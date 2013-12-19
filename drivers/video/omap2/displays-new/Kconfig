@@ -77,4 +77,20 @@ config DISPLAY_PANEL_NEC_NL8048HL11
 		This NEC NL8048HL11 panel is TFT LCD used in the
 		Zoom2/3/3630 sdp boards.
 
+
+config DISPLAY_PANEL_TC358765
+	tristate "Toshiba TC358765 DSI-2-LVDS bridge"
+	depends on OMAP2_DSS_DSI && I2C
+	select BACKLIGHT_CLASS_DEVICE
+	help
+		Toshiba TC358765 DSI-2-LVDS chip with 1024x768 panel,
+		which can be found in OMAP4-based Blaze Tablet boards
+		and some other boards.
+
+config DISPLAY_PANEL_TC358765_DEBUG
+	bool "Toshiba TC358765 DSI-2-LVDS chip debug"
+	depends on PANEL_TC358765 && DEBUG_FS
+	help
+	  Support of TC358765 DSI-2-LVDS chip register access via debugfs
+
 endmenu

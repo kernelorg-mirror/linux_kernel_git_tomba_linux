@@ -26,6 +26,7 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/slab.h>
+#include <linux/gpio.h>
 
 #include <video/omapdss.h>
 #include "omap_hwmod.h"
@@ -611,6 +612,42 @@ void __init omapdss_early_init_of(void)
 	}
 }
 
+#if 0
+static int omap_4430sdp_hack_backlight(void)
+{
+#define LED_PWM2ON             0x03
+#define LED_PWM2OFF            0x04
+#define TWL6030_TOGGLE3                0x92
+       twl_i2c_write_u8(TWL_MODULE_PWM, 0x7f, LED_PWM2OFF);
+       twl_i2c_write_u8(TWL_MODULE_PWM, 0x7f, LED_PWM2ON);
+       twl_i2c_write_u8(TWL6030_MODULE_ID1, 0x30, TWL6030_TOGGLE3);
+       return 0;
+}
+late_initcall(omap_4430sdp_hack_backlight);
+#endif
+
+#define LCD_BL_GPIO            27      /* LCD Backlight GPIO */
+#define OMAP4_CTRL_MODULE_PAD_FREF_CLK4_OUT_OFFSET             0x005c
+
+static void __init tablet_lcd_init(void)
+{
+       int r;
+       u32 reg;
+
+       printk("BLAZE HACK INIT\n");
+
+       r = gpio_request_one(LCD_BL_GPIO, GPIOF_OUT_INIT_HIGH,
+                       "lcd_bl_gpio");
+       if (r)
+               pr_err("%s: Could not get lcd_bl_gpio\n", __func__);
+
+       /* fref_clk4_out.fref_clk4_out INPUT_PULLUP | MODE0 */
+       reg = omap4_ctrl_pad_readl(OMAP4_CTRL_MODULE_PAD_FREF_CLK4_OUT_OFFSET);
+       reg &= ~0xffff;
+       reg |= 0x118;
+       omap4_ctrl_pad_writel(reg, OMAP4_CTRL_MODULE_PAD_FREF_CLK4_OUT_OFFSET);
+}
+
 int __init omapdss_init_of(void)
 {
 	int r;
@@ -681,6 +718,8 @@ int __init omapdss_init_of(void)
 		pr_err("Unable to register omap_vout device\n");
 		return r;
 	}
+
+	tablet_lcd_init();
 
 	return 0;
 }

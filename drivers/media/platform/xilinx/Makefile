@@ -8,3 +8,4 @@ obj-$(CONFIG_VIDEO_XILINX_DEMOSAIC) += xilinx-demosaic.o
 obj-$(CONFIG_VIDEO_XILINX_TPG) += xilinx-tpg.o
 obj-$(CONFIG_VIDEO_XILINX_HLS_TPG) += xilinx-hls-tpg.o
 obj-$(CONFIG_VIDEO_XILINX_VTC) += xilinx-vtc.o
+obj-$(CONFIG_VIDEO_XILINX_VPSS_CSC) += xilinx-vpss-csc.o

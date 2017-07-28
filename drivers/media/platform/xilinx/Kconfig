@@ -72,3 +72,13 @@ config VIDEO_XILINX_AXI4S_SWITCH
 	  V4L sub device based driver. It supports fixed (TDEST based)
 	  routing only, modeled with the V4L2 streams API.
 	  Say M to modularize. Say N if unsure.
+
+config VIDEO_XILINX_GAMMA
+	tristate "Xilinx Gamma Correction LUT"
+	depends on VIDEO_XILINX
+	help
+	  Driver for Xilinx Gamma Correction LUT IP. This is a V4L sub-device
+	  based driver that exposes V4L controls to adjust Red, Blue and Green
+	  Gamma Correction.
+
+	  Say M to modularize. Say N if unsure.

@@ -63,3 +63,12 @@ config VIDEO_XILINX_VPSS_CSC
 	  conversion and provides video controls like Brightness,
 	  Contrast, Color Gains that can be applied to video.
 	  Say N if unsure. Say M to modularize.
+
+config VIDEO_XILINX_AXI4S_SWITCH
+	tristate "Xilinx AXI4-Stream Video Switch"
+	depends on VIDEO_XILINX
+	help
+	  Driver for the Xilinx AXI4-Stream Video Switch. This is a
+	  V4L sub device based driver. It supports fixed (TDEST based)
+	  routing only, modeled with the V4L2 streams API.
+	  Say M to modularize. Say N if unsure.

@@ -666,7 +666,7 @@ static void xvip_m2m_stop_streaming(struct vb2_queue *q)
 
 		/* Cleanup the pipeline and mark it as being stopped. */
 		xvip_pipeline_cleanup(pipe);
-		media_pipeline_stop(&dma->video.entity);
+		media_pipeline_stop(dma->video.entity.pads);
 	}
 
 	for (;;) {
@@ -698,7 +698,7 @@ static int xvip_m2m_start_streaming(struct vb2_queue *q, unsigned int count)
 	pipe = dma->video.entity.pads->pipe
 	     ? to_xvip_pipeline(&dma->video.entity) : &dma->pipe;
 
-	ret = media_pipeline_start(&dma->video.entity, &pipe->pipe);
+	ret = media_pipeline_start(dma->video.entity.pads, &pipe->pipe);
 	if (ret < 0)
 		goto error;
 
@@ -720,7 +720,7 @@ static int xvip_m2m_start_streaming(struct vb2_queue *q, unsigned int count)
 
 	return 0;
 error_stop:
-	media_pipeline_stop(&dma->video.entity);
+	media_pipeline_stop(dma->video.entity.pads);
 
 error:
 	xvip_m2m_stop_streaming(q);

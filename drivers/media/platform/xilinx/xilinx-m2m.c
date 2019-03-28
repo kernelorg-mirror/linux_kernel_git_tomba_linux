@@ -123,7 +123,7 @@ struct xvip_m2m_dev {
 
 static inline struct xvip_pipeline *to_xvip_pipeline(struct media_entity *e)
 {
-	return container_of(e->pipe, struct xvip_pipeline, pipe);
+	return container_of(e->pads->pipe, struct xvip_pipeline, pipe);
 }
 
 /**
@@ -695,7 +695,7 @@ static int xvip_m2m_start_streaming(struct vb2_queue *q, unsigned int count)
 	if (!xdev->num_subdevs)
 		return 0;
 
-	pipe = dma->video.entity.pipe
+	pipe = dma->video.entity.pads->pipe
 	     ? to_xvip_pipeline(&dma->video.entity) : &dma->pipe;
 
 	ret = media_pipeline_start(&dma->video.entity, &pipe->pipe);

@@ -221,7 +221,7 @@ static int xsw_set_routing(struct v4l2_subdev *subdev,
 
 	mutex_lock(&subdev->entity.graph_obj.mdev->graph_mutex);
 
-	if (subdev->entity.stream_count) {
+	if (subdev->entity.pads->stream_count) {
 		ret = -EBUSY;
 		goto done;
 	}

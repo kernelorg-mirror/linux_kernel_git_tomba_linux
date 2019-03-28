@@ -225,6 +225,43 @@ EXPORT_SYMBOL_GPL(media_entity_pads_init);
  * Graph traversal
  */
 
+/**
+ * media_entity_has_route - Check if two entity pads are connected internally
+ *
+ * @entity: The entity
+ * @pad0: The first pad index
+ * @pad1: The second pad index
+ *
+ * This function uses the &media_entity_operations.has_route() operation to
+ * check connectivity inside the entity between @pad0 and @pad1.
+ *
+ * One of @pad0 and @pad1 must be a sink pad and the other one a source pad.
+ * The function returns 0 if both pads are sinks or sources.
+ *
+ * If the has_route operation is not implemented, all pads of the entity are
+ * considered as connected.
+ *
+ * The caller must hold entity->graph_obj.mdev->mutex.
+ *
+ * Return: true if the pads are connected internally and false otherwise.
+ */
+__maybe_unused
+static bool media_entity_has_route(struct media_entity *entity,
+				   unsigned int pad0, unsigned int pad1)
+{
+	if (pad0 >= entity->num_pads || pad1 >= entity->num_pads)
+		return false;
+
+	if (entity->pads[pad0].flags & entity->pads[pad1].flags &
+	    (MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_SOURCE))
+		return false;
+
+	if (!entity->ops || !entity->ops->has_route)
+		return true;
+
+	return entity->ops->has_route(entity, pad0, pad1);
+}
+
 static struct media_entity *
 media_entity_other(struct media_entity *entity, struct media_link *link)
 {

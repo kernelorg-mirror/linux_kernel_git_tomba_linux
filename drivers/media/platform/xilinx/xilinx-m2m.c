@@ -343,7 +343,7 @@ static int xvip_pipeline_start_stop(struct xvip_m2m_dev *xdev,
 	if (ret)
 		goto error;
 
-	media_graph_walk_start(&graph, entity);
+	media_graph_walk_start(&graph, entity->pads);
 
 	/* get the list of entities */
 	while ((entity = media_graph_walk_next(&graph))) {
@@ -461,7 +461,7 @@ static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
 		return ret;
 	}
 
-	media_graph_walk_start(&graph, entity);
+	media_graph_walk_start(&graph, entity->pads);
 
 	while ((entity = media_graph_walk_next(&graph))) {
 		if (entity->function != MEDIA_ENT_F_IO_V4L)

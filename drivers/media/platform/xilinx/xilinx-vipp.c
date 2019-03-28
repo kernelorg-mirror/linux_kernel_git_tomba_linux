@@ -382,7 +382,7 @@ int xvip_graph_pipeline_start_stop(struct xvip_composite_device *xdev,
 
 		entity = to_xvip_entity(asd);
 		/* skip an entity not belongng to the given pipe */
-		if (&pipe->pipe != entity->entity->pipe)
+		if (&pipe->pipe != entity->entity->pads->pipe)
 			continue;
 
 		state = xvip_graph_entity_start_stop(xdev, entity, on);

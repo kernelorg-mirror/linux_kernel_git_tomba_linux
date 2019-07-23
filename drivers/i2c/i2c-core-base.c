@@ -916,6 +916,7 @@ int i2c_dev_irq_from_resources(const struct resource *resources,
 struct i2c_client *
 i2c_new_client_device(struct i2c_adapter *adap, struct i2c_board_info const *info)
 {
+	const struct i2c_attach_operations *attach_ops;
 	struct i2c_client	*client;
 	int			status;
 
@@ -967,15 +968,24 @@ i2c_new_client_device(struct i2c_adapter *adap, struct i2c_board_info const *inf
 		}
 	}
 
+	attach_ops = adap->attach_ops;
+
+	if (attach_ops && attach_ops->attach_client &&
+	    attach_ops->attach_client(adap, info, client))
+		goto out_remove_swnode;
+
 	status = device_register(&client->dev);
 	if (status)
-		goto out_remove_swnode;
+		goto out_detach_client;
 
 	dev_dbg(&adap->dev, "client [%s] registered with bus id %s\n",
 		client->name, dev_name(&client->dev));
 
 	return client;
 
+out_detach_client:
+	if (attach_ops && attach_ops->detach_client)
+		attach_ops->detach_client(adap, client);
 out_remove_swnode:
 	device_remove_software_node(&client->dev);
 out_err_put_of_node:
@@ -997,8 +1007,17 @@ EXPORT_SYMBOL_GPL(i2c_new_client_device);
  */
 void i2c_unregister_device(struct i2c_client *client)
 {
+	const struct i2c_attach_operations *attach_ops;
+	struct i2c_adapter *adap;
+
 	if (IS_ERR_OR_NULL(client))
 		return;
+
+	adap = client->adapter;
+	attach_ops = adap->attach_ops;
+
+	if (attach_ops && attach_ops->detach_client)
+		attach_ops->detach_client(adap, client);
 
 	if (client->dev.of_node) {
 		of_node_clear_flag(client->dev.of_node, OF_POPULATED);

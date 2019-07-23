@@ -1,0 +1,194 @@
+Texas Instruments DS90UB954-Q1 dual video deserializer
+======================================================
+
+The TI DS90UB954-Q1 is a MIPI CSI-2 video deserializer that forwards video
+streams from up to two FPD-Link 3 connections to a MIPI CSI-2 output. It
+also allows access to remote I2C and GPIO.
+
+Required properties:
+
+ - compatible: must be "ti,ds90ub954-q1"
+
+ - reg: main I2C slave address; optionally aliases for RX port registers
+   and remote serializers. The main address is mandatory and must be the
+   first, others are optional and fall back to defaults if not
+   specified. See "reg-names".
+
+ - reset-gpios: chip reset GPIO, active low (connected to PDB pin of the chip)
+ - i2c-alias-pool: list of I2C addresses that are known to be available on the
+                   "local" (SoC-to-deser) I2C bus; they will be picked at
+		   runtime and used as aliases to reach remove I2C chips
+ - gpio-controller
+ - #gpio-cells: must be 3: FPD-Link 3 RX port number, remote gpio number, flags
+
+Optional properties:
+
+ - reg-names: names of I2C address used to communicate with the chip, must
+              match the "reg" values; mandatory if there are 2 or more
+              addresses
+    - "main": the main I2C address, used to access shared registers
+    - "rxport0", "rxport1": I2C alias to access FPD-link RX port specific
+      registers; must not be used by other slaves on the same bus
+    - "ser0", "ser1": I2C alias to access the remote serializer connected
+      on each FPD-link RX port; must not be used by other slaves on the
+      same bus
+ - interrupts: interrupt pin from the chip
+
+Required subnodes:
+
+ - ports: A ports node with one port child node per device input and output
+          port, in accordance with the video interface bindings defined in
+          Documentation/devicetree/bindings/media/video-interfaces.txt. The
+          port nodes are numbered as follows:
+
+          Port Description
+          ------------------------------------
+          0    Input from FPD-Link 3 RX port 0
+          1    Input from FPD-Link 3 RX port 1
+          2    CSI-2 output
+
+          Each port must have a "remote-chip" subnode that defines the remote
+	  chip (serializer) with at least a "compatible" property
+
+ - i2c-atr: contains one child per RX port, each describes the I2C bus on
+            the remote side
+
+	    Required properties:
+	    - #address-cells = <1>;
+	    - #size-cells = <0>;
+
+	    Subnodes: one per each FPD-link RX port, each having:
+
+	    Required properties for "i2c-atr" child bus nodes:
+	    - reg: The number of the port where the remove chip is connected
+	    - #address-cells = <1>;
+	    - #size-cells = <0>;
+
+	    Optional properties for "i2c-atr" child bus nodes:
+	    - Other properties specific to the remote hardware
+	    - Child nodes conforming to i2c bus binding
+
+
+Device node example
+-------------------
+
+&i2c0 {
+	deser: deser@3d {
+		compatible = "ti,ds90ub954-q1";
+		reg-names = "main", "rxport0", "rxport1", "ser0", "ser1";
+		reg       = <0x3d>,  <0x40>,    <0x41>,   <0x44>, <0x45>;
+		clocks = <&clk_25M>;
+		interrupt-parent = <&gic>;
+		interrupts = <3 1 IRQ_TYPE_LEVEL_HIGH>;
+		reset-gpios = <&gpio_ctl 4 GPIO_ACTIVE_LOW>;
+
+		i2c-alias-pool = /bits/ 16 <0x4a 0x4b 0x4c 0x4d 0x4e 0x4f>;
+
+		gpio-controller;
+		#gpio-cells = <3>; /* rxport, remote gpio num, flags */
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				ds90ub954_fpd3_in0: endpoint {
+					remote-endpoint = <&sensor_0_out>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+				ds90ub954_fpd3_in1: endpoint {
+					remote-endpoint = <&sensor_1_out>;
+				};
+			};
+
+			port@2 {
+				reg = <2>;
+				ds90ub954_mipi_out0: endpoint {
+					data-lanes = <1 2 3 4>;
+					/* Actually a REFCLK multiplier */
+					data-rate = <1600000000>;
+					remote-endpoint = <&csirx_0_in>;
+				};
+			};
+		};
+
+		i2c-atr {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			remote_i2c0: i2c@0 {
+				reg = <0>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+
+			remote_i2c1: i2c@1 {
+				reg = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+		};
+	};
+};
+
+&ds90ub954_fpd3_in0 {
+	remote-chip {
+		compatible = "ti,ds90ub953-q1";
+		gpio-functions = <DS90_GPIO_FUNC_OUTPUT_REMOTE
+				  DS90_GPIO_FUNC_UNUSED
+				  DS90_GPIO_FUNC_UNUSED
+				  DS90_GPIO_FUNC_UNUSED>;
+	};
+};
+
+&ds90ub954_fpd3_in1 {
+	remote-chip {
+		compatible = "ti,ds90ub953-q1";
+		gpio-functions = <DS90_GPIO_FUNC_OUTPUT_REMOTE
+				  DS90_GPIO_FUNC_UNUSED
+				  DS90_GPIO_FUNC_UNUSED
+				  DS90_GPIO_FUNC_UNUSED>;
+	};
+};
+
+&remote_i2c0 {
+	sensor_0@3c {
+		compatible = "sony,imx274";
+		reg = <0x3c>;
+
+		reset-gpios = <&deser 0 0 GPIO_ACTIVE_LOW>;
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			sensor_0_out: endpoint {
+				remote-endpoint = <&ds90ub954_fpd3_in0>;
+			};
+		};
+	};
+};
+
+&remote_i2c1 {
+	sensor_0@3c {
+		compatible = "sony,imx274";
+		reg = <0x3c>;
+
+		reset-gpios = <&deser 1 0 GPIO_ACTIVE_LOW>;
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			sensor_1_out: endpoint {
+				remote-endpoint = <&ds90ub954_fpd3_in1>;
+			};
+		};
+	};
+};

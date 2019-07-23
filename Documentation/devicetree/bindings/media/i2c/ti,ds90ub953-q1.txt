@@ -1,0 +1,42 @@
+Texas Instruments DS90UB953-Q1 video serializer
+===============================================
+
+The TI DS90UB953-Q1 is a MIPI CSI-2 video serializer that forwards a MIPI
+CSI-2 input video stream over an FPD Link 3 connection to a remote
+deserializer. It also allows access to I2C and GPIO from the deserializer.
+
+The DT definitions can be found in include/dt-bindings/media/ds90ub953.h
+
+When used as a the remote counterpart of a deserializer (e.g. the
+DS90UB954-Q1), the serializer is described in the
+"deserializer/ports/port@<N>/endpoint/remote-chip" node.
+
+Required properties:
+
+ - compatible: must be "ti,ds90ub953-q1"
+
+Optional properties:
+
+ - gpio-functions: a list of 4 values defining how the 4 GPIO pins are
+   connected in hardware; possible values are:
+    - DS90_GPIO_FUNC_UNUSED (0): the GPIO is not connected
+    - DS90_GPIO_FUNC_INPUT (1): the GPIO is an input to the ds90ub953
+    - DS90_GPIO_FUNC_OUTPUT_REMOTE (2): the GPIO is an output from the
+      ds90ub953, to be driven from the remote chip (deserializer)
+
+ - ti,ds90ub953-q1-clk-inv-pol-quirk: the MIPI CSI-2 input clock lane has
+                                      inverted polarity
+
+
+Device node example
+-------------------
+
+&ds90ub954_fpd3_in0 {
+	remote-chip {
+		compatible = "ti,ds90ub953-q1";
+		gpio-functions = <DS90_GPIO_FUNC_OUTPUT_REMOTE
+				  DS90_GPIO_FUNC_OUTPUT_REMOTE
+				  DS90_GPIO_FUNC_UNUSED
+				  DS90_GPIO_FUNC_UNUSED>;
+	};
+};

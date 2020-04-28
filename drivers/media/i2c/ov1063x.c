@@ -78,6 +78,7 @@ struct ov1063x_priv {
 	struct v4l2_subdev		subdev;
 	struct v4l2_async_subdev	asd;
 	struct v4l2_ctrl_handler	hdl;
+	struct media_pad		pad;
 	int				model;
 	int				revision;
 	int				xvclk_rate;
@@ -864,7 +865,7 @@ static int ov1063x_probe(struct i2c_client *client)
 
 	ret = clk_prepare_enable(priv->xvclk);
 	if (ret < 0)
-		goto err;
+		goto err_clk;
 
 	/* Default framerate */
 	priv->fps_numerator = 30;
@@ -893,7 +894,7 @@ static int ov1063x_probe(struct i2c_client *client)
 	priv->subdev.ctrl_handler = &priv->hdl;
 	if (priv->hdl.error) {
 		ret = priv->hdl.error;
-		goto err;
+		goto err_hdl;
 	}
 
 	mutex_init(&priv->lock);
@@ -901,19 +902,29 @@ static int ov1063x_probe(struct i2c_client *client)
 	/* Optional gpio don't fail if not present */
 	priv->pwdn_gpio = devm_gpiod_get_optional(&client->dev, "powerdown",
 						  GPIOD_OUT_LOW);
-	if (IS_ERR(priv->pwdn_gpio))
-		return PTR_ERR(priv->pwdn_gpio);
+	if (IS_ERR(priv->pwdn_gpio)) {
+		ret = PTR_ERR(priv->pwdn_gpio);
+		goto err_unlock;
+	}
 
 	/* Optional gpio don't fail if not present */
 	priv->resetb_gpio = devm_gpiod_get_optional(&client->dev, "reset",
 						    GPIOD_OUT_LOW);
-	if (IS_ERR(priv->resetb_gpio))
-		return PTR_ERR(priv->resetb_gpio);
+	if (IS_ERR(priv->resetb_gpio)) {
+		ret = PTR_ERR(priv->resetb_gpio);
+		goto err_unlock;
+	}
+
+	priv->pad.flags = MEDIA_PAD_FL_SOURCE;
+	priv->subdev.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	ret = media_entity_pads_init(&priv->subdev.entity, 1, &priv->pad);
+	if (ret < 0)
+		goto err_unlock;
 
 	ret = ov1063x_video_probe(client);
 	if (ret) {
 		v4l2_ctrl_handler_free(&priv->hdl);
-		goto err;
+		goto err_pads;
 	}
 
 	sd->dev = &client->dev;
@@ -922,8 +933,16 @@ static int ov1063x_probe(struct i2c_client *client)
 	dev_info(&client->dev, "%s sensor driver registered !!\n", sd->name);
 
 	return 0;
-err:
+
+err_pads:
+	media_entity_cleanup(&priv->subdev.entity);
+err_unlock:
+	mutex_destroy(&priv->lock);
+err_hdl:
+	v4l2_ctrl_handler_free(&priv->hdl);
+err_clk:
 	clk_disable_unprepare(priv->xvclk);
+err:
 	return ret;
 }
 
@@ -933,6 +952,8 @@ static int ov1063x_remove(struct i2c_client *client)
 
 	v4l2_ctrl_handler_free(&priv->hdl);
 	v4l2_async_unregister_subdev(&priv->subdev);
+	mutex_destroy(&priv->lock);
+	media_entity_cleanup(&priv->subdev.entity);
 	ov1063x_set_power(client, false);
 	clk_disable_unprepare(priv->xvclk);
 

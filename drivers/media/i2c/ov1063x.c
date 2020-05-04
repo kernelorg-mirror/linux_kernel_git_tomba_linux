@@ -808,7 +808,7 @@ static const struct v4l2_subdev_core_ops ov1063x_subdev_core_ops = {
 
 static const struct v4l2_subdev_pad_ops ov1063x_subdev_pad_ops = {
 	.enum_mbus_code		= ov1063x_enum_mbus_code,
-	.enum_frame_size	= ov1063x_enum_frame_sizes,
+//	.enum_frame_size	= ov1063x_enum_frame_sizes,
 	.get_fmt		= ov1063x_get_fmt,
 	.set_fmt		= ov1063x_set_fmt,
 };

@@ -1026,6 +1026,30 @@ static int vip_reset_vpdma(struct vip_stream *stream)
 	return 0;
 }
 
+/*
+ * Is it possible that an overflow can occur in he VIP_PARSER.
+ * Overflow detection is determined by reading the VIP_FIQ_STATUS register.
+ *
+ * These may indicate that not all of the icoming video data was sent to DDR.
+ * Overflow can be caused by one of the following:
+ *
+ * 1. External pixel clock is faster than processing clock
+ * 2. DDR bandwidth is temporarily over-consumed
+ * 3. VIP scaler is being used inline with external video input, and is
+ *    upscaling. VIP scaler in this use case can only be used for downscaling
+ * 4. VIP scaler is being used inline with external video input, but has not
+ *    been configured with scaler coefficients. VIP scaler will not accept
+ *    video input if it is not first configured with scaler coefficients.
+ * 5. VIP scaler is being used inline, but has not been enabled
+ * 6. External cables are connected or disconnected while the system is
+ *    running, resulting in corrupted video streams going into the VIP
+ * 7. Bad external video cable, which causes corrupted video streams going
+ *    into the VIP
+ *
+ * References:
+ * https://www.ti.com/lit/ug/sprui30g/sprui30g.pdf
+ * 9.4.5.20 VIP Overflow Detection and Recovery
+ */
 static void vip_overflow_recovery_work(struct work_struct *work)
 {
 	struct vip_stream *stream = container_of(work, struct vip_stream,

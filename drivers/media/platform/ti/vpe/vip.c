@@ -109,7 +109,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_NV12,
 		.code		= MEDIA_BUS_FMT_UYVY8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
 		.coplanar	= 1,
 		.vpdma_fmt	= { &vpdma_yuv_fmts[VPDMA_DATA_FMT_Y420],
 				    &vpdma_yuv_fmts[VPDMA_DATA_FMT_C420],
@@ -118,7 +117,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_UYVY,
 		.code		= MEDIA_BUS_FMT_UYVY8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_yuv_fmts[VPDMA_DATA_FMT_CBY422],
 				  },
@@ -126,7 +124,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_YUYV,
 		.code		= MEDIA_BUS_FMT_UYVY8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_yuv_fmts[VPDMA_DATA_FMT_YCB422],
 				  },
@@ -134,7 +131,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_VYUY,
 		.code		= MEDIA_BUS_FMT_UYVY8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_yuv_fmts[VPDMA_DATA_FMT_CRY422],
 				  },
@@ -142,7 +138,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_YVYU,
 		.code		= MEDIA_BUS_FMT_UYVY8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_yuv_fmts[VPDMA_DATA_FMT_YCR422],
 				  },
@@ -150,7 +145,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_RGB24,
 		.code		= MEDIA_BUS_FMT_UYVY8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SRGB,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_rgb_fmts[VPDMA_DATA_FMT_RGB24],
 				  },
@@ -158,7 +152,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_RGB32,
 		.code		= MEDIA_BUS_FMT_UYVY8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SRGB,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_rgb_fmts[VPDMA_DATA_FMT_ARGB32],
 				  },
@@ -166,7 +159,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_BGR24,
 		.code		= MEDIA_BUS_FMT_UYVY8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SRGB,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_rgb_fmts[VPDMA_DATA_FMT_BGR24],
 				  },
@@ -174,7 +166,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_BGR32,
 		.code		= MEDIA_BUS_FMT_UYVY8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SRGB,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_rgb_fmts[VPDMA_DATA_FMT_ABGR32],
 				  },
@@ -182,7 +173,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_RGB24,
 		.code		= MEDIA_BUS_FMT_RGB888_1X24,
-		.colorspace	= V4L2_COLORSPACE_SRGB,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_rgb_fmts[VPDMA_DATA_FMT_RGB24],
 				  },
@@ -190,7 +180,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_RGB32,
 		.code		= MEDIA_BUS_FMT_ARGB8888_1X32,
-		.colorspace	= V4L2_COLORSPACE_SRGB,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_rgb_fmts[VPDMA_DATA_FMT_ARGB32],
 				  },
@@ -198,7 +187,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_SBGGR8,
 		.code		= MEDIA_BUS_FMT_SBGGR8_1X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_raw_fmts[VPDMA_DATA_FMT_RAW8],
 				  },
@@ -206,7 +194,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_SGBRG8,
 		.code		= MEDIA_BUS_FMT_SGBRG8_1X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_raw_fmts[VPDMA_DATA_FMT_RAW8],
 				  },
@@ -214,7 +201,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_SGRBG8,
 		.code		= MEDIA_BUS_FMT_SGRBG8_1X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_raw_fmts[VPDMA_DATA_FMT_RAW8],
 				  },
@@ -222,7 +208,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_SRGGB8,
 		.code		= MEDIA_BUS_FMT_SRGGB8_1X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_raw_fmts[VPDMA_DATA_FMT_RAW8],
 				  },
@@ -231,7 +216,6 @@ static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
 		/* V4L2 currently only defines one 16 bit variant */
 		.fourcc		= V4L2_PIX_FMT_SBGGR16,
 		.code		= MEDIA_BUS_FMT_SBGGR16_1X16,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
 		.coplanar	= 0,
 		.vpdma_fmt	= { &vpdma_raw_fmts[VPDMA_DATA_FMT_RAW16],
 				  },
@@ -1528,7 +1512,7 @@ static int vip_calc_format_size(struct vip_port *port,
 					fmt->vpdma_fmt[VIP_CHROMA]->depth >> 3;
 	}
 
-	f->fmt.pix.colorspace = fmt->colorspace;
+	f->fmt.pix.colorspace = port->mbus_framefmt.colorspace;
 	f->fmt.pix.priv = 0;
 
 	v4l2_dbg(3, debug, port, "calc_format_size: fourcc:%s size: %dx%d bpl:%d img_size:%d\n",
@@ -1794,7 +1778,7 @@ static int vip_g_fmt_vid_cap(struct file *file, void *priv,
 	f->fmt.pix.height	= stream->height;
 	f->fmt.pix.pixelformat	= port->fmt->fourcc;
 	f->fmt.pix.field	= stream->sup_field;
-	f->fmt.pix.colorspace	= port->fmt->colorspace;
+	f->fmt.pix.colorspace	= port->mbus_framefmt.colorspace;
 	f->fmt.pix.bytesperline	= stream->bytesperline;
 	f->fmt.pix.sizeimage	= stream->sizeimage;
 

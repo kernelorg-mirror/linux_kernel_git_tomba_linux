@@ -2445,22 +2445,6 @@ static int vip_s_selection(struct file *file, void *fh,
 	return 0;
 }
 
-static long vip_ioctl_default(struct file *file, void *fh, bool valid_prio,
-			      unsigned int cmd, void *arg)
-{
-	struct vip_stream *stream = file2stream(file);
-
-	if (!valid_prio) {
-		vip_err(stream, "%s device busy\n", __func__);
-		return -EBUSY;
-	}
-
-	switch (cmd) {
-	default:
-		return -ENOTTY;
-	}
-}
-
 static const struct v4l2_ioctl_ops vip_ioctl_ops = {
 	.vidioc_querycap	= vip_querycap,
 	.vidioc_enum_input	= vip_enuminput,
@@ -2495,7 +2479,6 @@ static const struct v4l2_ioctl_ops vip_ioctl_ops = {
 	.vidioc_log_status	= v4l2_ctrl_log_status,
 	.vidioc_subscribe_event = v4l2_ctrl_subscribe_event,
 	.vidioc_unsubscribe_event = v4l2_event_unsubscribe,
-	.vidioc_default		= vip_ioctl_default,
 };
 
 /*

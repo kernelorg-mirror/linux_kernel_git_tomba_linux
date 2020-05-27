@@ -1930,14 +1930,12 @@ static void unset_fmt_params(struct vip_stream *stream)
 	if (port->csc == VIP_CSC_Y2R) {
 		if (port->port_id == VIP_PORTA) {
 			vip_set_slice_path(dev, VIP_CSC_SRC_DATA_SELECT, 0);
-			vip_set_slice_path(dev,
-					   VIP_MULTI_CHANNEL_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_MULTI_CHANNEL_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_RGB_SRC_DATA_SELECT, 0);
 		} else {
 			vip_set_slice_path(dev, VIP_CSC_SRC_DATA_SELECT, 0);
-			vip_set_slice_path(dev,
-					   VIP_MULTI_CHANNEL_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_MULTI_CHANNEL_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_LO_DATA_SELECT, 0);
 		}
 		/* We are done */
@@ -1945,67 +1943,40 @@ static void unset_fmt_params(struct vip_stream *stream)
 	} else if (port->csc == VIP_CSC_R2Y) {
 		if (port->scaler && port->fmt->coplanar) {
 			if (port->port_id == VIP_PORTA) {
-				vip_set_slice_path(dev,
-						   VIP_CSC_SRC_DATA_SELECT, 0);
-				vip_set_slice_path(dev,
-						   VIP_SC_SRC_DATA_SELECT, 0);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_SRC_DATA_SELECT,
-						   0);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_DATA_BYPASS, 0);
-				vip_set_slice_path(dev,
-						   VIP_RGB_OUT_HI_DATA_SELECT,
-						   0);
+				vip_set_slice_path(dev, VIP_CSC_SRC_DATA_SELECT, 0);
+				vip_set_slice_path(dev, VIP_SC_SRC_DATA_SELECT, 0);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 0);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
+				vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 			}
 		} else if (port->scaler) {
 			if (port->port_id == VIP_PORTA) {
-				vip_set_slice_path(dev,
-						   VIP_CSC_SRC_DATA_SELECT, 0);
-				vip_set_slice_path(dev,
-						   VIP_SC_SRC_DATA_SELECT, 0);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_SRC_DATA_SELECT,
-						   0);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_DATA_BYPASS, 0);
-				vip_set_slice_path(dev,
-						   VIP_RGB_OUT_HI_DATA_SELECT,
-						   0);
+				vip_set_slice_path(dev, VIP_CSC_SRC_DATA_SELECT, 0);
+				vip_set_slice_path(dev, VIP_SC_SRC_DATA_SELECT, 0);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 0);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
+				vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 			}
 		} else if (port->fmt->coplanar) {
 			if (port->port_id == VIP_PORTA) {
-				vip_set_slice_path(dev,
-						   VIP_CSC_SRC_DATA_SELECT, 0);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_SRC_DATA_SELECT,
-						   0);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_DATA_BYPASS, 0);
-				vip_set_slice_path(dev,
-						   VIP_RGB_OUT_HI_DATA_SELECT,
-						   0);
+				vip_set_slice_path(dev, VIP_CSC_SRC_DATA_SELECT, 0);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 0);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
+				vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 			}
 		} else {
 			if (port->port_id == VIP_PORTA) {
-				vip_set_slice_path(dev,
-						   VIP_CSC_SRC_DATA_SELECT, 0);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_SRC_DATA_SELECT,
-						   0);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_DATA_BYPASS, 0);
-				vip_set_slice_path(dev,
-						   VIP_RGB_OUT_HI_DATA_SELECT,
-						   0);
+				vip_set_slice_path(dev, VIP_CSC_SRC_DATA_SELECT, 0);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 0);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
+				vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 			}
 		}
 		/* We are done */
 		return;
 	} else if (v4l2_is_format_rgb(port->fmt->finfo)) {
 		if (port->port_id == VIP_PORTA) {
-			vip_set_slice_path(dev,
-					   VIP_MULTI_CHANNEL_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_MULTI_CHANNEL_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_LO_DATA_SELECT, 0);
 		}
 		/* We are done */
@@ -2015,46 +1986,38 @@ static void unset_fmt_params(struct vip_stream *stream)
 	if (port->scaler && port->fmt->coplanar) {
 		if (port->port_id == VIP_PORTA) {
 			vip_set_slice_path(dev, VIP_SC_SRC_DATA_SELECT, 0);
-			vip_set_slice_path(dev,
-					   VIP_CHR_DS_1_SRC_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 		} else {
 			vip_set_slice_path(dev, VIP_SC_SRC_DATA_SELECT, 0);
-			vip_set_slice_path(dev,
-					   VIP_CHR_DS_2_SRC_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_CHR_DS_2_SRC_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_LO_DATA_SELECT, 0);
-			vip_set_slice_path(dev,
-					   VIP_MULTI_CHANNEL_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_MULTI_CHANNEL_DATA_SELECT, 0);
 		}
 	} else if (port->scaler) {
 		if (port->port_id == VIP_PORTA) {
 			vip_set_slice_path(dev, VIP_SC_SRC_DATA_SELECT, 0);
-			vip_set_slice_path(dev,
-					   VIP_CHR_DS_1_SRC_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 		} else {
 			vip_set_slice_path(dev, VIP_SC_SRC_DATA_SELECT, 0);
-			vip_set_slice_path(dev,
-					   VIP_CHR_DS_2_SRC_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_CHR_DS_2_SRC_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
 			vip_set_slice_path(dev, VIP_CHR_DS_2_DATA_BYPASS, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 		}
 	} else if (port->fmt->coplanar) {
 		if (port->port_id == VIP_PORTA) {
-			vip_set_slice_path(dev,
-					   VIP_CHR_DS_1_SRC_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 		} else {
-			vip_set_slice_path(dev,
-					   VIP_CHR_DS_2_SRC_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_CHR_DS_2_SRC_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_CHR_DS_2_DATA_BYPASS, 0);
-			vip_set_slice_path(dev,
-					   VIP_MULTI_CHANNEL_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_MULTI_CHANNEL_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_LO_DATA_SELECT, 0);
 		}
 	} else {
@@ -2089,30 +2052,15 @@ static void set_fmt_params(struct vip_stream *stream)
 				   port->fmt->vpdma_fmt[0],
 				   0xff);
 		if (port->port_id == VIP_PORTA) {
-			/*
-			 * Input A: YUV422
-			 * Output: Y_UP/UV_UP: RGB
-			 * CSC_SRC_SELECT       = 1
-			 * RGB_OUT_HI_SELECT    = 1
-			 * RGB_SRC_SELECT       = 1
-			 * MULTI_CHANNEL_SELECT = 0
-			 */
+			/* Input A: YUV422 Output: Y_UP/UV_UP: RGB */
 			vip_set_slice_path(dev, VIP_CSC_SRC_DATA_SELECT, 1);
-			vip_set_slice_path(dev,
-					   VIP_MULTI_CHANNEL_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_MULTI_CHANNEL_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 1);
 			vip_set_slice_path(dev, VIP_RGB_SRC_DATA_SELECT, 1);
 		} else {
-			/*
-			 * Input B: YUV422
-			 * Output: Y_UP/UV_UP: RGB
-			 * CSC_SRC_SELECT       = 2
-			 * RGB_OUT_LO_SELECT    = 1
-			 * MULTI_CHANNEL_SELECT = 0
-			 */
+			/* Input B: YUV422 Output: Y_UP/UV_UP: RGB */
 			vip_set_slice_path(dev, VIP_CSC_SRC_DATA_SELECT, 2);
-			vip_set_slice_path(dev,
-					   VIP_MULTI_CHANNEL_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_MULTI_CHANNEL_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_LO_DATA_SELECT, 1);
 		}
 		/* We are done */
@@ -2121,99 +2069,43 @@ static void set_fmt_params(struct vip_stream *stream)
 		port->flags &= ~FLAG_MULT_PORT;
 		if (port->scaler && port->fmt->coplanar) {
 			if (port->port_id == VIP_PORTA) {
-				/*
-				 * Input A: RGB
-				 * Output: Y_UP/UV_UP: Scaled YUV420
-				 * CSC_SRC_SELECT       = 4
-				 * SC_SRC_SELECT        = 1
-				 * CHR_DS_1_SRC_SELECT  = 1
-				 * CHR_DS_1_BYPASS      = 0
-				 * RGB_OUT_HI_SELECT    = 0
-				 */
-				vip_set_slice_path(dev,
-						   VIP_CSC_SRC_DATA_SELECT, 4);
-				vip_set_slice_path(dev,
-						   VIP_SC_SRC_DATA_SELECT, 1);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_SRC_DATA_SELECT,
-						   1);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_DATA_BYPASS, 0);
-				vip_set_slice_path(dev,
-						   VIP_RGB_OUT_HI_DATA_SELECT,
-						   0);
+				/* Input A: RGB Output: Y_UP/UV_UP: Scaled YUV420 */
+				vip_set_slice_path(dev, VIP_CSC_SRC_DATA_SELECT, 4);
+				vip_set_slice_path(dev, VIP_SC_SRC_DATA_SELECT, 1);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 1);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
+				vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 			} else {
 				v4l2_err(stream, "RGB sensor can only be on Port A\n");
 			}
 		} else if (port->scaler) {
 			if (port->port_id == VIP_PORTA) {
-				/*
-				 * Input A: RGB
-				 * Output: Y_UP: Scaled YUV422
-				 * CSC_SRC_SELECT       = 4
-				 * SC_SRC_SELECT        = 1
-				 * CHR_DS_1_SRC_SELECT  = 1
-				 * CHR_DS_1_BYPASS      = 1
-				 * RGB_OUT_HI_SELECT    = 0
-				 */
-				vip_set_slice_path(dev,
-						   VIP_CSC_SRC_DATA_SELECT, 4);
-				vip_set_slice_path(dev,
-						   VIP_SC_SRC_DATA_SELECT, 1);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_SRC_DATA_SELECT,
-						   1);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_DATA_BYPASS, 1);
-				vip_set_slice_path(dev,
-						   VIP_RGB_OUT_HI_DATA_SELECT,
-						   0);
+				/* Input A: RGB Output: Y_UP: Scaled YUV422 */
+				vip_set_slice_path(dev, VIP_CSC_SRC_DATA_SELECT, 4);
+				vip_set_slice_path(dev, VIP_SC_SRC_DATA_SELECT, 1);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 1);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 1);
+				vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 			} else {
 				v4l2_err(stream, "RGB sensor can only be on Port A\n");
 			}
 		} else if (port->fmt->coplanar) {
 			if (port->port_id == VIP_PORTA) {
-				/*
-				 * Input A: RGB
-				 * Output: Y_UP/UV_UP: YUV420
-				 * CSC_SRC_SELECT       = 4
-				 * CHR_DS_1_SRC_SELECT  = 2
-				 * CHR_DS_1_BYPASS      = 0
-				 * RGB_OUT_HI_SELECT    = 0
-				 */
-				vip_set_slice_path(dev,
-						   VIP_CSC_SRC_DATA_SELECT, 4);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_SRC_DATA_SELECT,
-						   2);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_DATA_BYPASS, 0);
-				vip_set_slice_path(dev,
-						   VIP_RGB_OUT_HI_DATA_SELECT,
-						   0);
+				/* Input A: RGB Output: Y_UP/UV_UP: YUV420 */
+				vip_set_slice_path(dev, VIP_CSC_SRC_DATA_SELECT, 4);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 2);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
+				vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 			} else {
 				v4l2_err(stream, "RGB sensor can only be on Port A\n");
 			}
 		} else {
 			if (port->port_id == VIP_PORTA) {
-				/*
-				 * Input A: RGB
-				 * Output: Y_UP/UV_UP: YUV420
-				 * CSC_SRC_SELECT       = 4
-				 * CHR_DS_1_SRC_SELECT  = 2
-				 * CHR_DS_1_BYPASS      = 1
-				 * RGB_OUT_HI_SELECT    = 0
-				 */
-				vip_set_slice_path(dev,
-						   VIP_CSC_SRC_DATA_SELECT, 4);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_SRC_DATA_SELECT,
-						   2);
-				vip_set_slice_path(dev,
-						   VIP_CHR_DS_1_DATA_BYPASS, 1);
-				vip_set_slice_path(dev,
-						   VIP_RGB_OUT_HI_DATA_SELECT,
-						   0);
+				/* Input A: RGB Output: Y_UP: YUV422 */
+				vip_set_slice_path(dev, VIP_CSC_SRC_DATA_SELECT, 4);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 2);
+				vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 1);
+				vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 			} else {
 				v4l2_err(stream, "RGB sensor can only be on Port A\n");
 			}
@@ -2228,14 +2120,8 @@ static void set_fmt_params(struct vip_stream *stream)
 				   port->fmt->vpdma_fmt[0],
 				   0xff);
 		if (port->port_id == VIP_PORTA) {
-			/*
-			 * Input A: RGB
-			 * Output: Y_LO/UV_LO: RGB
-			 * RGB_OUT_LO_SELECT    = 1
-			 * MULTI_CHANNEL_SELECT = 1
-			 */
-			vip_set_slice_path(dev,
-					   VIP_MULTI_CHANNEL_DATA_SELECT, 1);
+			/* Input A: RGB Output: Y_LO/UV_LO: RGB */
+			vip_set_slice_path(dev, VIP_MULTI_CHANNEL_DATA_SELECT, 1);
 			vip_set_slice_path(dev, VIP_RGB_OUT_LO_DATA_SELECT, 1);
 		} else {
 			v4l2_err(stream, "RGB sensor can only be on Port A\n");
@@ -2247,65 +2133,31 @@ static void set_fmt_params(struct vip_stream *stream)
 	if (port->scaler && port->fmt->coplanar) {
 		port->flags &= ~FLAG_MULT_PORT;
 		if (port->port_id == VIP_PORTA) {
-			/*
-			 * Input A: YUV422
-			 * Output: Y_UP/UV_UP: Scaled YUV420
-			 * SC_SRC_SELECT        = 2
-			 * CHR_DS_1_SRC_SELECT  = 1
-			 * CHR_DS_1_BYPASS      = 0
-			 * RGB_OUT_HI_SELECT    = 0
-			 */
+			/* Input A: YUV422 Output: Y_UP/UV_UP: Scaled YUV420 */
 			vip_set_slice_path(dev, VIP_SC_SRC_DATA_SELECT, 2);
-			vip_set_slice_path(dev,
-					   VIP_CHR_DS_1_SRC_DATA_SELECT, 1);
+			vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 1);
 			vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 		} else {
-			/*
-			 * Input B: YUV422
-			 * Output: Y_LO/UV_LO: Scaled YUV420
-			 * SC_SRC_SELECT        = 3
-			 * CHR_DS_2_SRC_SELECT  = 1
-			 * RGB_OUT_LO_SELECT    = 0
-			 * MULTI_CHANNEL_SELECT = 0
-			 */
+			/* Input B: YUV422 Output: Y_UP/UV_UP: Scaled YUV420 */
 			vip_set_slice_path(dev, VIP_SC_SRC_DATA_SELECT, 3);
-			vip_set_slice_path(dev,
-					   VIP_CHR_DS_2_SRC_DATA_SELECT, 1);
+			vip_set_slice_path(dev, VIP_CHR_DS_2_SRC_DATA_SELECT, 1);
 			vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_LO_DATA_SELECT, 0);
-			vip_set_slice_path(dev,
-					   VIP_MULTI_CHANNEL_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_MULTI_CHANNEL_DATA_SELECT, 0);
 		}
 	} else if (port->scaler) {
 		port->flags &= ~FLAG_MULT_PORT;
 		if (port->port_id == VIP_PORTA) {
-			/*
-			 * Input A: YUV422
-			 * Output: Y_UP: Scaled YUV422
-			 * SC_SRC_SELECT        = 2
-			 * CHR_DS_1_SRC_SELECT  = 1
-			 * CHR_DS_1_BYPASS      = 1
-			 * RGB_OUT_HI_SELECT    = 0
-			 */
+			/* Input A: YUV422 Output: Y_UP: Scaled YUV422 */
 			vip_set_slice_path(dev, VIP_SC_SRC_DATA_SELECT, 2);
-			vip_set_slice_path(dev,
-					   VIP_CHR_DS_1_SRC_DATA_SELECT, 1);
+			vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 1);
 			vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 1);
 			vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 		} else {
-			/*
-			 * Input B: YUV422
-			 * Output: UV_UP: Scaled YUV422
-			 * SC_SRC_SELECT        = 3
-			 * CHR_DS_2_SRC_SELECT  = 1
-			 * CHR_DS_1_BYPASS      = 1
-			 * CHR_DS_2_BYPASS      = 1
-			 * RGB_OUT_HI_SELECT    = 0
-			 */
+			/* Input B: YUV422 Output: Y_UP: Scaled YUV422 */
 			vip_set_slice_path(dev, VIP_SC_SRC_DATA_SELECT, 3);
-			vip_set_slice_path(dev,
-					   VIP_CHR_DS_2_SRC_DATA_SELECT, 1);
+			vip_set_slice_path(dev, VIP_CHR_DS_2_SRC_DATA_SELECT, 1);
 			vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 1);
 			vip_set_slice_path(dev, VIP_CHR_DS_2_DATA_BYPASS, 1);
 			vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
@@ -2313,41 +2165,20 @@ static void set_fmt_params(struct vip_stream *stream)
 	} else if (port->fmt->coplanar) {
 		port->flags &= ~FLAG_MULT_PORT;
 		if (port->port_id == VIP_PORTA) {
-			/*
-			 * Input A: YUV422
-			 * Output: Y_UP/UV_UP: YUV420
-			 * CHR_DS_1_SRC_SELECT  = 3
-			 * CHR_DS_1_BYPASS      = 0
-			 * RGB_OUT_HI_SELECT    = 0
-			 */
-			vip_set_slice_path(dev,
-					   VIP_CHR_DS_1_SRC_DATA_SELECT, 3);
+			/* Input A: YUV422 Output: Y_UP/UV_UP: YUV420 */
+			vip_set_slice_path(dev, VIP_CHR_DS_1_SRC_DATA_SELECT, 3);
 			vip_set_slice_path(dev, VIP_CHR_DS_1_DATA_BYPASS, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_HI_DATA_SELECT, 0);
 		} else {
-			/*
-			 * Input B: YUV422
-			 * Output: Y_LO/UV_LO: YUV420
-			 * CHR_DS_2_SRC_SELECT  = 4
-			 * CHR_DS_2_BYPASS      = 0
-			 * RGB_OUT_LO_SELECT    = 0
-			 * MULTI_CHANNEL_SELECT = 0
-			 */
-			vip_set_slice_path(dev,
-					   VIP_CHR_DS_2_SRC_DATA_SELECT, 4);
+			/* Input B: YUV422 Output: Y_UP/UV_UP: YUV420 */
+			vip_set_slice_path(dev, VIP_CHR_DS_2_SRC_DATA_SELECT, 4);
 			vip_set_slice_path(dev, VIP_CHR_DS_2_DATA_BYPASS, 0);
-			vip_set_slice_path(dev,
-					   VIP_MULTI_CHANNEL_DATA_SELECT, 0);
+			vip_set_slice_path(dev, VIP_MULTI_CHANNEL_DATA_SELECT, 0);
 			vip_set_slice_path(dev, VIP_RGB_OUT_LO_DATA_SELECT, 0);
 		}
 	} else {
 		port->flags |= FLAG_MULT_PORT;
-		/*
-		 * Input A/B: YUV422
-		 * Output: Y_LO: YUV422 - UV_LO: YUV422
-		 * MULTI_CHANNEL_SELECT = 1
-		 * RGB_OUT_LO_SELECT    = 0
-		 */
+		/* Input A/B: YUV422 Output: Y_LO: YUV422 - UV_LO: YUV422 */
 		vip_set_slice_path(dev, VIP_MULTI_CHANNEL_DATA_SELECT, 1);
 		vip_set_slice_path(dev, VIP_RGB_OUT_LO_DATA_SELECT, 0);
 	}

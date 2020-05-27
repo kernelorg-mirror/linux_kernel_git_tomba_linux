@@ -303,17 +303,17 @@ inline struct vip_port *notifier_to_vip_port(struct v4l2_async_notifier *n)
 
 static bool vip_is_mbuscode_yuv(u32 code)
 {
-	return ((code & 0xFF00) == 0x2000);
+	return ((code & 0xff00) == 0x2000);
 }
 
 static bool vip_is_mbuscode_rgb(u32 code)
 {
-	return ((code & 0xFF00) == 0x1000);
+	return ((code & 0xff00) == 0x1000);
 }
 
 static bool vip_is_mbuscode_raw(u32 code)
 {
-	return ((code & 0xFF00) == 0x3000);
+	return ((code & 0xff00) == 0x3000);
 }
 
 /*

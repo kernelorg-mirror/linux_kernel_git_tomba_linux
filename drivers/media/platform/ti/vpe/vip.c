@@ -2401,18 +2401,6 @@ static int vip_g_selection(struct file *file, void *fh,
 	return -EINVAL;
 }
 
-static int enclosed_rectangle(struct v4l2_rect *a, struct v4l2_rect *b)
-{
-	if (a->left < b->left || a->top < b->top)
-		return 0;
-	if (a->left + a->width > b->left + b->width)
-		return 0;
-	if (a->top + a->height > b->top + b->height)
-		return 0;
-
-	return 1;
-}
-
 static int vip_s_selection(struct file *file, void *fh,
 			   struct v4l2_selection *s)
 {
@@ -2434,11 +2422,11 @@ static int vip_s_selection(struct file *file, void *fh,
 				 stream->height - r.height);
 
 		if (s->flags & V4L2_SEL_FLAG_LE &&
-		    !enclosed_rectangle(&r, &s->r))
+		    !v4l2_rect_enclosed(&r, &s->r))
 			return -ERANGE;
 
 		if (s->flags & V4L2_SEL_FLAG_GE &&
-		    !enclosed_rectangle(&s->r, &r))
+		    !v4l2_rect_enclosed(&s->r, &r))
 			return -ERANGE;
 
 		s->r = r;

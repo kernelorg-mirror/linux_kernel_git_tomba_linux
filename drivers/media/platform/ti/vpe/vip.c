@@ -3673,8 +3673,11 @@ static struct fwnode_handle *
 fwnode_graph_get_next_endpoint_by_regs(const struct fwnode_handle *fwnode,
 				       int port_reg, int reg)
 {
-	return of_fwnode_handle(of_graph_get_endpoint_by_regs(to_of_node(fwnode),
-							      port_reg, reg));
+	struct device_node *node = to_of_node(fwnode);
+	struct device_node *ep;
+
+	ep = of_graph_get_endpoint_by_regs(node, port_reg, reg);
+	return of_fwnode_handle(ep);
 }
 
 static int vip_register_subdev_notif(struct vip_port *port,
@@ -3837,7 +3840,7 @@ static int vip_probe_complete(struct platform_device *pdev)
 	struct vip_clk_polarity *pol;
 	struct vip_port *port;
 	struct vip_dev *dev;
-	struct device_node *parent = pdev->dev.of_node;
+	struct fwnode_handle *parent = of_fwnode_handle(pdev->dev.of_node);
 	struct fwnode_handle *ep, *port_node;
 	const char *port_name;
 	int ret, slice_id, port_id, p;
@@ -3851,8 +3854,7 @@ static int vip_probe_complete(struct platform_device *pdev)
 		return ret;
 
 	for (p = 0; p < (VIP_NUM_PORTS * VIP_NUM_SLICES); p++) {
-		ep = fwnode_graph_get_next_endpoint_by_regs(of_fwnode_handle(parent),
-							    p, 0);
+		ep = fwnode_graph_get_next_endpoint_by_regs(parent, p, 0);
 		if (!ep)
 			continue;
 

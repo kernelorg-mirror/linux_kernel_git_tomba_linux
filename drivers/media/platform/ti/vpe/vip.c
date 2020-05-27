@@ -1519,7 +1519,6 @@ static int vip_calc_format_size(struct vip_port *port,
 	}
 
 	f->fmt.pix.colorspace = port->mbus_framefmt.colorspace;
-	f->fmt.pix.priv = 0;
 
 	v4l2_dbg(3, debug, port, "calc_format_size: fourcc:%s size: %dx%d bpl:%d img_size:%d\n",
 		 fourcc_to_str(f->fmt.pix.pixelformat),

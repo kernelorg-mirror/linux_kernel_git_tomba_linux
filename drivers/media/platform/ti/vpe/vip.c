@@ -1419,25 +1419,8 @@ static int vip_enum_framesizes(struct file *file, void *priv,
 	fse.code = fmt->code;
 	fse.which = V4L2_SUBDEV_FORMAT_ACTIVE;
 	ret = v4l2_subdev_call(port->subdev, pad, enum_frame_size, NULL, &fse);
-	if (ret == -ENOIOCTLCMD && !f->index) {
-		/*
-		 * if subdev does not support enum_frame_size
-		 * then use get_fmt
-		 */
-		struct v4l2_subdev_format format = {
-			.which = V4L2_SUBDEV_FORMAT_ACTIVE,
-			.pad = port->source_pad,
-		};
-		ret = v4l2_subdev_call(port->subdev, pad, get_fmt, NULL,
-				       &format);
-		if (ret)
-			return ret;
-
-		fse.max_width = format.format.width;
-		fse.max_height = format.format.height;
-	} else if (ret) {
+	if (ret)
 		return -EINVAL;
-	}
 
 	v4l2_dbg(1, debug, stream, "%s: index: %d code: %x W:[%d,%d] H:[%d,%d]\n",
 		 __func__, fse.index, fse.code, fse.min_width, fse.max_width,
@@ -3444,6 +3427,15 @@ static int alloc_stream(struct vip_port *port, int stream_id, int vfl_type)
 
 	vfd->lock = &dev->mutex;
 	video_set_drvdata(vfd, stream);
+
+	/* Disable ioctl not supported by the sub device */
+	if (!v4l2_subdev_has_op(port->subdev, pad, enum_frame_size))
+		v4l2_disable_ioctl(vfd, VIDIOC_ENUM_FRAMESIZES);
+	if (!v4l2_subdev_has_op(port->subdev, pad, enum_frame_interval)) {
+		v4l2_disable_ioctl(vfd, VIDIOC_ENUM_FRAMEINTERVALS);
+		v4l2_disable_ioctl(vfd, VIDIOC_G_PARM);
+		v4l2_disable_ioctl(vfd, VIDIOC_S_PARM);
+	}
 
 	ret = video_register_device(vfd, vfl_type, -1);
 	if (ret) {

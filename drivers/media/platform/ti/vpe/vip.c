@@ -1358,7 +1358,7 @@ static int vip_g_std(struct file *file, void *fh, v4l2_std_id *std)
 	struct vip_port *port = stream->port;
 
 	*std = stream->vfd->tvnorms;
-	v4l2_subdev_call(port->subdev, video, g_std_output, std);
+	v4l2_subdev_call(port->subdev, video, g_std, std);
 	v4l2_dbg(1, debug, stream, "g_std: 0x%lx\n", (unsigned long)*std);
 
 	return 0;
@@ -1377,7 +1377,7 @@ static int vip_s_std(struct file *file, void *fh, v4l2_std_id std)
 		return -EINVAL;
 	}
 
-	v4l2_subdev_call(port->subdev, video, s_std_output, std);
+	v4l2_subdev_call(port->subdev, video, s_std, std);
 	return 0;
 }
 

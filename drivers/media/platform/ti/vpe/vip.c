@@ -1395,7 +1395,6 @@ static int vip_enum_fmt_vid_cap(struct file *file, void *priv,
 	fmt = port->active_fmt[f->index];
 
 	f->pixelformat = fmt->fourcc;
-	f->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	v4l2_dbg(3, debug, stream, "enum_fmt fourcc:%s\n",
 		 fourcc_to_str(f->pixelformat));
 

@@ -3267,13 +3267,13 @@ static int alloc_stream(struct vip_port *port, int stream_id, int vfl_type)
 		v4l2_disable_ioctl(vfd, VIDIOC_S_PARM);
 	}
 
+	stream->vfd = vfd;
+
 	ret = video_register_device(vfd, vfl_type, -1);
 	if (ret) {
 		v4l2_err(stream, "Failed to register video device\n");
 		goto do_free_vfd;
 	}
-
-	stream->vfd = vfd;
 
 	v4l2_info(stream, "device registered as %s\n",
 		  video_device_node_name(vfd));

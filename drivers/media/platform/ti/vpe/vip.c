@@ -2446,6 +2446,28 @@ static int vip_load_vpdma_list_fifo(struct vip_stream *stream)
 	return 0;
 }
 
+static void vip_return_all_buffers(struct vip_stream *stream,
+				   struct vb2_queue *q,
+				   enum vb2_buffer_state state)
+{
+	struct vip_buffer *buf;
+
+	while (!list_empty(&stream->post_bufs)) {
+		buf = list_entry(stream->post_bufs.next,
+				 struct vip_buffer, list);
+		list_del(&buf->list);
+		if (buf->drop == 1)
+			list_add_tail(&buf->list, &stream->dropq);
+		else
+			vb2_buffer_done(&buf->vb.vb2_buf, state);
+	}
+	while (!list_empty(&stream->vidq)) {
+		buf = list_entry(stream->vidq.next, struct vip_buffer, list);
+		list_del(&buf->list);
+		vb2_buffer_done(&buf->vb.vb2_buf, state);
+	}
+}
+
 static int vip_start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct vip_stream *stream = vb2_get_drv_priv(vq);
@@ -2469,7 +2491,7 @@ static int vip_start_streaming(struct vb2_queue *vq, unsigned int count)
 		ret = v4l2_subdev_call(port->subdev, video, s_stream, 1);
 		if (ret < 0 && ret != -ENOIOCTLCMD) {
 			v4l2_dbg(1, debug, stream, "stream on failed in subdev\n");
-			return ret;
+			goto error_subdev;
 		}
 	}
 
@@ -2480,7 +2502,7 @@ static int vip_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	ret = vip_load_vpdma_list_fifo(stream);
 	if (ret)
-		return ret;
+		goto error_list_fifo;
 
 	stream->num_recovery = 0;
 
@@ -2491,6 +2513,15 @@ static int vip_start_streaming(struct vb2_queue *vq, unsigned int count)
 	vip_enable_parser(port, true);
 
 	return 0;
+
+error_list_fifo:
+	vpdma_unmap_desc_buf(dev->shared->vpdma, &stream->desc_list.buf);
+	vpdma_reset_desc_list(&stream->desc_list);
+
+error_subdev:
+	vip_return_all_buffers(stream, vq, VB2_BUF_STATE_QUEUED);
+	unset_fmt_params(stream);
+	return ret;
 }
 
 /*
@@ -2501,7 +2532,6 @@ static void vip_stop_streaming(struct vb2_queue *vq)
 	struct vip_stream *stream = vb2_get_drv_priv(vq);
 	struct vip_port *port = stream->port;
 	struct vip_dev *dev = port->dev;
-	struct vip_buffer *buf;
 	int ret;
 
 	vip_parser_stop_imm(port, true);
@@ -2519,21 +2549,7 @@ static void vip_stop_streaming(struct vb2_queue *vq)
 
 	stop_dma(stream, true);
 
-	/* release all active buffers */
-	while (!list_empty(&stream->post_bufs)) {
-		buf = list_entry(stream->post_bufs.next,
-				 struct vip_buffer, list);
-		list_del(&buf->list);
-		if (buf->drop == 1)
-			list_add_tail(&buf->list, &stream->dropq);
-		else
-			vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
-	}
-	while (!list_empty(&stream->vidq)) {
-		buf = list_entry(stream->vidq.next, struct vip_buffer, list);
-		list_del(&buf->list);
-		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
-	}
+	vip_return_all_buffers(stream, vq, VB2_BUF_STATE_ERROR);
 
 	if (!vb2_is_streaming(vq))
 		return;

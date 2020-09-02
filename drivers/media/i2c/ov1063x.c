@@ -673,6 +673,7 @@ static int ov1063x_enum_mbus_code(struct v4l2_subdev *sd,
 	return 0;
 }
 
+#if 0
 static int ov1063x_enum_frame_sizes(struct v4l2_subdev *sd,
 				    struct v4l2_subdev_pad_config *cfg,
 				    struct v4l2_subdev_frame_size_enum *fse)
@@ -695,6 +696,7 @@ static int ov1063x_enum_frame_sizes(struct v4l2_subdev *sd,
 
 	return 0;
 }
+#endif
 
 static void ov1063x_set_power(struct i2c_client *client, bool on)
 {

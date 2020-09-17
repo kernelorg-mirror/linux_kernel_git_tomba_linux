@@ -99,7 +99,7 @@ struct ov1063x_priv {
 	bool				power;
 
 	/* GPIOs */
-	struct gpio_desc		*resetb_gpio;
+	struct gpio_desc		*reset_gpio;
 	struct gpio_desc		*pwdn_gpio;
 
 	struct v4l2_ctrl		*colorbar;
@@ -709,18 +709,18 @@ static void ov1063x_set_power(struct i2c_client *client, bool on)
 
 	if (on) {
 		if (priv->pwdn_gpio) {
-			gpiod_set_value_cansleep(priv->pwdn_gpio, 1);
+			gpiod_set_value_cansleep(priv->pwdn_gpio, 0);
 			usleep_range(1000, 1200);
 		}
-		if (priv->resetb_gpio) {
-			gpiod_set_value_cansleep(priv->resetb_gpio, 1);
+		if (priv->reset_gpio) {
+			gpiod_set_value_cansleep(priv->reset_gpio, 0);
 			usleep_range(250000, 260000);
 		}
 	} else {
 		if (priv->pwdn_gpio)
-			gpiod_set_value_cansleep(priv->pwdn_gpio, 0);
-		if (priv->resetb_gpio)
-			gpiod_set_value_cansleep(priv->resetb_gpio, 0);
+			gpiod_set_value_cansleep(priv->pwdn_gpio, 1);
+		if (priv->reset_gpio)
+			gpiod_set_value_cansleep(priv->reset_gpio, 1);
 	}
 
 	priv->power = on;
@@ -903,17 +903,17 @@ static int ov1063x_probe(struct i2c_client *client)
 
 	/* Optional gpio don't fail if not present */
 	priv->pwdn_gpio = devm_gpiod_get_optional(&client->dev, "powerdown",
-						  GPIOD_OUT_LOW);
+						  GPIOD_OUT_HIGH);
 	if (IS_ERR(priv->pwdn_gpio)) {
 		ret = PTR_ERR(priv->pwdn_gpio);
 		goto err_unlock;
 	}
 
 	/* Optional gpio don't fail if not present */
-	priv->resetb_gpio = devm_gpiod_get_optional(&client->dev, "reset",
-						    GPIOD_OUT_LOW);
-	if (IS_ERR(priv->resetb_gpio)) {
-		ret = PTR_ERR(priv->resetb_gpio);
+	priv->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset",
+						   GPIOD_OUT_HIGH);
+	if (IS_ERR(priv->reset_gpio)) {
+		ret = PTR_ERR(priv->reset_gpio);
 		goto err_unlock;
 	}
 

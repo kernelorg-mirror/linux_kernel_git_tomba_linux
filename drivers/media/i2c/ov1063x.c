@@ -81,12 +81,13 @@ struct ov1063x_priv {
 	struct v4l2_ctrl_handler	hdl;
 	struct v4l2_ctrl		*colorbar;
 
-	/* Protects the struct fields below */
+	/* Protects the streaming and format fields. */
 	struct mutex			lock;
+	bool				streaming;
+	struct v4l2_mbus_framefmt	format;
 
 	int				fps_numerator;
 	int				fps_denominator;
-	struct v4l2_mbus_framefmt	format;
 	bool				power;
 };
 
@@ -275,7 +276,7 @@ static int ov1063x_get_pclk(int clk_rate, int *htsmin, int *vtsmin,
 }
 
 /* Setup registers according to resolution and color encoding */
-static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
+static int ov1063x_set_params(struct ov1063x_priv *priv)
 {
 	int pclk;
 	int hts, vts;
@@ -289,7 +290,12 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 	int horiz_sub_sample = 0;
 	int sensor_width;
 	int n_regs;
+	u32 width;
+	u32 height;
 	int ret;
+
+	width = priv->format.width;
+	height = priv->format.height;
 
 	if (width > OV1063X_MAX_WIDTH || height > OV1063X_MAX_HEIGHT)
 		return -EINVAL;
@@ -505,8 +511,32 @@ static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 	struct ov1063x_priv *priv = to_ov1063x(sd);
 	int ret = 0;
 
-	ov1063x_write8(priv, 0x0100, enable, &ret);
-	ov1063x_write8(priv, 0x301c, enable ? 0xf0 : 0x70, &ret);
+	if (!enable) {
+		ov1063x_write8(priv, 0x0100, 0x00, &ret);
+		ov1063x_write8(priv, 0x301c, 0x70, &ret);
+
+		mutex_lock(&priv->lock);
+		priv->streaming = false;
+		mutex_unlock(&priv->lock);
+
+		return ret;
+	}
+
+	mutex_lock(&priv->lock);
+
+	ret = ov1063x_set_params(priv);
+	if (ret < 0)
+		goto done;
+
+	ov1063x_write8(priv, 0x0100, 0x01, &ret);
+	ov1063x_write8(priv, 0x301c, 0xf0, &ret);
+	if (ret < 0)
+		goto done;
+
+	priv->streaming = false;
+
+done:
+	mutex_unlock(&priv->lock);
 
 	return ret;
 }
@@ -591,15 +621,18 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 
 	mutex_lock(&priv->lock);
 
+	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE && priv->streaming) {
+		ret = -EBUSY;
+		goto done;
+	}
+
 	format->code = code;
 	format->width = fsize->width;
 	format->height = fsize->height;
 
 	fmt->format = *format;
 
-	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		ret = ov1063x_set_params(priv, format->width, format->height);
-
+done:
 	mutex_unlock(&priv->lock);
 
 	return ret;

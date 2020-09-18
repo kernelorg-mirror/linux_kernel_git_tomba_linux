@@ -631,53 +631,64 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 	static const unsigned int pre_divs[] = { 2, 3, 4, 6, 8, 10, 12, 14 };
 
 	unsigned int best_pclk = UINT_MAX;
-	unsigned int best_pre_div = 0;
-	unsigned int best_mult = 0;
-	unsigned int best_div = 0;
-	unsigned int best_hts = 0;
+	unsigned int best_pre_div;
+	unsigned int best_mult;
+	unsigned int best_div;
+	unsigned int best_hts;
+	unsigned int max_pre_div;
 	unsigned int pre_div;
-	unsigned int mult;
-	unsigned int div;
 	unsigned int hts;
 
 	/*
 	 *  XVCLK --> pre-div -------> mult ----------> div --> output
-	 * 6-27 MHz           3-27 MHz      200-500 MHz
+	 * 6-27 MHz           3-27 MHz      200-500 MHz       Max 96 MHz
 	 *
 	 * Valid pre-divider values are 1, 1.5, 2, 3, 4, 5, 6 and 7. The
 	 * pre_divs array stores the pre-dividers multiplied by two, indexed by
 	 * register values.
 	 *
-	 * Valid multiplier values are [1, 31], stored as-is in registers.
+	 * Valid multiplier values are [1, 63], stored as-is in registers.
 	 *
 	 * Valid divider values are 2 to 16 with a step of 2, stored in
 	 * registers as (div / 2) - 1.
 	 */
+
+	if (clk_rate < 6 * 1000 * 1000 || clk_rate > 27 * 1000 * 1000)
+		return -EINVAL;
 
 	/*
 	 * We try all valid combinations of settings for the 3 blocks to get
 	 * the pixel clock, and from that calculate the actual hts/vts to use.
 	 * The vts is extended so as to achieve the required frame rate.
 	 */
-	for (pre_div = 0; pre_div < ARRAY_SIZE(pre_divs); pre_div++) {
-		unsigned int clk1 = clk_rate / pre_divs[pre_div] * 2;
 
-		if (clk1 < 3000000 || clk1 > 27000000)
+	max_pre_div = max(clk_rate / (3 * 1000 * 1000),
+			  ARRAY_SIZE(pre_divs) - 1);
+
+	for (pre_div = 0; pre_div <= max_pre_div; pre_div++) {
+		unsigned int clk1 = clk_rate * 2 / pre_divs[pre_div];
+		unsigned int min_mult;
+		unsigned int max_mult;
+		unsigned int mult;
+
+		if (clk1 < 3 * 1000 * 1000 || clk1 > 27 * 1000 * 1000)
 			continue;
 
-		for (mult = 1; mult < 32; mult++) {
+		min_mult = DIV_ROUND_UP(200 * 1000 * 1000, clk1);
+		max_mult = min(500 * 1000 * 1000 / clk1, 63U);
+
+		for (mult = min_mult; mult <= max_mult; mult++) {
 			unsigned int clk2 = clk1 * mult;
+			unsigned int min_div;
+			unsigned int div;
 
-			if (clk2 < 200000000 || clk2 > 500000000)
-				continue;
+			min_div = DIV_ROUND_UP(clk2, 96 * 1000 * 1000);
+			min_div = round_up(min_div, 2);
 
-			for (div = 0; div < 8; div++) {
-				unsigned int pclk = clk2 / (2 * (div + 1));
+			for (div = min_div; div <= 16; div += 2) {
+				unsigned int pclk = clk2 / div;
 
-				if (pclk > 96000000)
-					continue;
-
-				hts = *htsmin + 200 + pclk / 300000;
+				hts = *htsmin + 200 + pclk / (300*1000);
 
 				/* 2 clock cycles for every YUV422 pixel */
 				if (pclk < (((hts * *vtsmin) / fps_denominator)
@@ -700,7 +711,7 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 
 	cfg->mult = best_mult;
 	cfg->pre_div = best_pre_div;
-	cfg->div = best_div;
+	cfg->div = (best_div / 2) - 1;
 	cfg->clk_out = best_pclk;
 
 	*htsmin = best_hts;

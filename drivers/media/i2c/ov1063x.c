@@ -583,21 +583,20 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct ov1063x_priv *priv = to_ov1063x(sd);
-	int index = ARRAY_SIZE(ov1063x_mbus_formats);
 	struct v4l2_mbus_framefmt *mf = &fmt->format;
 	int ret = 0;
 
+	for (i = 0; i < ARRAY_SIZE(ov1063x_mbus_formats); ++i) {
+		if (ov1063x_mbus_formats[i] == mf->code)
+			break;
+	}
+
+	if (i == ARRAY_SIZE(ov1063x_mbus_formats))
+		mf->code = ov1063x_mbus_formats[0];
+
 	__ov1063x_try_frame_size(mf);
 
-	while (--index >= 0)
-		if (ov1063x_mbus_formats[index] == mf->code)
-			break;
-
-	if (index < 0)
-		return -EINVAL;
-
 	mf->colorspace = V4L2_COLORSPACE_SMPTE170M;
-	mf->code = ov1063x_mbus_formats[index];
 	mf->field = V4L2_FIELD_NONE;
 
 	mutex_lock(&priv->lock);

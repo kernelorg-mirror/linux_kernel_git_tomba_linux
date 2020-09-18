@@ -162,15 +162,28 @@ static inline struct ov1063x_priv *to_ov1063x(struct v4l2_subdev *sd)
 }
 
 /* Helper function to write consecutive 8 bit registers */
-static int ov1063x_regmap_write16(struct regmap *map, u16 reg, u16 val)
+static int ov1063x_write16(struct ov1063x_priv *priv, u16 reg, u16 val, int *err)
 {
 	int ret;
 
-	ret = regmap_write(map, reg, val >> 8);
-	if (ret)
-		return ret;
+	if (err && *err)
+		return *err;
 
-	return regmap_write(map, reg + 1, val & 0xff);
+	ret = regmap_write(priv->regmap, reg, val >> 8);
+	if (ret)
+		goto error;
+
+	ret = regmap_write(priv->regmap, reg + 1, val & 0xff);
+	if (ret)
+		goto error;
+
+	return 0;
+
+error:
+	if (err)
+		*err = ret;
+
+	return ret;
 }
 
 static int ov1063x_write_array(struct ov1063x_priv *priv,
@@ -462,32 +475,22 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 
 	/* Vertical cropping */
 	tmp = ((OV1063X_SENSOR_HEIGHT - height_pre_subsample) / 2) & ~0x1;
-	ret = ov1063x_regmap_write16(map, 0x3802, tmp);
-	if (ret)
-		return ret;
+	ov1063x_write16(priv, 0x3802, tmp, &ret);
 	tmp = tmp + height_pre_subsample + 3;
-	ret = ov1063x_regmap_write16(map, 0x3806, tmp);
-	if (ret)
-		return ret;
+	ov1063x_write16(priv, 0x3806, tmp, &ret);
 
 	dev_dbg(priv->dev, "width x height = %x x %x\n",
 		priv->width, priv->height);
 	/* Output size */
-	ret = ov1063x_regmap_write16(map, 0x3808, priv->width);
-	if (ret)
-		return ret;
-	ret = ov1063x_regmap_write16(map, 0x380a, priv->height);
-	if (ret)
-		return ret;
+	ov1063x_write16(priv, 0x3808, priv->width, &ret);
+	ov1063x_write16(priv, 0x380a, priv->height, &ret);
 
 	dev_dbg(priv->dev, "hts x vts = %x x %x\n", hts, vts);
 
-	ret = ov1063x_regmap_write16(map, 0x380c, hts);
-	if (ret)
-		return ret;
+	ov1063x_write16(priv, 0x380c, hts, &ret);
+	ov1063x_write16(priv, 0x380e, vts, &ret);
 
-	ret = ov1063x_regmap_write16(map, 0x380e, vts);
-	if (ret)
+	if (ret < 0)
 		return ret;
 
 	if (vert_sub_sample) {
@@ -503,30 +506,18 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 			return ret;
 	}
 
-	ret = ov1063x_regmap_write16(map, 0x4606, 2 * hts);
-	if (ret)
-		return ret;
-	ret = ov1063x_regmap_write16(map, 0x460a,
-				     2 * (hts - width_pre_subsample));
-	if (ret)
-		return ret;
+	ov1063x_write16(priv, 0x4606, 2 * hts, &ret);
+	ov1063x_write16(priv, 0x460a, 2 * (hts - width_pre_subsample), &ret);
 
 	tmp = (vts - 8) * 16;
-	ret = ov1063x_regmap_write16(map, 0xc488, tmp);
-	if (ret)
-		return ret;
-	ret = ov1063x_regmap_write16(map, 0xc48a, tmp);
-	if (ret)
-		return ret;
+	ov1063x_write16(priv, 0xc488, tmp, &ret);
+	ov1063x_write16(priv, 0xc48a, tmp, &ret);
 
 	nr_isp_pixels = sensor_width * (priv->height + 4);
-	ret = ov1063x_regmap_write16(map, 0xc4cc, nr_isp_pixels / 256);
-	if (ret)
-		return ret;
-	ret = ov1063x_regmap_write16(map, 0xc4ce, nr_isp_pixels / 256);
-	if (ret)
-		return ret;
-	ret = ov1063x_regmap_write16(map, 0xc512, nr_isp_pixels / 16);
+	ov1063x_write16(priv, 0xc4cc, nr_isp_pixels / 256, &ret);
+	ov1063x_write16(priv, 0xc4ce, nr_isp_pixels / 256, &ret);
+	ov1063x_write16(priv, 0xc512, nr_isp_pixels / 16, &ret);
+
 	if (ret)
 		return ret;
 
@@ -541,11 +532,9 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 			return ret;
 	}
 
-	ret = ov1063x_regmap_write16(map, 0xc518, vts);
-	if (ret)
-		return ret;
-	ret = ov1063x_regmap_write16(map, 0xc51a, hts);
-	if (ret)
+	ov1063x_write16(priv, 0xc518, vts, &ret);
+	ov1063x_write16(priv, 0xc51a, hts, &ret);
+	if (ret < 0)
 		return ret;
 
 	/* Enable ISP blocks */

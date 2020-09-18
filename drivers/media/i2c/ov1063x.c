@@ -471,6 +471,13 @@ struct ov1063x_priv {
 	unsigned int			fps_denominator;
 };
 
+/*
+ * TODO: Expose multiple subdevs to control cropping and subsampling separately
+ * from userspace instead of hardcoding resolutions.
+ *
+ * TODO: Resolutions with an analog crop rectangle width equal to 768 or higher
+ * don't work properly.
+ */
 static const struct v4l2_area ov1063x_framesizes[] = {
 	{
 		.width		= 1280,
@@ -684,6 +691,12 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 				unsigned int pclk = clk2 / div;
 				unsigned int min_pclk;
 
+				/*
+				 * TODO: HTS calculation should ideally be split
+				 * from the PLL calculations. This requires
+				 * figuring out where the pclk / 300000 comes
+				 * from.
+				 */
 				hts = *htsmin + pclk / (300*1000);
 
 				/* 2 clock cycles for every YUV422 pixel. */
@@ -822,7 +835,14 @@ static int ov1063x_configure(struct ov1063x_priv *priv)
 	ov1063x_write(priv, OV1063X_SENSOR_TXWIDTH,
 		      (pll_cfg.clk_out + 961500) / 1923000, &ret);
 
-	/* Timings (including cropping) */
+	/*
+	 * Timings (including cropping)
+	 *
+	 * TODO: The vertical size is set to the height of the analog crop
+	 * rectangle plus 4 pixels. This margin is probably used by the ISP for
+	 * CFA interpolation, and should be moved to the crop rectangle height
+	 * after investigating how the ISP operates.
+	 */
 	ov1063x_write(priv, OV1063X_TIMING_Y_START_ADDR,
 		      priv->analog_crop.top, &ret);
 	ov1063x_write(priv, OV1063X_TIMING_Y_END_ADDR,
@@ -839,7 +859,10 @@ static int ov1063x_configure(struct ov1063x_priv *priv)
 	ov1063x_write(priv, OV1063X_TIMING_HTS, hts, &ret);
 	ov1063x_write(priv, OV1063X_TIMING_VTS, vts, &ret);
 
-	/* ISP sub-sampling */
+	/*
+	 * Sub-sampling. Horizontal sub-sampling is applied in the ISP, vertical
+	 * sub-sampling in the pixel array.
+	 */
 	if (priv->format.width <= 640) {
 		ov1063x_write(priv, OV1063X_ISP_RW05, OV1063X_ISP_RW05_SUB_AVG |
 			      OV1063X_ISP_RW05_SUB_ENABLE, &ret);
@@ -860,7 +883,22 @@ static int ov1063x_configure(struct ov1063x_priv *priv)
 		ret = ov1063x_write_array(priv, ov1063x_regs_vert_no_sub,
 					  ARRAY_SIZE(ov1063x_regs_vert_no_sub));
 
-	/* AEC & AWB */
+	/*
+	 * AEC & AWB
+	 *
+	 * TODO: The number of pixels fed to the ISP is computed using the
+	 * analog crop width and the vertical output size, to account for the
+	 * fact that vertical sub-sampling is applied in the pixel array while
+	 * horizontal sub-sampling is applied in the ISP. The 4 pixels margin
+	 * seems incorrect when sub-sampling, as the vertical timing start and
+	 * stop registers are programmed with a 4 pixels margin before
+	 * sub-sampling, the ISP should thus receive a 2 pixels margin only.
+	 * This needs to be investigated.
+	 *
+	 * TODO: When applying vertical digital crop, the output height is
+	 * likely the wrong value to compute the total number of pixels fed to
+	 * the ISP.
+	 */
 	val = (vts - 8) * 16;
 	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_LONG, val, &ret);
 	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_SHORT, val, &ret);
@@ -985,6 +1023,7 @@ static int ov1063x_tpg_setup(struct ov1063x_priv *priv, struct v4l2_ctrl *ctrl)
 
 	cfg = &ov1063x_tpg_configs[ctrl->val - 1];
 
+	/* TODO: Add support for the moving bar overlay. */
 	ov1063x_write(priv, OV1063X_ISP_CTRL3D, cfg->ctrl3d, &ret);
 	ov1063x_write(priv, OV1063X_ISP_CTRL3E, cfg->ctrl3e, &ret);
 

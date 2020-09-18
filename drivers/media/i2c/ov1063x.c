@@ -273,6 +273,12 @@
 #define OV1063X_ISP_CTRL3D_TEST_PATTERN_EN	BIT(7)
 #define OV1063X_ISP_CTRL3D_COLOR_BAR(n)		((n) << 4)
 #define OV1063X_ISP_CTRL3D_ROLLING_BAR_EN	BIT(2)
+#define OV1063X_ISP_CTRL3E			OV1063X_REG_8BIT(0x503e)
+#define OV1063X_ISP_CTRL3E_SQUARE_BW		BIT(3)
+#define OV1063X_ISP_CTRL3E_TRANSPARENT_EN	BIT(2)
+#define OV1063X_ISP_CTRL3E_PATTERN_BARS		(0U << 0)
+#define OV1063X_ISP_CTRL3E_PATTERN_RANDOM	(1U << 0)
+#define OV1063X_ISP_CTRL3E_PATTERN_SQUARES	(2U << 0)
 
 #define OV1063X_GAIN_AWB_MAN_GAIN_B_LONG	OV1063X_REG_16BIT(0x5100)
 #define OV1063X_GAIN_AWB_MAN_GAIN_GB_LONG	OV1063X_REG_16BIT(0x5102)
@@ -943,12 +949,86 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
  * V4L2 Control Operations
  */
 
+static const char * const ov1063x_test_pattern_menu[] = {
+	"Disabled",
+	"Color Bars, Plain",
+	"Color Bars, Vertical Gradient",
+	"Color Bars, Horizontal Gradient",
+	"Color Bars, Repeating",
+	"Random Data",
+	"Squares, Color",
+	"Squares, Black & White",
+};
+
+struct ov1063x_tpg_config {
+	u8 ctrl3d;
+	u8 ctrl3e;
+};
+
+static const struct ov1063x_tpg_config
+ov1063x_tpg_configs[ARRAY_SIZE(ov1063x_test_pattern_menu) - 1] = {
+	{
+		.ctrl3d = OV1063X_ISP_CTRL3D_TEST_PATTERN_EN
+			| OV1063X_ISP_CTRL3D_COLOR_BAR(0),
+		.ctrl3e = OV1063X_ISP_CTRL3E_PATTERN_BARS,
+	}, {
+		.ctrl3d = OV1063X_ISP_CTRL3D_TEST_PATTERN_EN
+			| OV1063X_ISP_CTRL3D_COLOR_BAR(1),
+		.ctrl3e = OV1063X_ISP_CTRL3E_PATTERN_BARS,
+	}, {
+		.ctrl3d = OV1063X_ISP_CTRL3D_TEST_PATTERN_EN
+			| OV1063X_ISP_CTRL3D_COLOR_BAR(2),
+		.ctrl3e = OV1063X_ISP_CTRL3E_PATTERN_BARS,
+	}, {
+		.ctrl3d = OV1063X_ISP_CTRL3D_TEST_PATTERN_EN
+			| OV1063X_ISP_CTRL3D_COLOR_BAR(3),
+		.ctrl3e = OV1063X_ISP_CTRL3E_PATTERN_BARS,
+	}, {
+		.ctrl3d = OV1063X_ISP_CTRL3D_TEST_PATTERN_EN,
+		.ctrl3e = OV1063X_ISP_CTRL3E_PATTERN_RANDOM,
+	}, {
+		.ctrl3d = OV1063X_ISP_CTRL3D_TEST_PATTERN_EN,
+		.ctrl3e = OV1063X_ISP_CTRL3E_PATTERN_SQUARES,
+	}, {
+		.ctrl3d = OV1063X_ISP_CTRL3D_TEST_PATTERN_EN,
+		.ctrl3e = OV1063X_ISP_CTRL3E_SQUARE_BW
+			| OV1063X_ISP_CTRL3E_PATTERN_SQUARES,
+	},
+};
+
+static int ov1063x_tpg_setup(struct ov1063x_priv *priv, struct v4l2_ctrl *ctrl)
+{
+	const struct ov1063x_tpg_config *cfg;
+	int ret = 0;
+
+	if (!ctrl->val)
+		return ov1063x_write_array(priv, ov1063x_regs_colorbar_disable,
+					   ARRAY_SIZE(ov1063x_regs_colorbar_disable));
+
+	if (!ctrl->cur.val) {
+		/*
+		 * Only write the full settings when the test pattern was
+		 * disabled, not when we're just changing the test pattern type.
+		 */
+		ret = ov1063x_write_array(priv, ov1063x_regs_colorbar_enable,
+					  ARRAY_SIZE(ov1063x_regs_colorbar_enable));
+		if (ret < 0)
+			return ret;
+	}
+
+	cfg = &ov1063x_tpg_configs[ctrl->val - 1];
+
+	ov1063x_write(priv, OV1063X_ISP_CTRL3D, cfg->ctrl3d, &ret);
+	ov1063x_write(priv, OV1063X_ISP_CTRL3E, cfg->ctrl3e, &ret);
+
+	return ret;
+}
+
 static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct ov1063x_priv *priv = container_of(ctrl->handler,
 					struct ov1063x_priv, hdl);
-	const struct ov1063x_reg *regs;
-	int n_regs, ret = 0;
+	int ret = 0;
 
 	if (!priv->streaming)
 		return 0;
@@ -976,14 +1056,7 @@ static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
 	}
 
 	case V4L2_CID_TEST_PATTERN:
-		if (ctrl->val) {
-			n_regs = ARRAY_SIZE(ov1063x_regs_colorbar_enable);
-			regs = ov1063x_regs_colorbar_enable;
-		} else {
-			n_regs = ARRAY_SIZE(ov1063x_regs_colorbar_disable);
-			regs = ov1063x_regs_colorbar_disable;
-		}
-		return ov1063x_write_array(priv, regs, n_regs);
+		return ov1063x_tpg_setup(priv, ctrl);
 	}
 
 	return -EINVAL;
@@ -991,11 +1064,6 @@ static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
 
 static const struct v4l2_ctrl_ops ov1063x_ctrl_ops = {
 	.s_ctrl = ov1063x_s_ctrl,
-};
-
-static const char * const ov1063x_test_pattern_menu[] = {
-	"Disabled",
-	"Vertical Color Bars",
 };
 
 /* -----------------------------------------------------------------------------

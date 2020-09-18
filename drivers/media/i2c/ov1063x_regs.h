@@ -587,12 +587,11 @@ static const struct ov1063x_reg ov1063x_regs_colorbar_enable[] = {
 			    OV1063X_ISP_RW00_WHITE_DPC_EN |
 			    OV1063X_ISP_RW00_BLACK_DPC_EN |
 			    OV1063X_ISP_RW00_LSC_EN },
-	{ OV1063X_ISP_CTRL3D, OV1063X_ISP_CTRL3D_TEST_PATTERN_EN |
-			       OV1063X_ISP_CTRL3D_COLOR_BAR(0) },
 };
 
 static const struct ov1063x_reg ov1063x_regs_colorbar_disable[] = {
 	{ OV1063X_ISP_CTRL3D, 0 },
+	{ OV1063X_ISP_CTRL3E, 0 },
 	{ OV1063X_GAIN_AWB_CTRL32, 0 },
 	{ OV1063X_AEC_CTRLD0, OV1063X_AEC_CTRLD0_R_MAN_EN(0) },
 	{ OV1063X_REG_8BIT(0x5300), 0x01 }, { OV1063X_REG_8BIT(0x5301), 0x00 },

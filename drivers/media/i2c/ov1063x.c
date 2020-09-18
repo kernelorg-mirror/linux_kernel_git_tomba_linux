@@ -768,10 +768,10 @@ static int ov1063x_isp_reset(struct ov1063x_priv *priv, bool reset)
 static int ov1063x_set_params(struct ov1063x_priv *priv)
 {
 	struct ov1063x_pll_config pll_cfg;
+	unsigned int width_pre_subsample;
+	unsigned int nr_isp_pixels;
 	unsigned int hts, vts;
 	u32 val;
-	u32 width_pre_subsample;
-	int nr_isp_pixels;
 	u32 width;
 	u32 height;
 	int ret = 0;

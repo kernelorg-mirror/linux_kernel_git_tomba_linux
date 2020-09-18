@@ -299,9 +299,6 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	width = priv->format.width;
 	height = priv->format.height;
 
-	if (width > OV1063X_MAX_WIDTH || height > OV1063X_MAX_HEIGHT)
-		return -EINVAL;
-
 	/* Vertical sub-sampling? */
 	height_pre_subsample = height;
 	if (height <= 400) {

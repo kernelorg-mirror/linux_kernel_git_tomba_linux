@@ -75,6 +75,8 @@ struct ov1063x_framesize {
 };
 
 struct ov1063x_priv {
+	struct device			*dev;
+
 	struct v4l2_subdev		subdev;
 	struct v4l2_ctrl_handler	hdl;
 	struct media_pad		pad;
@@ -154,10 +156,9 @@ static const struct ov1063x_color_format ov1063x_cfmts[] = {
 	},
 };
 
-static inline struct ov1063x_priv *to_ov1063x(const struct i2c_client *client)
+static inline struct ov1063x_priv *to_ov1063x(struct v4l2_subdev *sd)
 {
-	return container_of(i2c_get_clientdata(client), struct ov1063x_priv,
-			    subdev);
+	return container_of(sd, struct ov1063x_priv, subdev);
 }
 
 /* Helper function to write consecutive 8 bit registers */
@@ -175,8 +176,7 @@ static int ov1063x_regmap_write16(struct regmap *map, u16 reg, u16 val)
 /* Start/Stop streaming from the device */
 static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct ov1063x_priv *priv = to_ov1063x(client);
+	struct ov1063x_priv *priv = to_ov1063x(sd);
 	struct regmap *map = priv->regmap;
 	int ret;
 
@@ -187,7 +187,7 @@ static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 	return regmap_write(map, 0x301c, enable ? 0xf0 : 0x70);
 }
 
-static int ov1063x_set_regs(struct i2c_client *client,
+static int ov1063x_set_regs(struct ov1063x_priv *priv,
 			    const struct ov1063x_reg *regs, int nr_regs);
 
 /* Set status of additional camera capabilities */
@@ -195,7 +195,6 @@ static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct ov1063x_priv *priv = container_of(ctrl->handler,
 					struct ov1063x_priv, hdl);
-	struct i2c_client *client = v4l2_get_subdevdata(&priv->subdev);
 	struct regmap *map = priv->regmap;
 	const struct ov1063x_reg *regs;
 	int n_regs, ret;
@@ -224,7 +223,7 @@ static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
 			n_regs = ARRAY_SIZE(ov1063x_regs_colorbar_disable);
 			regs = ov1063x_regs_colorbar_disable;
 		}
-		return ov1063x_set_regs(client, regs, n_regs);
+		return ov1063x_set_regs(priv, regs, n_regs);
 	}
 
 	return -EINVAL;
@@ -308,10 +307,10 @@ static int ov1063x_get_pclk(int clk_rate, int *htsmin, int *vtsmin,
 	return best_pclk;
 }
 
-static int ov1063x_set_regs(struct i2c_client *client,
+static int ov1063x_set_regs(struct ov1063x_priv *priv,
 			    const struct ov1063x_reg *regs, int nr_regs)
 {
-	struct ov1063x_priv *priv = to_ov1063x(client);
+	struct i2c_client *client = to_i2c_client(priv->dev);
 	struct regmap *map = priv->regmap;
 	int i, ret;
 	u8 val;
@@ -334,9 +333,8 @@ static int ov1063x_set_regs(struct i2c_client *client,
 }
 
 /* Setup registers according to resolution and color encoding */
-static int ov1063x_set_params(struct i2c_client *client, u32 width, u32 height)
+static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 {
-	struct ov1063x_priv *priv = to_ov1063x(client);
 	struct regmap *map = priv->regmap;
 	int ret = -EINVAL;
 	int pclk;
@@ -387,7 +385,7 @@ static int ov1063x_set_params(struct i2c_client *client, u32 width, u32 height)
 	/* minimum values for hts and vts */
 	hts = sensor_width;
 	vts = height_pre_subsample + 50;
-	dev_dbg(&client->dev, "fps=(%d/%d), hts=%d, vts=%d\n",
+	dev_dbg(priv->dev, "fps=(%d/%d), hts=%d, vts=%d\n",
 		priv->fps_numerator, priv->fps_denominator, hts, vts);
 
 	/* Get the best PCLK & adjust hts,vts accordingly */
@@ -396,11 +394,11 @@ static int ov1063x_set_params(struct i2c_client *client, u32 width, u32 height)
 				&r3003, &r3004);
 	if (pclk < 0)
 		return ret;
-	dev_dbg(&client->dev, "pclk=%d, hts=%d, vts=%d\n", pclk, hts, vts);
-	dev_dbg(&client->dev, "r3003=0x%X r3004=0x%X\n", r3003, r3004);
+	dev_dbg(priv->dev, "pclk=%d, hts=%d, vts=%d\n", pclk, hts, vts);
+	dev_dbg(priv->dev, "r3003=0x%X r3004=0x%X\n", r3003, r3004);
 
 	/* Disable ISP & program all registers that we might modify */
-	ret = ov1063x_set_regs(client, ov1063x_regs_change_mode,
+	ret = ov1063x_set_regs(priv, ov1063x_regs_change_mode,
 			       ARRAY_SIZE(ov1063x_regs_change_mode));
 	if (ret)
 		return ret;
@@ -441,7 +439,7 @@ static int ov1063x_set_params(struct i2c_client *client, u32 width, u32 height)
 	if (ret)
 		return ret;
 
-	dev_dbg(&client->dev, "r4300=0x%X\n", r4300);
+	dev_dbg(priv->dev, "r4300=0x%X\n", r4300);
 
 	/* Set output to 8-bit yuv */
 	ret = regmap_write(map, 0x4605, 0x08);
@@ -473,7 +471,7 @@ static int ov1063x_set_params(struct i2c_client *client, u32 width, u32 height)
 	if (ret)
 		return ret;
 
-	dev_dbg(&client->dev, "width x height = %x x %x\n",
+	dev_dbg(priv->dev, "width x height = %x x %x\n",
 		priv->width, priv->height);
 	/* Output size */
 	ret = ov1063x_regmap_write16(map, 0x3808, priv->width);
@@ -483,7 +481,7 @@ static int ov1063x_set_params(struct i2c_client *client, u32 width, u32 height)
 	if (ret)
 		return ret;
 
-	dev_dbg(&client->dev, "hts x vts = %x x %x\n", hts, vts);
+	dev_dbg(priv->dev, "hts x vts = %x x %x\n", hts, vts);
 
 	ret = ov1063x_regmap_write16(map, 0x380c, hts);
 	if (ret)
@@ -500,7 +498,7 @@ static int ov1063x_set_params(struct i2c_client *client, u32 width, u32 height)
 		if (ret)
 			return ret;
 		n_regs = ARRAY_SIZE(ov1063x_regs_vert_sub_sample);
-		ret = ov1063x_set_regs(client, ov1063x_regs_vert_sub_sample,
+		ret = ov1063x_set_regs(priv, ov1063x_regs_vert_sub_sample,
 				       n_regs);
 		if (ret)
 			return ret;
@@ -552,7 +550,7 @@ static int ov1063x_set_params(struct i2c_client *client, u32 width, u32 height)
 		return ret;
 
 	/* Enable ISP blocks */
-	ret = ov1063x_set_regs(client, ov1063x_regs_enable,
+	ret = ov1063x_set_regs(priv, ov1063x_regs_enable,
 			       ARRAY_SIZE(ov1063x_regs_enable));
 	if (ret)
 		return ret;
@@ -578,8 +576,7 @@ static int ov1063x_get_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_pad_config *cfg,
 			   struct v4l2_subdev_format *fmt)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-	struct ov1063x_priv *priv = to_ov1063x(client);
+	struct ov1063x_priv *priv = to_ov1063x(sd);
 	struct v4l2_mbus_framefmt *mf;
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
@@ -625,9 +622,8 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_pad_config *cfg,
 			   struct v4l2_subdev_format *fmt)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct ov1063x_priv *priv = to_ov1063x(sd);
 	int index = ARRAY_SIZE(ov1063x_cfmts);
-	struct ov1063x_priv *priv = to_ov1063x(client);
 	struct v4l2_mbus_framefmt *mf = &fmt->format;
 	int ret = 0;
 
@@ -651,7 +647,7 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 		*mf = fmt->format;
 	} else {
 		priv->format = fmt->format;
-		ret = ov1063x_set_params(client, mf->width, mf->height);
+		ret = ov1063x_set_params(priv, mf->width, mf->height);
 	}
 
 	mutex_unlock(&priv->lock);
@@ -696,11 +692,9 @@ static int ov1063x_enum_frame_sizes(struct v4l2_subdev *sd,
 }
 #endif
 
-static void ov1063x_set_power(struct i2c_client *client, bool on)
+static void ov1063x_set_power(struct ov1063x_priv *priv, bool on)
 {
-	struct ov1063x_priv *priv = to_ov1063x(client);
-
-	dev_dbg(&client->dev, "%s: on: %d\n", __func__, on);
+	dev_dbg(priv->dev, "%s: on: %d\n", __func__, on);
 
 	if (priv->power == on)
 		return;
@@ -729,10 +723,10 @@ static void ov1063x_set_power(struct i2c_client *client, bool on)
  */
 static int ov1063x_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct ov1063x_priv *priv = to_ov1063x(sd);
 	struct v4l2_mbus_framefmt *mf;
 
-	dev_dbg(&client->dev, "%s:\n", __func__);
+	dev_dbg(priv->dev, "%s:\n", __func__);
 
 	mf = v4l2_subdev_get_try_format(sd, fh->pad, 0);
 	ov1063x_get_default_format(mf);
@@ -779,17 +773,16 @@ static struct v4l2_subdev_ops ov1063x_subdev_ops = {
  * I2C Driver, Probe & Remove
  */
 
-static int ov1063x_detect(struct i2c_client *client)
+static int ov1063x_detect(struct ov1063x_priv *priv)
 {
-	struct ov1063x_priv *priv = to_ov1063x(client);
 	struct regmap *map = priv->regmap;
 	const char *name;
 	u32 pid, ver;
 	int ret;
 
-	ov1063x_set_power(client, true);
+	ov1063x_set_power(priv, true);
 
-	ret = ov1063x_set_regs(client, ov1063x_regs_default,
+	ret = ov1063x_set_regs(priv, ov1063x_regs_default,
 			       ARRAY_SIZE(ov1063x_regs_default));
 	if (ret)
 		return ret;
@@ -817,11 +810,11 @@ static int ov1063x_detect(struct i2c_client *client)
 		name = "OV10635";
 		break;
 	default:
-		dev_err(&client->dev, "Unknown product ID %04x\n", pid);
+		dev_err(priv->dev, "Unknown product ID %04x\n", pid);
 		return -ENODEV;
 	}
 
-	dev_info(&client->dev, "%s detected\n", name);
+	dev_info(priv->dev, "%s detected\n", name);
 
 	return 0;
 }
@@ -841,6 +834,7 @@ static int ov1063x_probe(struct i2c_client *client)
 	if (!priv)
 		return -ENOMEM;
 
+	priv->dev = &client->dev;
 	mutex_init(&priv->lock);
 	i2c_set_clientdata(client, priv);
 
@@ -851,29 +845,29 @@ static int ov1063x_probe(struct i2c_client *client)
 		goto err_mutex;
 	}
 
-	priv->pwdn_gpio = devm_gpiod_get_optional(&client->dev, "powerdown",
+	priv->pwdn_gpio = devm_gpiod_get_optional(priv->dev, "powerdown",
 						  GPIOD_OUT_HIGH);
 	if (IS_ERR(priv->pwdn_gpio)) {
 		ret = PTR_ERR(priv->pwdn_gpio);
 		goto err_mutex;
 	}
 
-	priv->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset",
+	priv->reset_gpio = devm_gpiod_get_optional(priv->dev, "reset",
 						   GPIOD_OUT_HIGH);
 	if (IS_ERR(priv->reset_gpio)) {
 		ret = PTR_ERR(priv->reset_gpio);
 		goto err_mutex;
 	}
 
-	priv->clk = devm_clk_get(&client->dev, "xvclk");
+	priv->clk = devm_clk_get(priv->dev, "xvclk");
 	if (IS_ERR(priv->clk)) {
 		ret = PTR_ERR(priv->clk);
-		dev_err(&client->dev, "Failed to get xvclk clock: %d\n", ret);
+		dev_err(priv->dev, "Failed to get xvclk clock: %d\n", ret);
 		goto err_mutex;
 	}
 
 	priv->clk_rate = clk_get_rate(priv->clk);
-	dev_dbg(&client->dev, "xvclk rate: %lu Hz\n", priv->clk_rate);
+	dev_dbg(priv->dev, "xvclk rate: %lu Hz\n", priv->clk_rate);
 
 	if (priv->clk_rate < 6000000 || priv->clk_rate > 27000000) {
 		ret = -EINVAL;
@@ -885,7 +879,7 @@ static int ov1063x_probe(struct i2c_client *client)
 	if (ret < 0)
 		goto err_mutex;
 
-	ret = ov1063x_detect(client);
+	ret = ov1063x_detect(priv);
 	if (ret)
 		goto err_clock;
 
@@ -931,12 +925,12 @@ static int ov1063x_probe(struct i2c_client *client)
 	if (ret < 0)
 		goto err_ctrls;
 
-	sd->dev = &client->dev;
+	sd->dev = priv->dev;
 	ret = v4l2_async_register_subdev(sd);
 	if (ret < 0)
 		goto err_media;
 
-	dev_info(&client->dev, "%s sensor driver registered !!\n", sd->name);
+	dev_info(priv->dev, "%s sensor driver registered !!\n", sd->name);
 
 	return 0;
 
@@ -959,7 +953,7 @@ static int ov1063x_remove(struct i2c_client *client)
 	v4l2_async_unregister_subdev(&priv->subdev);
 	mutex_destroy(&priv->lock);
 	media_entity_cleanup(&priv->subdev.entity);
-	ov1063x_set_power(client, false);
+	ov1063x_set_power(priv, false);
 	clk_disable_unprepare(priv->clk);
 
 	return 0;

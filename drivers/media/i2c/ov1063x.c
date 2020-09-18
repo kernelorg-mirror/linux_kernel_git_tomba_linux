@@ -784,7 +784,6 @@ static int ov1063x_probe(struct i2c_client *client)
 
 	priv->dev = &client->dev;
 	mutex_init(&priv->lock);
-	i2c_set_clientdata(client, priv);
 
 	/* Acquire resources: regmap, GPIOs and clock. The GPIOs are optional. */
 	priv->regmap = devm_regmap_init_i2c(client, &ov1063x_regmap_config);
@@ -873,7 +872,6 @@ static int ov1063x_probe(struct i2c_client *client)
 	if (ret < 0)
 		goto err_ctrls;
 
-	sd->dev = priv->dev;
 	ret = v4l2_async_register_subdev(sd);
 	if (ret < 0)
 		goto err_media;

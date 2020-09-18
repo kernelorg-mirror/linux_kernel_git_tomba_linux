@@ -517,14 +517,36 @@ static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 	return ret;
 }
 
-static void ov1063x_get_default_format(struct v4l2_mbus_framefmt *mf)
+static struct v4l2_mbus_framefmt *
+__ov1063x_get_pad_format(struct ov1063x_priv *priv,
+			 struct v4l2_subdev_pad_config *cfg,
+			 unsigned int pad, u32 which)
 {
-	mf->width = ov1063x_framesizes[0].width;
-	mf->height = ov1063x_framesizes[0].height;
-	mf->colorspace = V4L2_COLORSPACE_SMPTE170M;
-	mf->code = ov1063x_mbus_formats[0];
+	switch (which) {
+	case V4L2_SUBDEV_FORMAT_TRY:
+		return v4l2_subdev_get_try_format(&priv->subdev, cfg, pad);
+	case V4L2_SUBDEV_FORMAT_ACTIVE:
+		return &priv->format;
+	default:
+		return NULL;
+	}
+}
 
-	mf->field = V4L2_FIELD_NONE;
+static int ov1063x_init_cfg(struct v4l2_subdev *sd,
+			    struct v4l2_subdev_pad_config *cfg)
+{
+	u32 which = cfg ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
+	struct ov1063x_priv *priv = to_ov1063x(sd);
+	struct v4l2_mbus_framefmt *format;
+
+	format = __ov1063x_get_pad_format(priv, cfg, 0, which);
+	format->code = ov1063x_mbus_formats[0];
+	format->width = ov1063x_framesizes[0].width;
+	format->height = ov1063x_framesizes[0].height;
+	format->field = V4L2_FIELD_NONE;
+	format->colorspace = V4L2_COLORSPACE_SMPTE170M;
+
+	return 0;
 }
 
 static int ov1063x_get_fmt(struct v4l2_subdev *sd,
@@ -654,24 +676,8 @@ static void ov1063x_set_power(struct ov1063x_priv *priv, bool on)
 	priv->power = on;
 }
 
-static int ov1063x_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
-{
-	struct ov1063x_priv *priv = to_ov1063x(sd);
-	struct v4l2_mbus_framefmt *mf;
-
-	dev_dbg(priv->dev, "%s:\n", __func__);
-
-	mf = v4l2_subdev_get_try_format(sd, fh->pad, 0);
-	ov1063x_get_default_format(mf);
-	return 0;
-}
-
 static const struct v4l2_subdev_video_ops ov1063x_subdev_video_ops = {
 	.s_stream	= ov1063x_s_stream,
-};
-
-static const struct v4l2_subdev_internal_ops ov1063x_sd_internal_ops = {
-	.open		= ov1063x_open,
 };
 
 static const struct v4l2_subdev_core_ops ov1063x_subdev_core_ops = {
@@ -681,6 +687,7 @@ static const struct v4l2_subdev_core_ops ov1063x_subdev_core_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops ov1063x_subdev_pad_ops = {
+	.init_cfg		= ov1063x_init_cfg,
 	.enum_mbus_code		= ov1063x_enum_mbus_code,
 //	.enum_frame_size	= ov1063x_enum_frame_sizes,
 	.get_fmt		= ov1063x_get_fmt,
@@ -810,7 +817,6 @@ static int ov1063x_probe(struct i2c_client *client)
 	sd = &priv->subdev;
 	v4l2_i2c_subdev_init(sd, client, &ov1063x_subdev_ops);
 
-	sd->internal_ops = &ov1063x_sd_internal_ops;
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
 		     V4L2_SUBDEV_FL_HAS_EVENTS;
 
@@ -837,7 +843,7 @@ static int ov1063x_probe(struct i2c_client *client)
 	/* Default framerate */
 	priv->fps_numerator = 30;
 	priv->fps_denominator = 1;
-	ov1063x_get_default_format(&priv->format);
+	ov1063x_init_cfg(&priv->subdev, NULL);
 	priv->width = priv->format.width;
 	priv->height = priv->format.height;
 

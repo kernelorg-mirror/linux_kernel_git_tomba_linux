@@ -87,8 +87,6 @@ struct ov1063x_priv {
 	int				fps_numerator;
 	int				fps_denominator;
 	struct v4l2_mbus_framefmt	format;
-	int				width;
-	int				height;
 	bool				power;
 };
 
@@ -296,19 +294,16 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 	if (width > OV1063X_MAX_WIDTH || height > OV1063X_MAX_HEIGHT)
 		return -EINVAL;
 
-	priv->width = width;
-	priv->height = height;
-
 	/* Vertical sub-sampling? */
-	height_pre_subsample = priv->height;
-	if (priv->height <= 400) {
+	height_pre_subsample = height;
+	if (height <= 400) {
 		vert_sub_sample = 1;
 		height_pre_subsample <<= 1;
 	}
 
 	/* Horizontal sub-sampling? */
-	width_pre_subsample = priv->width;
-	if (priv->width <= 640) {
+	width_pre_subsample = width;
+	if (width <= 640) {
 		horiz_sub_sample = 1;
 		width_pre_subsample <<= 1;
 	}
@@ -392,11 +387,10 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 	tmp = tmp + height_pre_subsample + 3;
 	ov1063x_write16(priv, 0x3806, tmp, &ret);
 
-	dev_dbg(priv->dev, "width x height = %x x %x\n",
-		priv->width, priv->height);
+	dev_dbg(priv->dev, "width x height = %x x %x\n", width, height);
 	/* Output size */
-	ov1063x_write16(priv, 0x3808, priv->width, &ret);
-	ov1063x_write16(priv, 0x380a, priv->height, &ret);
+	ov1063x_write16(priv, 0x3808, width, &ret);
+	ov1063x_write16(priv, 0x380a, height, &ret);
 
 	dev_dbg(priv->dev, "hts x vts = %x x %x\n", hts, vts);
 
@@ -426,7 +420,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 	ov1063x_write16(priv, 0xc488, tmp, &ret);
 	ov1063x_write16(priv, 0xc48a, tmp, &ret);
 
-	nr_isp_pixels = sensor_width * (priv->height + 4);
+	nr_isp_pixels = sensor_width * (height + 4);
 	ov1063x_write16(priv, 0xc4cc, nr_isp_pixels / 256, &ret);
 	ov1063x_write16(priv, 0xc4ce, nr_isp_pixels / 256, &ret);
 	ov1063x_write16(priv, 0xc512, nr_isp_pixels / 16, &ret);
@@ -842,8 +836,6 @@ static int ov1063x_probe(struct i2c_client *client)
 	priv->fps_numerator = 30;
 	priv->fps_denominator = 1;
 	ov1063x_init_cfg(&priv->subdev, NULL);
-	priv->width = priv->format.width;
-	priv->height = priv->format.height;
 
 	/* Initialize the media entity. */
 	priv->pad.flags = MEDIA_PAD_FL_SOURCE;

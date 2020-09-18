@@ -624,9 +624,16 @@ static int ov1063x_update(struct ov1063x_priv *priv, u32 reg, u32 mask, u32 val,
  * extended so as to achieve the required frame rate. The function also returns
  * the PLL register contents needed to set the pixel clock.
  */
+
+struct ov1063x_pll_config {
+	unsigned int pre_div;
+	unsigned int mult;
+	unsigned int div;
+};
+
 static int ov1063x_get_pclk(int clk_rate, int *htsmin, int *vtsmin,
 			    int fps_numerator, int fps_denominator,
-			    u8 *r3003, u8 *r3004)
+			    struct ov1063x_pll_config *cfg)
 {
 	int pre_divs[] = { 2, 3, 4, 6, 8, 10, 12, 14 };
 	int pclk;
@@ -677,8 +684,9 @@ static int ov1063x_get_pclk(int clk_rate, int *htsmin, int *vtsmin,
 	}
 
 	/* register contents */
-	*r3003 = (u8)best_j;
-	*r3004 = ((u8)best_i << 4) | (u8)best_k;
+	cfg->mult = best_j;
+	cfg->pre_div = best_i;
+	cfg->div = best_k;
 
 	/* Did we get a valid PCLK? */
 	if (best_pclk == INT_MAX)
@@ -735,10 +743,10 @@ static int ov1063x_isp_reset(struct ov1063x_priv *priv, bool reset)
 /* Setup registers according to resolution and color encoding */
 static int ov1063x_set_params(struct ov1063x_priv *priv)
 {
+	struct ov1063x_pll_config pll_cfg;
 	int pclk;
 	int hts, vts;
 	u32 val;
-	u8 r3003, r3004;
 	int tmp;
 	u32 height_pre_subsample;
 	u32 width_pre_subsample;
@@ -792,18 +800,21 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	/* Get the best PCLK & adjust hts,vts accordingly */
 	pclk = ov1063x_get_pclk(priv->clk_rate, &hts, &vts,
 				priv->fps_numerator, priv->fps_denominator,
-				&r3003, &r3004);
+				&pll_cfg);
 	if (pclk < 0)
 		return -EINVAL;
+
 	dev_dbg(priv->dev, "pclk=%d, hts=%d, vts=%d\n", pclk, hts, vts);
-	dev_dbg(priv->dev, "r3003=0x%X r3004=0x%X\n", r3003, r3004);
+	dev_dbg(priv->dev, "PLL pre-div %u mult %u div %u\n",
+		pll_cfg.pre_div, pll_cfg.mult, pll_cfg.div);
 
 	/* Reset the ISP. */
 	ret = ov1063x_isp_reset(priv, true);
 
 	/* Set PLL */
-	ov1063x_write(priv, OV1063X_SC_CMMN_PLL_CTRL0, r3003, &ret);
-	ov1063x_write(priv, OV1063X_SC_CMMN_PLL_CTRL1, r3004, &ret);
+	ov1063x_write(priv, OV1063X_SC_CMMN_PLL_CTRL0, pll_cfg.mult, &ret);
+	ov1063x_write(priv, OV1063X_SC_CMMN_PLL_CTRL1,
+		      (pll_cfg.pre_div << 4) | pll_cfg.div, &ret);
 
 	/* Set HSYNC */
 	ov1063x_write(priv, OV1063X_DVP_MOD_SEL, 0, &ret);

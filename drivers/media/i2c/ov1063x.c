@@ -1602,13 +1602,6 @@ static int ov1063x_remove(struct i2c_client *client)
 	return 0;
 }
 
-static const struct i2c_device_id ov1063x_id[] = {
-	{ "ov10635", 0 },
-	{ "ov10633", 0 },
-	{ }
-};
-MODULE_DEVICE_TABLE(i2c, ov1063x_id);
-
 static const struct of_device_id ov1063x_dt_id[] = {
 	{ .compatible = "ovti,ov10635" },
 	{ .compatible = "ovti,ov10633" },
@@ -1624,7 +1617,6 @@ static struct i2c_driver ov1063x_i2c_driver = {
 	},
 	.probe_new = ov1063x_probe,
 	.remove = ov1063x_remove,
-	.id_table = ov1063x_id,
 };
 
 module_i2c_driver(ov1063x_i2c_driver);

@@ -497,15 +497,11 @@ static const struct v4l2_area ov1063x_framesizes[] = {
 	},
 };
 
-/*
- * supported color format list
- */
 static const u32 ov1063x_mbus_formats[] = {
 	MEDIA_BUS_FMT_YUYV8_2X8,
 	MEDIA_BUS_FMT_UYVY8_2X8,
 	MEDIA_BUS_FMT_VYUY8_2X8,
 	MEDIA_BUS_FMT_YVYU8_2X8,
-	MEDIA_BUS_FMT_YUYV10_2X10,
 };
 
 static inline struct ov1063x_priv *to_ov1063x(struct v4l2_subdev *sd)

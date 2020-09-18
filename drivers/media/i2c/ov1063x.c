@@ -774,7 +774,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	u32 val;
 	u32 width;
 	u32 height;
-	int ret = 0;
+	int ret;
 
 	width = priv->format.width;
 	height = priv->format.height;

@@ -970,14 +970,9 @@ static const struct i2c_device_id ov1063x_id[] = {
 MODULE_DEVICE_TABLE(i2c, ov1063x_id);
 
 static const struct of_device_id ov1063x_dt_id[] = {
-	{
-		.compatible = "ovti,ov10635", .data = "ov10635"
-	},
-	{
-		.compatible = "ovti,ov10633", .data = "ov10633"
-	},
-	{
-	}
+	{ .compatible = "ovti,ov10635" },
+	{ .compatible = "ovti,ov10633" },
+	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, ov1063x_dt_id);
 

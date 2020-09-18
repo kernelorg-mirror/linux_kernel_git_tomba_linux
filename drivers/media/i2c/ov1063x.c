@@ -84,7 +84,7 @@
 #define OV1063X_SC_CMMN_MISC_CTRL_SCLK_INV	BIT(6)
 #define OV1063X_SC_CMMN_MISC_CTRL_SCLK2X_INV	BIT(5)
 #define OV1063X_SC_CMMN_MISC_CTRL_CEN_GLOBAL_O	BIT(0)
-#define OV1063X_SC_CMMN_CORE_CTRL		OV1063X_REG_8BIT(0x3024)
+#define OV1063X_SC_CMMN_CORE_CTRL_3		OV1063X_REG_8BIT(0x3024)
 #define OV1063X_SC_CMMN_CORE_CTRL_RAW_LONG	(0U << 4)
 #define OV1063X_SC_CMMN_CORE_CTRL_RAW_SHORT	(1U << 4)
 #define OV1063X_SC_CMMN_CORE_CTRL_RAW_LONG_SHORT	(2U << 4)
@@ -219,10 +219,11 @@
 #define	OV1063X_HORIZ_COLORCORRECT		OV1063X_REG_8BIT(0x6900)
 #define OV1063X_HORIZ_COLORCORRECT_ON		BIT(0)
 
-#define OV1063X_MAX_EXP_LONG			OV1063X_REG_16BIT(0xc488)
-#define OV1063X_MAX_EXP_SHORT			OV1063X_REG_16BIT(0xc48a)
-#define OV1063X_SIMPLE_MIN_NUM			OV1063X_REG_16BIT(0xc4cc)
-#define OV1063X_CT_MIN_NUM			OV1063X_REG_16BIT(0xc4ce)
+#define OV1063X_AEC_MAX_EXP_LONG		OV1063X_REG_16BIT(0xc488)
+#define OV1063X_AEC_MAX_EXP_SHORT		OV1063X_REG_16BIT(0xc48a)
+
+#define OV1063X_AWB_SIMPLE_MIN_NUM		OV1063X_REG_16BIT(0xc4cc)
+#define OV1063X_AWB_CT_MIN_NUM			OV1063X_REG_16BIT(0xc4ce)
 
 #define OV1063X_VTS_ADDR			OV1063X_REG_16BIT(0xc518)
 #define OV1063X_HTS_ADDR			OV1063X_REG_16BIT(0xc51a)
@@ -673,15 +674,15 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 
 	ov1063x_write(priv, OV1063X_VFIFO_LINE_LENGTH_MAN, 2 * hts, &ret);
 	ov1063x_write(priv, OV1063X_VFIFO_HSYNC_START_POSITION,
-			2 * (hts - width_pre_subsample), &ret);
+		      2 * (hts - width_pre_subsample), &ret);
 
 	tmp = (vts - 8) * 16;
-	ov1063x_write(priv, OV1063X_MAX_EXP_LONG, tmp, &ret);
-	ov1063x_write(priv, OV1063X_MAX_EXP_SHORT, tmp, &ret);
+	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_LONG, tmp, &ret);
+	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_SHORT, tmp, &ret);
 
 	nr_isp_pixels = sensor_width * (height + 4);
-	ov1063x_write(priv, OV1063X_SIMPLE_MIN_NUM, nr_isp_pixels / 256, &ret);
-	ov1063x_write(priv, OV1063X_CT_MIN_NUM, nr_isp_pixels / 256, &ret);
+	ov1063x_write(priv, OV1063X_AWB_SIMPLE_MIN_NUM, nr_isp_pixels / 256, &ret);
+	ov1063x_write(priv, OV1063X_AWB_CT_MIN_NUM, nr_isp_pixels / 256, &ret);
 	ov1063x_write(priv, OV1063X_REG_16BIT(0xc512), nr_isp_pixels / 16,
 		      &ret);
 

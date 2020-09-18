@@ -737,7 +737,8 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 {
 	int pclk;
 	int hts, vts;
-	u8 r3003, r3004, r4300;
+	u32 val;
+	u8 r3003, r3004;
 	int tmp;
 	u32 height_pre_subsample;
 	u32 width_pre_subsample;
@@ -807,30 +808,29 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	/* Set HSYNC */
 	ov1063x_write(priv, OV1063X_DVP_MOD_SEL, 0, &ret);
 
+	/* Set YUV output format. */
 	switch (priv->format.code) {
 	case MEDIA_BUS_FMT_UYVY8_2X8:
-		r4300 = OV1063X_FORMAT_UYVY;
+		val = OV1063X_FORMAT_UYVY;
 		break;
 	case MEDIA_BUS_FMT_VYUY8_2X8:
-		r4300 = OV1063X_FORMAT_VYUY;
+		val = OV1063X_FORMAT_VYUY;
 		break;
 	case MEDIA_BUS_FMT_YUYV8_2X8:
-		r4300 = OV1063X_FORMAT_YUYV;
+		val = OV1063X_FORMAT_YUYV;
 		break;
 	case MEDIA_BUS_FMT_YVYU8_2X8:
-		r4300 = OV1063X_FORMAT_YYYU;
+		val = OV1063X_FORMAT_YYYU;
 		break;
 	default:
-		r4300 = OV1063X_FORMAT_UYVY;
+		val = OV1063X_FORMAT_UYVY;
 		break;
 	}
 
-	/* Set format to UYVY */
-	ov1063x_write(priv, OV1063X_FORMAT_CTRL00, r4300, &ret);
+	ov1063x_write(priv, OV1063X_FORMAT_CTRL00, val, &ret);
+	dev_dbg(priv->dev, "FORMAT_CTRL00=0x%x\n", val);
 
-	dev_dbg(priv->dev, "r4300=0x%X\n", r4300);
-
-	/* Set output to 8-bit yuv */
+	/* Set output to 8-bit YUV. */
 	ov1063x_write(priv, OV1063X_VFIFO_LLEN_FIRS1_SEL,
 		      OV1063X_VFIFO_LLEN_FIRS1_SEL_8B_YUV, &ret);
 

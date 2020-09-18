@@ -988,6 +988,6 @@ static struct i2c_driver ov1063x_i2c_driver = {
 
 module_i2c_driver(ov1063x_i2c_driver);
 
-MODULE_DESCRIPTION("SoC Camera driver for OmniVision OV10633/OV10635");
+MODULE_DESCRIPTION("Camera Sensor Driver for OmniVision OV10633/OV10635");
 MODULE_AUTHOR("Texas Instruments Inc.");
 MODULE_LICENSE("GPL v2");

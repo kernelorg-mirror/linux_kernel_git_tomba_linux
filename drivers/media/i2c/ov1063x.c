@@ -459,6 +459,7 @@ struct ov1063x_priv {
 	struct gpio_desc		*pwdn_gpio;
 
 	int				model;
+	const char			*name;
 	unsigned long			clk_rate;
 
 	struct v4l2_subdev		subdev;
@@ -1399,7 +1400,6 @@ static const struct dev_pm_ops ov1063x_pm_ops = {
 
 static int ov1063x_detect(struct ov1063x_priv *priv)
 {
-	const char *name;
 	u32 pid, ver;
 	int ret;
 
@@ -1417,18 +1417,18 @@ static int ov1063x_detect(struct ov1063x_priv *priv)
 	switch (pid) {
 	case OV10633_VERSION_REG:
 		priv->model = SENSOR_OV10633;
-		name = "OV10633";
+		priv->name = "ov10633";
 		break;
 	case OV10635_VERSION_REG:
 		priv->model = SENSOR_OV10635;
-		name = "OV10635";
+		priv->name = "ov10635";
 		break;
 	default:
 		dev_err(priv->dev, "Unknown product ID %04x\n", pid);
 		return -ENODEV;
 	}
 
-	dev_info(priv->dev, "%s detected\n", name);
+	dev_dbg(priv->dev, "%s detected\n", priv->name);
 
 	return 0;
 }
@@ -1494,6 +1494,7 @@ static int ov1063x_probe(struct i2c_client *client)
 	/* Initialize the subdev and its controls. */
 	sd = &priv->subdev;
 	v4l2_i2c_subdev_init(sd, client, &ov1063x_subdev_ops);
+	v4l2_i2c_subdev_set_name(sd, client, priv->name, NULL);
 
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
 		     V4L2_SUBDEV_FL_HAS_EVENTS;
@@ -1566,7 +1567,7 @@ static int ov1063x_probe(struct i2c_client *client)
 	if (ret < 0)
 		goto err_pm;
 
-	dev_info(priv->dev, "%s sensor driver registered !!\n", sd->name);
+	dev_info(priv->dev, "%s probed\n", priv->name);
 
 	return 0;
 

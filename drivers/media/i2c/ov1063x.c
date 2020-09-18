@@ -20,13 +20,13 @@
 #include <linux/of.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
+#include <linux/v4l2-mediabus.h>
 #include <linux/videodev2.h>
 
 #include <media/v4l2-common.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-fwnode.h>
-#include <linux/v4l2-mediabus.h>
 #include <media/v4l2-subdev.h>
 
 #include "ov1063x_regs.h"

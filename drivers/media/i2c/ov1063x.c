@@ -64,11 +64,6 @@ enum ov1063x_model {
 #define OV1063X_MAX_WIDTH		1280
 #define OV1063X_MAX_HEIGHT		800
 
-struct ov1063x_framesize {
-	u16 width;
-	u16 height;
-};
-
 struct ov1063x_priv {
 	struct device			*dev;
 
@@ -97,7 +92,7 @@ struct ov1063x_priv {
 	bool				power;
 };
 
-static const struct ov1063x_framesize ov1063x_framesizes[] = {
+static const struct v4l2_area ov1063x_framesizes[] = {
 	{
 		.width		= 1280,
 		.height		= 800,
@@ -554,36 +549,14 @@ static int ov1063x_get_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static void __ov1063x_try_frame_size(struct v4l2_mbus_framefmt *mf)
-{
-	const struct ov1063x_framesize *fsize = &ov1063x_framesizes[0];
-	const struct ov1063x_framesize *match = NULL;
-	int i = ARRAY_SIZE(ov1063x_framesizes);
-	unsigned int min_err = UINT_MAX;
-
-	while (i--) {
-		int err = abs(fsize->width - mf->width)
-				+ abs(fsize->height - mf->height);
-		if (err < min_err) {
-			min_err = err;
-			match = fsize;
-		}
-		fsize++;
-	}
-
-	if (!match)
-		match = &ov1063x_framesizes[0];
-
-	mf->width  = match->width;
-	mf->height = match->height;
-}
-
 static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_pad_config *cfg,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct ov1063x_priv *priv = to_ov1063x(sd);
 	struct v4l2_mbus_framefmt *mf = &fmt->format;
+	const struct v4l2_area *fsize;
+	unsigned int i;
 	int ret = 0;
 
 	for (i = 0; i < ARRAY_SIZE(ov1063x_mbus_formats); ++i) {
@@ -594,7 +567,11 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 	if (i == ARRAY_SIZE(ov1063x_mbus_formats))
 		mf->code = ov1063x_mbus_formats[0];
 
-	__ov1063x_try_frame_size(mf);
+	fsize = v4l2_find_nearest_size(ov1063x_framesizes,
+				       ARRAY_SIZE(ov1063x_framesizes),
+				       width, height, mf->width, mf->height);
+	mf->width = fsize->width;
+	mf->height = fsize->height;
 
 	mf->colorspace = V4L2_COLORSPACE_SMPTE170M;
 	mf->field = V4L2_FIELD_NONE;

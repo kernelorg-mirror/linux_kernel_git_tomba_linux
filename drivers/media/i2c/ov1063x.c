@@ -760,8 +760,7 @@ static int ov1063x_isp_reset(struct ov1063x_priv *priv, bool reset)
 	return ret;
 }
 
-/* Setup registers according to resolution and color encoding */
-static int ov1063x_set_params(struct ov1063x_priv *priv)
+static int ov1063x_configure(struct ov1063x_priv *priv)
 {
 	struct ov1063x_pll_config pll_cfg;
 	unsigned int width_pre_subsample;
@@ -1068,7 +1067,7 @@ static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 	if (ret < 0)
 		goto done;
 
-	ret = ov1063x_set_params(priv);
+	ret = ov1063x_configure(priv);
 	if (ret < 0)
 		goto done;
 

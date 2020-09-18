@@ -724,46 +724,6 @@ static void ov1063x_set_power(struct i2c_client *client, bool on)
 	priv->power = on;
 }
 
-static int ov1063x_video_probe(struct i2c_client *client)
-{
-	struct ov1063x_priv *priv = to_ov1063x(client);
-	struct regmap *map = priv->regmap;
-	u32 pid, ver;
-	int ret;
-
-	ov1063x_set_power(client, true);
-
-	ret = ov1063x_set_regs(client, ov1063x_regs_default,
-			       ARRAY_SIZE(ov1063x_regs_default));
-	if (ret)
-		return ret;
-
-	usleep_range(500, 510);
-
-	/* check and show product ID and manufacturer ID */
-	ret = regmap_read(map, OV1063X_PID, &pid);
-	if (ret)
-		return ret;
-
-	ret = regmap_read(map, OV1063X_VER, &ver);
-	if (ret)
-		return ret;
-
-	if (OV1063X_VERSION(pid, ver) == OV10635_VERSION_REG) {
-		priv->model = SENSOR_OV10635;
-	} else if (OV1063X_VERSION(pid, ver) == OV10633_VERSION_REG) {
-		priv->model = SENSOR_OV10633;
-	} else {
-		dev_err(&client->dev, "Product ID error %x:%x\n", pid, ver);
-		return -ENODEV;
-	}
-
-	dev_info(&client->dev, "ov1063x Product ID %x Manufacturer ID %x\n",
-		 pid, ver);
-
-	return 0;
-}
-
 /*
  * V4L2 subdev internal operations
  */
@@ -815,14 +775,61 @@ static struct v4l2_subdev_ops ov1063x_subdev_ops = {
 	.pad	= &ov1063x_subdev_pad_ops,
 };
 
+/* -----------------------------------------------------------------------------
+ * I2C Driver, Probe & Remove
+ */
+
+static int ov1063x_detect(struct i2c_client *client)
+{
+	struct ov1063x_priv *priv = to_ov1063x(client);
+	struct regmap *map = priv->regmap;
+	const char *name;
+	u32 pid, ver;
+	int ret;
+
+	ov1063x_set_power(client, true);
+
+	ret = ov1063x_set_regs(client, ov1063x_regs_default,
+			       ARRAY_SIZE(ov1063x_regs_default));
+	if (ret)
+		return ret;
+
+	usleep_range(500, 510);
+
+	/* Read and check the product ID. */
+	ret = regmap_read(map, OV1063X_PID, &pid);
+	if (ret)
+		return ret;
+
+	ret = regmap_read(map, OV1063X_VER, &ver);
+	if (ret)
+		return ret;
+
+	pid = OV1063X_VERSION(pid, ver);
+
+	switch (pid) {
+	case OV10633_VERSION_REG:
+		priv->model = SENSOR_OV10633;
+		name = "OV10633";
+		break;
+	case OV10635_VERSION_REG:
+		priv->model = SENSOR_OV10635;
+		name = "OV10635";
+		break;
+	default:
+		dev_err(&client->dev, "Unknown product ID %04x\n", pid);
+		return -ENODEV;
+	}
+
+	dev_info(&client->dev, "%s detected\n", name);
+
+	return 0;
+}
+
 static const struct regmap_config ov1063x_regmap_config = {
 	.reg_bits = 16,
 	.val_bits = 8,
 };
-
-/*
- * i2c_driver function
- */
 
 static int ov1063x_probe(struct i2c_client *client)
 {
@@ -878,7 +885,7 @@ static int ov1063x_probe(struct i2c_client *client)
 	if (ret < 0)
 		goto err_mutex;
 
-	ret = ov1063x_video_probe(client);
+	ret = ov1063x_detect(client);
 	if (ret)
 		goto err_clock;
 

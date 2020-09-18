@@ -757,7 +757,6 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	struct ov1063x_pll_config pll_cfg;
 	unsigned int hts, vts;
 	u32 val;
-	int tmp;
 	u32 height_pre_subsample;
 	u32 width_pre_subsample;
 	u8 horiz_crop_mode;
@@ -867,10 +866,10 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 		      (pll_cfg.clk_out + 961500) / 1923000, &ret);
 
 	/* Vertical cropping */
-	tmp = ((OV1063X_SENSOR_HEIGHT - height_pre_subsample) / 2) & ~0x1;
-	ov1063x_write(priv, OV1063X_TIMING_Y_START_ADDR, tmp, &ret);
-	tmp = tmp + height_pre_subsample + 3;
-	ov1063x_write(priv, OV1063X_TIMING_Y_END_ADDR, tmp, &ret);
+	val = ((OV1063X_SENSOR_HEIGHT - height_pre_subsample) / 2) & ~0x1;
+	ov1063x_write(priv, OV1063X_TIMING_Y_START_ADDR, val, &ret);
+	val += height_pre_subsample + 3;
+	ov1063x_write(priv, OV1063X_TIMING_Y_END_ADDR, val, &ret);
 
 	dev_dbg(priv->dev, "width x height = %x x %x\n", width, height);
 	/* Output size */
@@ -899,9 +898,9 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	ov1063x_write(priv, OV1063X_VFIFO_HSYNC_START_POSITION,
 		      2 * (hts - width_pre_subsample), &ret);
 
-	tmp = (vts - 8) * 16;
-	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_LONG, tmp, &ret);
-	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_SHORT, tmp, &ret);
+	val = (vts - 8) * 16;
+	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_LONG, val, &ret);
+	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_SHORT, val, &ret);
 
 	nr_isp_pixels = sensor_width * (height + 4);
 	ov1063x_write(priv, OV1063X_AWB_SIMPLE_MIN_NUM, nr_isp_pixels / 256, &ret);

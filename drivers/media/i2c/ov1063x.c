@@ -802,44 +802,14 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	dev_dbg(priv->dev, "PLL pre-div %u mult %u div %u\n",
 		pll_cfg.pre_div, pll_cfg.mult, pll_cfg.div);
 
-	/* Reset the ISP. */
+	/* Reset the ISP and configure the PLL. */
 	ret = ov1063x_isp_reset(priv, true);
 
-	/* Set PLL */
 	ov1063x_write(priv, OV1063X_SC_CMMN_PLL_CTRL0, pll_cfg.mult, &ret);
 	ov1063x_write(priv, OV1063X_SC_CMMN_PLL_CTRL1,
 		      (pll_cfg.pre_div << 4) | pll_cfg.div, &ret);
 
-	/* Set HSYNC */
-	ov1063x_write(priv, OV1063X_DVP_MOD_SEL, 0, &ret);
-
-	/* Set YUV output format. */
-	switch (priv->format.code) {
-	case MEDIA_BUS_FMT_UYVY8_2X8:
-		val = OV1063X_FORMAT_UYVY;
-		break;
-	case MEDIA_BUS_FMT_VYUY8_2X8:
-		val = OV1063X_FORMAT_VYUY;
-		break;
-	case MEDIA_BUS_FMT_YUYV8_2X8:
-		val = OV1063X_FORMAT_YUYV;
-		break;
-	case MEDIA_BUS_FMT_YVYU8_2X8:
-		val = OV1063X_FORMAT_YYYU;
-		break;
-	default:
-		val = OV1063X_FORMAT_UYVY;
-		break;
-	}
-
-	ov1063x_write(priv, OV1063X_FORMAT_CTRL00, val, &ret);
-	dev_dbg(priv->dev, "FORMAT_CTRL00=0x%x\n", val);
-
-	/* Set output to 8-bit YUV. */
-	ov1063x_write(priv, OV1063X_VFIFO_LLEN_FIRS1_SEL,
-		      OV1063X_VFIFO_LLEN_FIRS1_SEL_8B_YUV, &ret);
-
-	/* Analog cropping. */
+	/* Analog array configuration (including horizontal cropping) */
 	switch (priv->analog_crop.width) {
 	case OV1063X_SENSOR_WIDTH:
 	default:
@@ -858,13 +828,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 
 	ov1063x_write(priv, OV1063X_ANA_ARRAY1, h_crop_mode, &ret);
 
-	ov1063x_write(priv, OV1063X_TIMING_Y_START_ADDR,
-		      priv->analog_crop.top, &ret);
-	ov1063x_write(priv, OV1063X_TIMING_Y_END_ADDR,
-		      priv->analog_crop.top + priv->analog_crop.height + 3,
-		      &ret);
-
-
+	/* Sensor configuration */
 	ov1063x_write(priv, OV1063X_SENSOR_RSTGOLOW,
 		      (pll_cfg.clk_out + 1500000) / 3000000, &ret);
 	ov1063x_write(priv, OV1063X_SENSOR_HLDWIDTH,
@@ -872,45 +836,22 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	ov1063x_write(priv, OV1063X_SENSOR_TXWIDTH,
 		      (pll_cfg.clk_out + 961500) / 1923000, &ret);
 
-	dev_dbg(priv->dev, "width x height = %x x %x\n", width, height);
-	/* Output size */
-	ov1063x_write(priv, OV1063X_TIMING_X_OUTPUT_SIZE, width, &ret);
-	ov1063x_write(priv, OV1063X_TIMING_Y_OUTPUT_SIZE, height, &ret);
+	/* Timings (including cropping) */
+	ov1063x_write(priv, OV1063X_TIMING_Y_START_ADDR,
+		      priv->analog_crop.top, &ret);
+	ov1063x_write(priv, OV1063X_TIMING_Y_END_ADDR,
+		      priv->analog_crop.top + priv->analog_crop.height + 3,
+		      &ret);
 
+	dev_dbg(priv->dev, "width x height = %x x %x\n", width, height);
 	dev_dbg(priv->dev, "hts x vts = %x x %x\n", hts, vts);
 
+	ov1063x_write(priv, OV1063X_TIMING_X_OUTPUT_SIZE, width, &ret);
+	ov1063x_write(priv, OV1063X_TIMING_Y_OUTPUT_SIZE, height, &ret);
 	ov1063x_write(priv, OV1063X_TIMING_HTS, hts, &ret);
 	ov1063x_write(priv, OV1063X_TIMING_VTS, vts, &ret);
 
-	if (ret < 0)
-		return ret;
-
-	if (height <= 400) {
-		ret = ov1063x_write_array(priv, ov1063x_regs_vert_sub2,
-					  ARRAY_SIZE(ov1063x_regs_vert_sub2));
-	} else {
-		ret = ov1063x_write_array(priv, ov1063x_regs_vert_no_sub,
-					  ARRAY_SIZE(ov1063x_regs_vert_no_sub));
-	}
-	if (ret)
-		return ret;
-
-	width_pre_subsample = width <= 640 ? width * 2 : width;
-	ov1063x_write(priv, OV1063X_VFIFO_LINE_LENGTH_MAN, 2 * hts, &ret);
-	ov1063x_write(priv, OV1063X_VFIFO_HSYNC_START_POSITION,
-		      2 * (hts - width_pre_subsample), &ret);
-
-	val = (vts - 8) * 16;
-	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_LONG, val, &ret);
-	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_SHORT, val, &ret);
-
-	nr_isp_pixels = priv->analog_crop.width * (height + 4);
-	ov1063x_write(priv, OV1063X_AWB_SIMPLE_MIN_NUM, nr_isp_pixels / 256, &ret);
-	ov1063x_write(priv, OV1063X_AWB_CT_MIN_NUM, nr_isp_pixels / 256, &ret);
-	ov1063x_write(priv, OV1063X_REG_16BIT(0xc512), nr_isp_pixels / 16,
-		      &ret);
-
-	/* Horizontal sub-sampling */
+	/* ISP sub-sampling */
 	if (width <= 640) {
 		ov1063x_write(priv, OV1063X_ISP_RW05, OV1063X_ISP_RW05_SUB_AVG |
 			      OV1063X_ISP_RW05_SUB_ENABLE, &ret);
@@ -921,12 +862,65 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 		ov1063x_write(priv, OV1063X_SC_CMMN_PCLK_DIV_CTRL, 1, &ret);
 	}
 
+	if (ret < 0)
+		return ret;
+
+	if (height <= 400)
+		ret = ov1063x_write_array(priv, ov1063x_regs_vert_sub2,
+					  ARRAY_SIZE(ov1063x_regs_vert_sub2));
+	else
+		ret = ov1063x_write_array(priv, ov1063x_regs_vert_no_sub,
+					  ARRAY_SIZE(ov1063x_regs_vert_no_sub));
+
+	/* AEC & AWB */
+	val = (vts - 8) * 16;
+	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_LONG, val, &ret);
+	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_SHORT, val, &ret);
+
+	nr_isp_pixels = priv->analog_crop.width * (height + 4);
+	ov1063x_write(priv, OV1063X_AWB_SIMPLE_MIN_NUM, nr_isp_pixels / 256, &ret);
+	ov1063x_write(priv, OV1063X_AWB_CT_MIN_NUM, nr_isp_pixels / 256, &ret);
+	ov1063x_write(priv, OV1063X_REG_16BIT(0xc512), nr_isp_pixels / 16,
+		      &ret);
+
 	ov1063x_write(priv, OV1063X_VTS_ADDR, vts, &ret);
 	ov1063x_write(priv, OV1063X_HTS_ADDR, hts, &ret);
+
+	/* FIFO */
+	ov1063x_write(priv, OV1063X_VFIFO_LLEN_FIRS1_SEL,
+		      OV1063X_VFIFO_LLEN_FIRS1_SEL_8B_YUV, &ret);
+	width_pre_subsample = width <= 640 ? width * 2 : width;
+	ov1063x_write(priv, OV1063X_VFIFO_LINE_LENGTH_MAN, 2 * hts, &ret);
+	ov1063x_write(priv, OV1063X_VFIFO_HSYNC_START_POSITION,
+		      2 * (hts - width_pre_subsample), &ret);
+
+	/* Output interface (DVP). */
+	switch (priv->format.code) {
+	case MEDIA_BUS_FMT_UYVY8_2X8:
+		val = OV1063X_FORMAT_UYVY;
+		break;
+	case MEDIA_BUS_FMT_VYUY8_2X8:
+		val = OV1063X_FORMAT_VYUY;
+		break;
+	case MEDIA_BUS_FMT_YUYV8_2X8:
+		val = OV1063X_FORMAT_YUYV;
+		break;
+	case MEDIA_BUS_FMT_YVYU8_2X8:
+		val = OV1063X_FORMAT_YYYU;
+		break;
+	default:
+		val = OV1063X_FORMAT_UYVY;
+		break;
+	}
+
+	dev_dbg(priv->dev, "FORMAT_CTRL00=0x%x\n", val);
+	ov1063x_write(priv, OV1063X_FORMAT_CTRL00, val, &ret);
+	ov1063x_write(priv, OV1063X_DVP_MOD_SEL, 0, &ret);
 
 	if (ret)
 		return ret;
 
+	/* Take the ISP out of reset. */
 	return ov1063x_isp_reset(priv, false);
 }
 

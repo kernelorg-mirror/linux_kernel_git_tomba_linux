@@ -72,32 +72,29 @@ struct ov1063x_framesize {
 struct ov1063x_priv {
 	struct device			*dev;
 
-	struct v4l2_subdev		subdev;
-	struct v4l2_ctrl_handler	hdl;
-	struct media_pad		pad;
+	struct regmap			*regmap;
+	struct clk			*clk;
+	struct gpio_desc		*reset_gpio;
+	struct gpio_desc		*pwdn_gpio;
+
 	int				model;
 	unsigned long			clk_rate;
+
+	struct v4l2_subdev		subdev;
+	struct media_pad		pad;
+
+	struct v4l2_ctrl_handler	hdl;
+	struct v4l2_ctrl		*colorbar;
+
 	/* Protects the struct fields below */
-	struct mutex lock;
+	struct mutex			lock;
 
 	int				fps_numerator;
 	int				fps_denominator;
 	struct v4l2_mbus_framefmt	format;
 	int				width;
 	int				height;
-
-	struct regmap			*regmap;
-
-	/* Sensor reference clock */
-	struct clk			*clk;
-
 	bool				power;
-
-	/* GPIOs */
-	struct gpio_desc		*reset_gpio;
-	struct gpio_desc		*pwdn_gpio;
-
-	struct v4l2_ctrl		*colorbar;
 };
 
 static const struct ov1063x_framesize ov1063x_framesizes[] = {

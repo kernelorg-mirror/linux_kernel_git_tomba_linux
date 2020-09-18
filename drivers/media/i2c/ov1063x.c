@@ -371,19 +371,11 @@ static int ov1063x_write_array(struct ov1063x_priv *priv,
 			       const struct ov1063x_reg *regs,
 			       unsigned int nr_regs)
 {
-	struct i2c_client *client = to_i2c_client(priv->dev);
 	unsigned int i;
 	int ret;
-	u8 val;
 
 	for (i = 0; i < nr_regs; i++) {
-		if (regs[i].reg == OV1063X_SC_CMMN_SCCB_ID)
-			val = OV1063X_SC_CMMN_SCCB_ID_ADDR(client->addr)
-			    | OV1063X_SC_CMMN_SCCB_ID_SEL;
-		else
-			val = regs[i].val;
-
-		ret = ov1063x_write(priv, regs[i].reg, val, NULL);
+		ret = ov1063x_write(priv, regs[i].reg, regs[i].val, NULL);
 		if (ret)
 			return ret;
 	}
@@ -998,10 +990,36 @@ static struct v4l2_subdev_ops ov1063x_subdev_ops = {
 
 static int ov1063x_power_on_init(struct ov1063x_priv *priv)
 {
+	struct i2c_client *client = to_i2c_client(priv->dev);
+	unsigned int i;
 	int ret;
+
+	ret = ov1063x_write(priv, OV1063X_SOFTWARE_RESET, 0x01, NULL);
+	if (ret < 0)
+		return ret;
+
+	ret = ov1063x_isp_reset(priv, true);
+	if (ret < 0)
+		return ret;
+
+	/*
+	 * Why the I2C address has to be written 23 times (or, actually, at
+	 * all) is unknown. This may not be required.
+	 */
+	for (i = 0; i < 23; ++i) {
+		ret = ov1063x_write(priv, OV1063X_SC_CMMN_SCCB_ID,
+				    OV1063X_SC_CMMN_SCCB_ID_ADDR(client->addr) |
+				    OV1063X_SC_CMMN_SCCB_ID_SEL, NULL);
+		if (ret < 0)
+			return ret;
+	}
 
 	ret = ov1063x_write_array(priv, ov1063x_regs_default,
 				  ARRAY_SIZE(ov1063x_regs_default));
+	if (ret < 0)
+		return ret;
+
+	ret = ov1063x_isp_reset(priv, false);
 	if (ret < 0)
 		return ret;
 

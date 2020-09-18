@@ -1280,7 +1280,7 @@ static const struct v4l2_subdev_pad_ops ov1063x_subdev_pad_ops = {
 	.set_fmt		= ov1063x_set_fmt,
 };
 
-static struct v4l2_subdev_ops ov1063x_subdev_ops = {
+static const struct v4l2_subdev_ops ov1063x_subdev_ops = {
 	.core	= &ov1063x_subdev_core_ops,
 	.video	= &ov1063x_subdev_video_ops,
 	.pad	= &ov1063x_subdev_pad_ops,

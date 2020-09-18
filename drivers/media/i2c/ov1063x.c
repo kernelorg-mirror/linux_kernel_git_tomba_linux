@@ -79,7 +79,7 @@ struct ov1063x_priv {
 	struct v4l2_ctrl_handler	hdl;
 	struct media_pad		pad;
 	int				model;
-	int				xvclk_rate;
+	unsigned long			clk_rate;
 	/* Protects the struct fields below */
 	struct mutex lock;
 
@@ -92,7 +92,7 @@ struct ov1063x_priv {
 	struct regmap			*regmap;
 
 	/* Sensor reference clock */
-	struct clk			*xvclk;
+	struct clk			*clk;
 
 	bool				power;
 
@@ -232,14 +232,14 @@ static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
 
 /*
  * Get the best pixel clock (pclk) that meets minimum hts/vts requirements.
- * xvclk_rate => pre-divider => clk1 => multiplier => clk2 => post-divider
+ * clk_rate => pre-divider => clk1 => multiplier => clk2 => post-divider
  * => pclk
  * We try all valid combinations of settings for the 3 blocks to get the pixel
  * clock, and from that calculate the actual hts/vts to use. The vts is
  * extended so as to achieve the required frame rate. The function also returns
  * the PLL register contents needed to set the pixel clock.
  */
-static int ov1063x_get_pclk(int xvclk_rate, int *htsmin, int *vtsmin,
+static int ov1063x_get_pclk(int clk_rate, int *htsmin, int *vtsmin,
 			    int fps_numerator, int fps_denominator,
 			    u8 *r3003, u8 *r3004)
 {
@@ -254,7 +254,7 @@ static int ov1063x_get_pclk(int xvclk_rate, int *htsmin, int *vtsmin,
 
 	/* Pre-div, reg 0x3004, bits 6:4 */
 	for (i = 0; i < ARRAY_SIZE(pre_divs); i++) {
-		clk1 = (xvclk_rate / pre_divs[i]) * 2;
+		clk1 = (clk_rate / pre_divs[i]) * 2;
 
 		if (clk1 < 3000000 || clk1 > 27000000)
 			continue;
@@ -391,7 +391,7 @@ static int ov1063x_set_params(struct i2c_client *client, u32 width, u32 height)
 		priv->fps_numerator, priv->fps_denominator, hts, vts);
 
 	/* Get the best PCLK & adjust hts,vts accordingly */
-	pclk = ov1063x_get_pclk(priv->xvclk_rate, &hts, &vts,
+	pclk = ov1063x_get_pclk(priv->clk_rate, &hts, &vts,
 				priv->fps_numerator, priv->fps_denominator,
 				&r3003, &r3004);
 	if (pclk < 0)
@@ -858,24 +858,23 @@ static int ov1063x_probe(struct i2c_client *client)
 		goto err_mutex;
 	}
 
-	priv->xvclk = devm_clk_get(&client->dev, "xvclk");
-	if (IS_ERR(priv->xvclk)) {
-		dev_err(&client->dev, "xvclk reference is missing!\n");
-		ret = PTR_ERR(priv->xvclk);
+	priv->clk = devm_clk_get(&client->dev, "xvclk");
+	if (IS_ERR(priv->clk)) {
+		ret = PTR_ERR(priv->clk);
+		dev_err(&client->dev, "Failed to get xvclk clock: %d\n", ret);
 		goto err_mutex;
 	}
 
-	priv->xvclk_rate = clk_get_rate(priv->xvclk);
-	dev_dbg(&client->dev, "xvclk_rate: %d (Hz)\n", priv->xvclk_rate);
+	priv->clk_rate = clk_get_rate(priv->clk);
+	dev_dbg(&client->dev, "xvclk rate: %lu Hz\n", priv->clk_rate);
 
-	if (priv->xvclk_rate < 6000000 ||
-	    priv->xvclk_rate > 27000000) {
+	if (priv->clk_rate < 6000000 || priv->clk_rate > 27000000) {
 		ret = -EINVAL;
 		goto err_mutex;
 	}
 
 	/* Enable the clock and detect the device. */
-	ret = clk_prepare_enable(priv->xvclk);
+	ret = clk_prepare_enable(priv->clk);
 	if (ret < 0)
 		goto err_mutex;
 
@@ -939,7 +938,7 @@ err_media:
 err_ctrls:
 	v4l2_ctrl_handler_free(&priv->hdl);
 err_clock:
-	clk_disable_unprepare(priv->xvclk);
+	clk_disable_unprepare(priv->clk);
 err_mutex:
 	mutex_destroy(&priv->lock);
 	return ret;
@@ -954,7 +953,7 @@ static int ov1063x_remove(struct i2c_client *client)
 	mutex_destroy(&priv->lock);
 	media_entity_cleanup(&priv->subdev.entity);
 	ov1063x_set_power(client, false);
-	clk_disable_unprepare(priv->xvclk);
+	clk_disable_unprepare(priv->clk);
 
 	return 0;
 }

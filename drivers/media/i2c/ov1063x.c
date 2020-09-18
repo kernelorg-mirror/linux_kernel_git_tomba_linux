@@ -173,9 +173,9 @@ static int ov1063x_regmap_write16(struct regmap *map, u16 reg, u16 val)
 	return regmap_write(map, reg + 1, val & 0xff);
 }
 
-static int ov1063x_set_regs(struct ov1063x_priv *priv,
-			    const struct ov1063x_reg *regs,
-			    unsigned int nr_regs)
+static int ov1063x_write_array(struct ov1063x_priv *priv,
+			       const struct ov1063x_reg *regs,
+			       unsigned int nr_regs)
 {
 	struct i2c_client *client = to_i2c_client(priv->dev);
 	struct regmap *map = priv->regmap;
@@ -247,7 +247,7 @@ static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
 			n_regs = ARRAY_SIZE(ov1063x_regs_colorbar_disable);
 			regs = ov1063x_regs_colorbar_disable;
 		}
-		return ov1063x_set_regs(priv, regs, n_regs);
+		return ov1063x_write_array(priv, regs, n_regs);
 	}
 
 	return -EINVAL;
@@ -397,8 +397,8 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 	dev_dbg(priv->dev, "r3003=0x%X r3004=0x%X\n", r3003, r3004);
 
 	/* Disable ISP & program all registers that we might modify */
-	ret = ov1063x_set_regs(priv, ov1063x_regs_change_mode,
-			       ARRAY_SIZE(ov1063x_regs_change_mode));
+	ret = ov1063x_write_array(priv, ov1063x_regs_change_mode,
+				  ARRAY_SIZE(ov1063x_regs_change_mode));
 	if (ret)
 		return ret;
 
@@ -497,8 +497,8 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 		if (ret)
 			return ret;
 		n_regs = ARRAY_SIZE(ov1063x_regs_vert_sub_sample);
-		ret = ov1063x_set_regs(priv, ov1063x_regs_vert_sub_sample,
-				       n_regs);
+		ret = ov1063x_write_array(priv, ov1063x_regs_vert_sub_sample,
+					  n_regs);
 		if (ret)
 			return ret;
 	}
@@ -549,8 +549,8 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 		return ret;
 
 	/* Enable ISP blocks */
-	ret = ov1063x_set_regs(priv, ov1063x_regs_enable,
-			       ARRAY_SIZE(ov1063x_regs_enable));
+	ret = ov1063x_write_array(priv, ov1063x_regs_enable,
+				  ARRAY_SIZE(ov1063x_regs_enable));
 	if (ret)
 		return ret;
 
@@ -781,8 +781,8 @@ static int ov1063x_detect(struct ov1063x_priv *priv)
 
 	ov1063x_set_power(priv, true);
 
-	ret = ov1063x_set_regs(priv, ov1063x_regs_default,
-			       ARRAY_SIZE(ov1063x_regs_default));
+	ret = ov1063x_write_array(priv, ov1063x_regs_default,
+				  ARRAY_SIZE(ov1063x_regs_default));
 	if (ret)
 		return ret;
 

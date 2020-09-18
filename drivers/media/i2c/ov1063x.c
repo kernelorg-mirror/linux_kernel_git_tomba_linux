@@ -64,11 +64,6 @@ enum ov1063x_model {
 #define OV1063X_MAX_WIDTH		1280
 #define OV1063X_MAX_HEIGHT		800
 
-struct ov1063x_color_format {
-	u32 code;
-	u32 colorspace;
-};
-
 struct ov1063x_framesize {
 	u16 width;
 	u16 height;
@@ -133,27 +128,12 @@ static const struct ov1063x_framesize ov1063x_framesizes[] = {
 /*
  * supported color format list
  */
-static const struct ov1063x_color_format ov1063x_cfmts[] = {
-	{
-		.code		= MEDIA_BUS_FMT_YUYV8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
-	},
-	{
-		.code		= MEDIA_BUS_FMT_UYVY8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
-	},
-	{
-		.code		= MEDIA_BUS_FMT_VYUY8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
-	},
-	{
-		.code		= MEDIA_BUS_FMT_YVYU8_2X8,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
-	},
-	{
-		.code		= MEDIA_BUS_FMT_YUYV10_2X10,
-		.colorspace	= V4L2_COLORSPACE_SMPTE170M,
-	},
+static const u32 ov1063x_mbus_formats[] = {
+	MEDIA_BUS_FMT_YUYV8_2X8,
+	MEDIA_BUS_FMT_UYVY8_2X8,
+	MEDIA_BUS_FMT_VYUY8_2X8,
+	MEDIA_BUS_FMT_YVYU8_2X8,
+	MEDIA_BUS_FMT_YUYV10_2X10,
 };
 
 static inline struct ov1063x_priv *to_ov1063x(struct v4l2_subdev *sd)
@@ -549,8 +529,8 @@ static void ov1063x_get_default_format(struct v4l2_mbus_framefmt *mf)
 {
 	mf->width = ov1063x_framesizes[0].width;
 	mf->height = ov1063x_framesizes[0].height;
-	mf->colorspace = ov1063x_cfmts[0].colorspace;
-	mf->code = ov1063x_cfmts[0].code;
+	mf->colorspace = V4L2_COLORSPACE_SMPTE170M;
+	mf->code = ov1063x_mbus_formats[0];
 
 	mf->field = V4L2_FIELD_NONE;
 }
@@ -606,21 +586,21 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct ov1063x_priv *priv = to_ov1063x(sd);
-	int index = ARRAY_SIZE(ov1063x_cfmts);
+	int index = ARRAY_SIZE(ov1063x_mbus_formats);
 	struct v4l2_mbus_framefmt *mf = &fmt->format;
 	int ret = 0;
 
 	__ov1063x_try_frame_size(mf);
 
 	while (--index >= 0)
-		if (ov1063x_cfmts[index].code == mf->code)
+		if (ov1063x_mbus_formats[index] == mf->code)
 			break;
 
 	if (index < 0)
 		return -EINVAL;
 
-	mf->colorspace = ov1063x_cfmts[index].colorspace;
-	mf->code = ov1063x_cfmts[index].code;
+	mf->colorspace = V4L2_COLORSPACE_SMPTE170M;
+	mf->code = ov1063x_mbus_formats[index];
 	mf->field = V4L2_FIELD_NONE;
 
 	mutex_lock(&priv->lock);
@@ -642,10 +622,10 @@ static int ov1063x_enum_mbus_code(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_pad_config *cfg,
 				  struct v4l2_subdev_mbus_code_enum *code)
 {
-	if (code->index >= ARRAY_SIZE(ov1063x_cfmts))
+	if (code->index >= ARRAY_SIZE(ov1063x_mbus_formats))
 		return -EINVAL;
 
-	code->code = ov1063x_cfmts[code->index].code;
+	code->code = ov1063x_mbus_formats[code->index];
 
 	return 0;
 }
@@ -655,16 +635,16 @@ static int ov1063x_enum_frame_sizes(struct v4l2_subdev *sd,
 				    struct v4l2_subdev_pad_config *cfg,
 				    struct v4l2_subdev_frame_size_enum *fse)
 {
-	int i = ARRAY_SIZE(ov1063x_cfmts);
+	int i = ARRAY_SIZE(ov1063x_mbus_formats);
 
 	if (fse->index >= ARRAY_SIZE(ov1063x_framesizes))
 		return -EINVAL;
 
 	while (--i)
-		if (ov1063x_cfmts[i].code == fse->code)
+		if (ov1063x_mbus_formats[i] == fse->code)
 			break;
 
-	fse->code = ov1063x_cfmts[i].code;
+	fse->code = ov1063x_mbus_formats[i];
 
 	fse->min_width  = ov1063x_framesizes[fse->index].width;
 	fse->max_width  = fse->min_width;

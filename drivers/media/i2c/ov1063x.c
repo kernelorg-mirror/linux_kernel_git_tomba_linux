@@ -173,6 +173,33 @@ static int ov1063x_regmap_write16(struct regmap *map, u16 reg, u16 val)
 	return regmap_write(map, reg + 1, val & 0xff);
 }
 
+static int ov1063x_set_regs(struct ov1063x_priv *priv,
+			    const struct ov1063x_reg *regs,
+			    unsigned int nr_regs)
+{
+	struct i2c_client *client = to_i2c_client(priv->dev);
+	struct regmap *map = priv->regmap;
+	unsigned int i;
+	int ret;
+	u8 val;
+
+	for (i = 0; i < nr_regs; i++) {
+		if (regs[i].reg == 0x300c) {
+			val = ((client->addr * 2) | 0x1);
+
+			ret = regmap_write(map, regs[i].reg, val);
+			if (ret)
+				return ret;
+		} else {
+			ret = regmap_write(map, regs[i].reg, regs[i].val);
+			if (ret)
+				return ret;
+		}
+	}
+
+	return 0;
+}
+
 /* Start/Stop streaming from the device */
 static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 {
@@ -186,9 +213,6 @@ static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 
 	return regmap_write(map, 0x301c, enable ? 0xf0 : 0x70);
 }
-
-static int ov1063x_set_regs(struct ov1063x_priv *priv,
-			    const struct ov1063x_reg *regs, int nr_regs);
 
 /* Set status of additional camera capabilities */
 static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
@@ -305,31 +329,6 @@ static int ov1063x_get_pclk(int clk_rate, int *htsmin, int *vtsmin,
 		  fps_numerator * 2);
 
 	return best_pclk;
-}
-
-static int ov1063x_set_regs(struct ov1063x_priv *priv,
-			    const struct ov1063x_reg *regs, int nr_regs)
-{
-	struct i2c_client *client = to_i2c_client(priv->dev);
-	struct regmap *map = priv->regmap;
-	int i, ret;
-	u8 val;
-
-	for (i = 0; i < nr_regs; i++) {
-		if (regs[i].reg == 0x300c) {
-			val = ((client->addr * 2) | 0x1);
-
-			ret = regmap_write(map, regs[i].reg, val);
-			if (ret)
-				return ret;
-		} else {
-			ret = regmap_write(map, regs[i].reg, regs[i].val);
-			if (ret)
-				return ret;
-		}
-	}
-
-	return 0;
 }
 
 /* Setup registers according to resolution and color encoding */

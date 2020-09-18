@@ -464,6 +464,7 @@ struct ov1063x_priv {
 	 */
 	bool				streaming;
 	struct v4l2_rect		analog_crop;
+	struct v4l2_rect		digital_crop;
 	struct v4l2_mbus_framefmt	format;
 
 	unsigned int			fps_numerator;
@@ -827,6 +828,10 @@ static int ov1063x_configure(struct ov1063x_priv *priv)
 	ov1063x_write(priv, OV1063X_TIMING_Y_END_ADDR,
 		      priv->analog_crop.top + priv->analog_crop.height + 3,
 		      &ret);
+	ov1063x_write(priv, OV1063X_TIMING_ISP_X_WIN, priv->digital_crop.left,
+		      &ret);
+	ov1063x_write(priv, OV1063X_TIMING_ISP_Y_WIN, priv->digital_crop.top,
+		      &ret);
 	ov1063x_write(priv, OV1063X_TIMING_X_OUTPUT_SIZE, priv->format.width,
 		      &ret);
 	ov1063x_write(priv, OV1063X_TIMING_Y_OUTPUT_SIZE, priv->format.height,
@@ -1120,12 +1125,22 @@ static int ov1063x_init_cfg(struct v4l2_subdev *sd,
 	format->colorspace = V4L2_COLORSPACE_SMPTE170M;
 
 	if (which == V4L2_SUBDEV_FORMAT_ACTIVE) {
-		priv->analog_crop.width = format->width;
+		/*
+		 * This assumes that ov1063x_mbus_formats[0] doesn't
+		 * sub-sample.
+		 */
+		priv->analog_crop.width = OV1063X_SENSOR_WIDTH;
 		priv->analog_crop.height = format->height;
 		priv->analog_crop.left = ((OV1063X_SENSOR_WIDTH -
 					   priv->analog_crop.width) / 2) & ~1;
 		priv->analog_crop.top = ((OV1063X_SENSOR_HEIGHT -
 					  priv->analog_crop.height) / 2) & ~1;
+
+		priv->digital_crop.width = format->width;
+		priv->digital_crop.height = format->height;
+		priv->digital_crop.left = ((priv->analog_crop.width -
+					    priv->digital_crop.width) / 2) & ~1;
+		priv->digital_crop.top = 0;
 	}
 
 	return 0;
@@ -1226,23 +1241,25 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 	format->height = fsize->height;
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
+		unsigned int hsub;
+		unsigned int vsub;
+
 		/*
 		 * Enable horizontal or vertical sub-sampling automatically when
 		 * the width or height are smaller than half the maximum
 		 * resolution.
 		 */
-		priv->analog_crop.width = format->width <= 640
-					? format->width * 2
-					: format->width;
-		priv->analog_crop.height = format->height <= 400
-					 ? format->height * 2
-					 : format->height;
+		hsub = format->width <= 640 ? 2 : 1;
+		vsub = format->height <= 400 ? 2 : 1;
 
 		/*
 		 * The analog horizontal crop is restricted to the full sensor
 		 * width (1312 pixels), 768 or 656 pixels. Additional cropping
 		 * will be applied in the digital domain.
 		 */
+		priv->analog_crop.width = format->width * hsub;
+		priv->analog_crop.height = format->height * vsub;
+
 		if (priv->analog_crop.width > 768)
 			priv->analog_crop.width = OV1063X_SENSOR_WIDTH;
 		else if (priv->analog_crop.width > 656)
@@ -1251,13 +1268,24 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 			priv->analog_crop.width = 656;
 
 		/*
-		 * Center the crop rectangle, rounding coordinates to a
+		 * The digital crop is applied at the ISP input, before
+		 * horizontal sub-sampling but after vertical sub-sampling as
+		 * the latter is applied in the pixel array.
+		 */
+		priv->digital_crop.width = format->width * hsub;
+		priv->digital_crop.height = format->height;
+
+		/*
+		 * Center the crop rectangles, rounding coordinates to a
 		 * multiple of 2 to avoid changing the Bayer pattern.
 		 */
 		priv->analog_crop.left = ((OV1063X_SENSOR_WIDTH -
 					   priv->analog_crop.width) / 2) & ~1;
 		priv->analog_crop.top = ((OV1063X_SENSOR_HEIGHT -
 					  priv->analog_crop.height) / 2) & ~1;
+		priv->digital_crop.left = ((priv->analog_crop.width -
+					    priv->digital_crop.width) / 2) & ~1;
+		priv->analog_crop.top = 0;
 	}
 
 	fmt->format = *format;

@@ -773,22 +773,24 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	/* Minimum values for HTS anv VTS. */
 	hts = priv->analog_crop.width + 200;
 	vts = priv->analog_crop.height + 50;
-	dev_dbg(priv->dev, "fps=(%u/%u), hts=%u, vts=%u\n",
-		priv->fps_numerator, priv->fps_denominator, hts, vts);
 
-	/* Get the best PCLK and adjust HTS accordingly. */
+	/*
+	 * Get the best PCLK and adjust HTS accordingly. Adjust VTS to get as
+	 * close to the desired frame rate as we can.
+	 */
 	ret = ov1063x_pll_setup(priv->clk_rate, &hts, vts,
 				priv->fps_numerator, priv->fps_denominator,
 				&pll_cfg);
 	if (ret < 0)
 		return -EINVAL;
 
-	/* Adjust VTS to get as close to the desired frame rate as we can. */
 	vts = pll_cfg.clk_out
 	    / (hts * 2 * priv->fps_numerator / priv->fps_denominator);
 
-	dev_dbg(priv->dev, "pclk=%u, hts=%u, vts=%u\n",
-		pll_cfg.clk_out, hts, vts);
+	dev_dbg(priv->dev, "active %ux%u (total %ux%u) %u/%u fps, @%u MP/s\n",
+		priv->format.width, priv->format.height,
+		hts, vts, priv->fps_numerator, priv->fps_denominator,
+		pll_cfg.clk_out);
 	dev_dbg(priv->dev, "PLL pre-div %u mult %u div %u\n",
 		pll_cfg.pre_div, pll_cfg.mult, pll_cfg.div);
 
@@ -832,11 +834,6 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	ov1063x_write(priv, OV1063X_TIMING_Y_END_ADDR,
 		      priv->analog_crop.top + priv->analog_crop.height + 3,
 		      &ret);
-
-	dev_dbg(priv->dev, "width x height = %x x %x\n",
-		priv->format.width, priv->format.height);
-	dev_dbg(priv->dev, "hts x vts = %x x %x\n", hts, vts);
-
 	ov1063x_write(priv, OV1063X_TIMING_X_OUTPUT_SIZE, priv->format.width,
 		      &ret);
 	ov1063x_write(priv, OV1063X_TIMING_Y_OUTPUT_SIZE, priv->format.height,
@@ -907,7 +904,6 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 		break;
 	}
 
-	dev_dbg(priv->dev, "FORMAT_CTRL00=0x%x\n", val);
 	ov1063x_write(priv, OV1063X_FORMAT_CTRL00, val, &ret);
 	ov1063x_write(priv, OV1063X_DVP_MOD_SEL, 0, &ret);
 

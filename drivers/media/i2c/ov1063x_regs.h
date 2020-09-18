@@ -12,7 +12,7 @@ struct ov1063x_reg {
 
 static const struct ov1063x_reg ov1063x_regs_default[] = {
 	/* Register configuration for full resolution : 1280x720 */
-		{0x103, 0x1},	 /** Software Reset */
+		{OV1063X_SOFTWARE_RESET, 0x1},
 		{0x301b, 0xff},  /** System Control Clock Reset #1 */
 		{0x301c, 0xff},  /** System Control Clock Reset #2 */
 		{0x301a, 0xff},  /** System Control Clock Reset #0 */

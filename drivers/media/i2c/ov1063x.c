@@ -30,24 +30,93 @@
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
-#include "ov1063x_regs.h"
-
 /* Register definitions */
-#define	OV1063X_VFLIP			0x381c
-#define	 OV1063X_VFLIP_ON		GENMASK(7, 6)
-#define	 OV1063X_VFLIP_SUBSAMPLE	BIT(0)
-#define	OV1063X_HMIRROR			0x381d
-#define	 OV1063X_HMIRROR_ON		GENMASK(1, 0)
-#define	OV1063X_HORIZ_COLORCORRECT	0x6900
-#define	 OV1063X_HORIZ_COLORCORRECT_ON	BIT(0)
-#define OV1063X_PID			0x300a
-#define OV1063X_VER			0x300b
+#define OV1063X_STREAM_MODE			0x0100
+#define OV1063X_STREAM_MODE_ON			BIT(0)
+#define OV1063X_SOFTWARE_RESET			0x0103
 
-#define OV1063X_FORMAT_CTRL00		0x4300
-#define   OV1063X_FORMAT_YUYV		0x38
-#define   OV1063X_FORMAT_YYYU		0x39
-#define   OV1063X_FORMAT_UYVY		0x3A
-#define   OV1063X_FORMAT_VYUY		0x3B
+#define OV1063X_SC_CMMN_PLL_CTRL0		0x3003
+#define OV1063X_SC_CMMN_PLL_CTRL1		0x3004
+#define OV1063X_SC_CMMN_PCLK_DIV_CTRL		0x3007
+#define OV1063X_PID				0x300a
+#define OV1063X_VER				0x300b
+#define OV1063X_SC_CMMN_SCCB_ID			0x300c
+#define OV1063X_SC_CMMN_SCCB_ID_ADDR(n)		((n) << 1)
+#define OV1063X_SC_CMMN_SCCB_ID_SEL		BIT(0)
+#define OV1063X_SC_CMMN_CLKRST2			0x301c
+#define OV1063X_SC_CMMN_CLKRST2_PCLK_DVP	BIT(7)
+#define OV1063X_SC_CMMN_CLKRST2_SCLK		GENMASK(6, 4)
+#define OV1063X_SC_CMMN_CLKRST2_RST_DVP		BIT(3)
+#define OV1063X_SC_CMMN_CLKRST2_RST		GENMASK(2, 0)
+
+#define OV1063X_ANA_ARRAY1			0x3621
+#define OV1063X_ANA_ARRAY1_FULL			(0 << 3)
+#define OV1063X_ANA_ARRAY1_CROP_768		(1 << 3)
+#define OV1063X_ANA_ARRAY1_CROP_656		(2 << 3)
+#define OV1063X_ANA_ARRAY1_DELAY(n)		((n) << 0)
+
+#define OV1063X_SENSOR_RSTGOLOW			0x3702
+#define OV1063X_SENSOR_HLDWIDTH			0x3703
+#define OV1063X_SENSOR_TXWIDTH			0x3704
+
+#define OV1063X_TIMING_X_START_ADDR		0x3800
+#define OV1063X_TIMING_Y_START_ADDR		0x3802
+#define OV1063X_TIMING_X_END_ADDR		0x3804
+#define OV1063X_TIMING_Y_END_ADDR		0x3806
+#define OV1063X_TIMING_X_OUTPUT_SIZE		0x3808
+#define OV1063X_TIMING_Y_OUTPUT_SIZE		0x380a
+#define OV1063X_TIMING_HTS			0x380c
+#define OV1063X_TIMING_VTS			0x380e
+
+#define	OV1063X_TIMING_CTRL1C			0x381c
+#define	OV1063X_TIMING_CTRL1C_VFLIP_DIG		BIT(7)
+#define	OV1063X_TIMING_CTRL1C_VFLIP_ARRAY	BIT(6)
+#define	OV1063X_TIMING_CTRL1C_VSUB4		BIT(1)
+#define	OV1063X_TIMING_CTRL1C_VSUB2		BIT(0)
+#define	OV1063X_TIMING_CTRL1D			0x381d
+#define	OV1063X_TIMING_CTRL1D_HFLIP_DIG		BIT(1)
+#define	OV1063X_TIMING_CTRL1D_HFLIP_ARRAY	BIT(0)
+
+#define OV1063X_FORMAT_CTRL00			0x4300
+#define OV1063X_FORMAT_YUYV			0x38
+#define OV1063X_FORMAT_YYYU			0x39
+#define OV1063X_FORMAT_UYVY			0x3a
+#define OV1063X_FORMAT_VYUY			0x3b
+
+#define OV1063X_VFIFO_LLEN_FIRS1_SEL		0x4605
+#define OV1063X_VFIFO_LLEN_FIRS1_SEL_8B_YUV	BIT(3)
+#define OV1063X_VFIFO_LINE_LENGTH_MAN		0x4606
+#define OV1063X_VFIFO_HSYNC_START_POSITION	0x460a
+
+#define OV1063X_DVP_MOD_SEL			0x4700
+#define OV1063X_DVP_MOD_SEL_CCIR_V		BIT(3)
+#define OV1063X_DVP_MOD_SEL_CCIR_F		BIT(2)
+#define OV1063X_DVP_MOD_SEL_CCIR_656		BIT(1)
+#define OV1063X_DVP_MOD_SEL_HSYNC		BIT(0)
+
+#define	OV1063X_ISP_RW05			0x5005
+#define	OV1063X_ISP_RW05_VERT_SUB_EN		BIT(7)	/* Enable vertical subsampling */
+#define	OV1063X_ISP_RW05_LSC_CENTER_AUTO	BIT(6)	/* Set LSC center automatically based on image window */
+#define	OV1063X_ISP_RW05_SUB_OUT_ROW_2ND	BIT(5)	/* Output 2nd (1) or 1st (0) row when skipping */
+#define	OV1063X_ISP_RW05_SUB_OUT_COL_2ND	BIT(4)	/* Output 2nd (1) or 1st (0) column when skipping */
+#define	OV1063X_ISP_RW05_SUB_AVG		BIT(3)	/* Average (1) or sum (0) when binning */
+#define	OV1063X_ISP_RW05_SUB_G_DROP		BIT(2)	/* Skip (1) or bin (0) Green / Y */
+#define	OV1063X_ISP_RW05_SUB_RB_DROP		BIT(1)	/* Skip (1) or bin (0) Red Blue / UV */
+#define	OV1063X_ISP_RW05_SUB_ENABLE		BIT(0)	/* Enable sub-sampling */
+
+#define	OV1063X_HORIZ_COLORCORRECT		0x6900
+#define OV1063X_HORIZ_COLORCORRECT_ON		BIT(0)
+
+#define OV1063X_MAX_EXP_LONG			0xc488
+#define OV1063X_MAX_EXP_SHORT			0xc48a
+
+#define OV1063X_SIMPLE_MIN_NUM			0xc4cc
+#define OV1063X_CT_MIN_NUM			0xc4ce
+
+#define OV1063X_VTS_ADDR			0xc518
+#define OV1063X_HTS_ADDR			0xc51a
+
+#include "ov1063x_regs.h"
 
 /* IDs */
 #define OV10633_VERSION_REG		0xa630
@@ -179,8 +248,9 @@ static int ov1063x_write_array(struct ov1063x_priv *priv,
 	u8 val;
 
 	for (i = 0; i < nr_regs; i++) {
-		if (regs[i].reg == 0x300c) {
-			val = ((client->addr * 2) | 0x1);
+		if (regs[i].reg == OV1063X_SC_CMMN_SCCB_ID) {
+			val = OV1063X_SC_CMMN_SCCB_ID_ADDR(client->addr)
+			    | OV1063X_SC_CMMN_SCCB_ID_SEL;
 
 			ret = regmap_write(map, regs[i].reg, val);
 			if (ret)
@@ -316,13 +386,16 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	/* Horizontal cropping */
 	if (width_pre_subsample > 768) {
 		sensor_width = OV1063X_SENSOR_WIDTH;
-		horiz_crop_mode = 0x63;
+		horiz_crop_mode = 0x60 | OV1063X_ANA_ARRAY1_FULL
+				| OV1063X_ANA_ARRAY1_DELAY(3);
 	} else if (width_pre_subsample > 656) {
 		sensor_width = 768;
-		horiz_crop_mode = 0x6b;
+		horiz_crop_mode = 0x60 | OV1063X_ANA_ARRAY1_CROP_768
+				| OV1063X_ANA_ARRAY1_DELAY(3);
 	} else {
 		sensor_width = 656;
-		horiz_crop_mode = 0x73;
+		horiz_crop_mode = 0x60 | OV1063X_ANA_ARRAY1_CROP_656
+				| OV1063X_ANA_ARRAY1_DELAY(3);
 	}
 
 	/* minimum values for hts and vts */
@@ -347,11 +420,11 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 		return ret;
 
 	/* Set PLL */
-	ov1063x_write8(priv, 0x3003, r3003, &ret);
-	ov1063x_write8(priv, 0x3004, r3004, &ret);
+	ov1063x_write8(priv, OV1063X_SC_CMMN_PLL_CTRL0, r3003, &ret);
+	ov1063x_write8(priv, OV1063X_SC_CMMN_PLL_CTRL1, r3004, &ret);
 
 	/* Set HSYNC */
-	ov1063x_write8(priv, 0x4700, 0x00, &ret);
+	ov1063x_write8(priv, OV1063X_DVP_MOD_SEL, 0, &ret);
 
 	switch (priv->format.code) {
 	case MEDIA_BUS_FMT_UYVY8_2X8:
@@ -377,38 +450,39 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	dev_dbg(priv->dev, "r4300=0x%X\n", r4300);
 
 	/* Set output to 8-bit yuv */
-	ov1063x_write8(priv, 0x4605, 0x08, &ret);
+	ov1063x_write8(priv, OV1063X_VFIFO_LLEN_FIRS1_SEL,
+		       OV1063X_VFIFO_LLEN_FIRS1_SEL_8B_YUV, &ret);
 
 	/* Horizontal cropping */
-	ov1063x_write8(priv, 0x3621, horiz_crop_mode, &ret);
+	ov1063x_write8(priv, OV1063X_ANA_ARRAY1, horiz_crop_mode, &ret);
 
-	ov1063x_write8(priv, 0x3702, (pclk + 1500000) / 3000000, &ret);
-	ov1063x_write8(priv, 0x3703, (pclk + 666666) / 1333333, &ret);
-	ov1063x_write8(priv, 0x3704, (pclk + 961500) / 1923000, &ret);
+	ov1063x_write8(priv, OV1063X_SENSOR_RSTGOLOW, (pclk + 1500000) / 3000000, &ret);
+	ov1063x_write8(priv, OV1063X_SENSOR_HLDWIDTH, (pclk + 666666) / 1333333, &ret);
+	ov1063x_write8(priv, OV1063X_SENSOR_TXWIDTH, (pclk + 961500) / 1923000, &ret);
 
 	/* Vertical cropping */
 	tmp = ((OV1063X_SENSOR_HEIGHT - height_pre_subsample) / 2) & ~0x1;
-	ov1063x_write16(priv, 0x3802, tmp, &ret);
+	ov1063x_write16(priv, OV1063X_TIMING_Y_START_ADDR, tmp, &ret);
 	tmp = tmp + height_pre_subsample + 3;
-	ov1063x_write16(priv, 0x3806, tmp, &ret);
+	ov1063x_write16(priv, OV1063X_TIMING_Y_END_ADDR, tmp, &ret);
 
 	dev_dbg(priv->dev, "width x height = %x x %x\n", width, height);
 	/* Output size */
-	ov1063x_write16(priv, 0x3808, width, &ret);
-	ov1063x_write16(priv, 0x380a, height, &ret);
+	ov1063x_write16(priv, OV1063X_TIMING_X_OUTPUT_SIZE, width, &ret);
+	ov1063x_write16(priv, OV1063X_TIMING_Y_OUTPUT_SIZE, height, &ret);
 
 	dev_dbg(priv->dev, "hts x vts = %x x %x\n", hts, vts);
 
-	ov1063x_write16(priv, 0x380c, hts, &ret);
-	ov1063x_write16(priv, 0x380e, vts, &ret);
+	ov1063x_write16(priv, OV1063X_TIMING_HTS, hts, &ret);
+	ov1063x_write16(priv, OV1063X_TIMING_VTS, vts, &ret);
 
 	if (ret < 0)
 		return ret;
 
 	if (vert_sub_sample) {
-		ret = regmap_update_bits(priv->regmap, OV1063X_VFLIP,
-					 OV1063X_VFLIP_SUBSAMPLE,
-					 OV1063X_VFLIP_SUBSAMPLE);
+		ret = regmap_update_bits(priv->regmap, OV1063X_TIMING_CTRL1C,
+					 OV1063X_TIMING_CTRL1C_VSUB2,
+					 OV1063X_TIMING_CTRL1C_VSUB2);
 		if (ret)
 			return ret;
 		n_regs = ARRAY_SIZE(ov1063x_regs_vert_sub_sample);
@@ -418,26 +492,28 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 			return ret;
 	}
 
-	ov1063x_write16(priv, 0x4606, 2 * hts, &ret);
-	ov1063x_write16(priv, 0x460a, 2 * (hts - width_pre_subsample), &ret);
+	ov1063x_write16(priv, OV1063X_VFIFO_LINE_LENGTH_MAN, 2 * hts, &ret);
+	ov1063x_write16(priv, OV1063X_VFIFO_HSYNC_START_POSITION,
+			2 * (hts - width_pre_subsample), &ret);
 
 	tmp = (vts - 8) * 16;
-	ov1063x_write16(priv, 0xc488, tmp, &ret);
-	ov1063x_write16(priv, 0xc48a, tmp, &ret);
+	ov1063x_write16(priv, OV1063X_MAX_EXP_LONG, tmp, &ret);
+	ov1063x_write16(priv, OV1063X_MAX_EXP_SHORT, tmp, &ret);
 
 	nr_isp_pixels = sensor_width * (height + 4);
-	ov1063x_write16(priv, 0xc4cc, nr_isp_pixels / 256, &ret);
-	ov1063x_write16(priv, 0xc4ce, nr_isp_pixels / 256, &ret);
+	ov1063x_write16(priv, OV1063X_SIMPLE_MIN_NUM, nr_isp_pixels / 256, &ret);
+	ov1063x_write16(priv, OV1063X_CT_MIN_NUM, nr_isp_pixels / 256, &ret);
 	ov1063x_write16(priv, 0xc512, nr_isp_pixels / 16, &ret);
 
 	/* Horizontal sub-sampling */
 	if (horiz_sub_sample) {
-		ov1063x_write8(priv, 0x5005, 0x9, &ret);
-		ov1063x_write8(priv, 0x3007, 0x2, &ret);
+		ov1063x_write8(priv, OV1063X_ISP_RW05, OV1063X_ISP_RW05_SUB_AVG |
+			       OV1063X_ISP_RW05_SUB_ENABLE, &ret);
+		ov1063x_write8(priv, OV1063X_SC_CMMN_PCLK_DIV_CTRL, 2, &ret);
 	}
 
-	ov1063x_write16(priv, 0xc518, vts, &ret);
-	ov1063x_write16(priv, 0xc51a, hts, &ret);
+	ov1063x_write16(priv, OV1063X_VTS_ADDR, vts, &ret);
+	ov1063x_write16(priv, OV1063X_HTS_ADDR, hts, &ret);
 	if (ret < 0)
 		return ret;
 
@@ -466,11 +542,18 @@ static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
 		return 0;
 
 	switch (ctrl->id) {
-	case V4L2_CID_VFLIP:
-		return regmap_update_bits(map, OV1063X_VFLIP,
-					  OV1063X_VFLIP_ON,
-					  ctrl->val ? OV1063X_VFLIP_ON : 0);
-	case V4L2_CID_HFLIP:
+	case V4L2_CID_VFLIP: {
+		const u32 vflip = OV1063X_TIMING_CTRL1C_VFLIP_DIG
+				| OV1063X_TIMING_CTRL1C_VFLIP_ARRAY;
+
+		return regmap_update_bits(map, OV1063X_TIMING_CTRL1C, vflip,
+					  ctrl->val ? vflip : 0);
+	}
+
+	case V4L2_CID_HFLIP: {
+		const u32 hflip = OV1063X_TIMING_CTRL1D_HFLIP_DIG
+				| OV1063X_TIMING_CTRL1D_HFLIP_ARRAY;
+
 		ret = regmap_update_bits(map, OV1063X_HORIZ_COLORCORRECT,
 					 OV1063X_HORIZ_COLORCORRECT_ON,
 					 ctrl->val ?
@@ -478,9 +561,10 @@ static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
 		if (ret)
 			return ret;
 
-		return regmap_update_bits(map, OV1063X_HMIRROR,
-					  OV1063X_HMIRROR_ON,
-					  ctrl->val ? OV1063X_HMIRROR_ON : 0);
+		return regmap_update_bits(map, OV1063X_TIMING_CTRL1D, hflip,
+					  ctrl->val ? hflip : 0);
+	}
+
 	case V4L2_CID_TEST_PATTERN:
 		if (ctrl->val) {
 			n_regs = ARRAY_SIZE(ov1063x_regs_colorbar_enable);
@@ -514,8 +598,9 @@ static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 	int ret = 0;
 
 	if (!enable) {
-		ov1063x_write8(priv, 0x0100, 0x00, &ret);
-		ov1063x_write8(priv, 0x301c, 0x70, &ret);
+		ov1063x_write8(priv, OV1063X_STREAM_MODE, 0, &ret);
+		ov1063x_write8(priv, OV1063X_SC_CMMN_CLKRST2,
+			       OV1063X_SC_CMMN_CLKRST2_SCLK, &ret);
 
 		pm_runtime_mark_last_busy(priv->dev);
 		pm_runtime_put_autosuspend(priv->dev);
@@ -545,8 +630,10 @@ static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 		goto done;
 
 	ret = 0;
-	ov1063x_write8(priv, 0x0100, 0x01, &ret);
-	ov1063x_write8(priv, 0x301c, 0xf0, &ret);
+	ov1063x_write8(priv, OV1063X_STREAM_MODE, OV1063X_STREAM_MODE_ON, &ret);
+	ov1063x_write8(priv, OV1063X_SC_CMMN_CLKRST2,
+		       OV1063X_SC_CMMN_CLKRST2_PCLK_DVP |
+		       OV1063X_SC_CMMN_CLKRST2_SCLK, &ret);
 
 done:
 	if (ret < 0) {

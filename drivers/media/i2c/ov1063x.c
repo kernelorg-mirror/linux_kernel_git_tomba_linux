@@ -161,26 +161,35 @@ static inline struct ov1063x_priv *to_ov1063x(struct v4l2_subdev *sd)
 	return container_of(sd, struct ov1063x_priv, subdev);
 }
 
-/* Helper function to write consecutive 8 bit registers */
-static int ov1063x_write16(struct ov1063x_priv *priv, u16 reg, u16 val, int *err)
+/* -----------------------------------------------------------------------------
+ * Read/Write Helpers
+ */
+
+static int ov1063x_write8(struct ov1063x_priv *priv, u16 reg, u8 val, int *err)
 {
 	int ret;
 
 	if (err && *err)
 		return *err;
 
-	ret = regmap_write(priv->regmap, reg, val >> 8);
+	ret = regmap_write(priv->regmap, reg, val);
+	if (ret && err)
+		*err = ret;
+
+	return ret;
+}
+
+static int ov1063x_write16(struct ov1063x_priv *priv, u16 reg, u16 val, int *err)
+{
+	int ret = err ? *err : 0;
+
 	if (ret)
-		goto error;
+		return ret;
 
-	ret = regmap_write(priv->regmap, reg + 1, val & 0xff);
-	if (ret)
-		goto error;
+	ov1063x_write8(priv, reg, val >> 8, &ret);
+	ov1063x_write8(priv, reg + 1, val & 0xff, &ret);
 
-	return 0;
-
-error:
-	if (err)
+	if (ret && err)
 		*err = ret;
 
 	return ret;
@@ -217,14 +226,12 @@ static int ov1063x_write_array(struct ov1063x_priv *priv,
 static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct ov1063x_priv *priv = to_ov1063x(sd);
-	struct regmap *map = priv->regmap;
-	int ret;
+	int ret = 0;
 
-	ret = regmap_write(map, 0x0100, enable);
-	if (ret)
-		return ret;
+	ov1063x_write8(priv, 0x0100, enable, &ret);
+	ov1063x_write8(priv, 0x301c, enable ? 0xf0 : 0x70, &ret);
 
-	return regmap_write(map, 0x301c, enable ? 0xf0 : 0x70);
+	return ret;
 }
 
 /* Set status of additional camera capabilities */
@@ -347,7 +354,6 @@ static int ov1063x_get_pclk(int clk_rate, int *htsmin, int *vtsmin,
 /* Setup registers according to resolution and color encoding */
 static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 {
-	struct regmap *map = priv->regmap;
 	int ret = -EINVAL;
 	int pclk;
 	int hts, vts;
@@ -416,17 +422,11 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 		return ret;
 
 	/* Set PLL */
-	ret = regmap_write(map, 0x3003, r3003);
-	if (ret)
-		return ret;
-	ret = regmap_write(map, 0x3004, r3004);
-	if (ret)
-		return ret;
+	ov1063x_write8(priv, 0x3003, r3003, &ret);
+	ov1063x_write8(priv, 0x3004, r3004, &ret);
 
 	/* Set HSYNC */
-	ret = regmap_write(map, 0x4700, 0x00);
-	if (ret)
-		return ret;
+	ov1063x_write8(priv, 0x4700, 0x00, &ret);
 
 	switch (priv->format.code) {
 	case MEDIA_BUS_FMT_UYVY8_2X8:
@@ -447,31 +447,19 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 	}
 
 	/* Set format to UYVY */
-	ret = regmap_write(map, OV1063X_FORMAT_CTRL00, r4300);
-	if (ret)
-		return ret;
+	ov1063x_write8(priv, OV1063X_FORMAT_CTRL00, r4300, &ret);
 
 	dev_dbg(priv->dev, "r4300=0x%X\n", r4300);
 
 	/* Set output to 8-bit yuv */
-	ret = regmap_write(map, 0x4605, 0x08);
-	if (ret)
-		return ret;
+	ov1063x_write8(priv, 0x4605, 0x08, &ret);
 
 	/* Horizontal cropping */
-	ret = regmap_write(map, 0x3621, horiz_crop_mode);
-	if (ret)
-		return ret;
+	ov1063x_write8(priv, 0x3621, horiz_crop_mode, &ret);
 
-	ret = regmap_write(map, 0x3702, (pclk + 1500000) / 3000000);
-	if (ret)
-		return ret;
-	ret = regmap_write(map, 0x3703, (pclk + 666666) / 1333333);
-	if (ret)
-		return ret;
-	ret = regmap_write(map, 0x3704, (pclk + 961500) / 1923000);
-	if (ret)
-		return ret;
+	ov1063x_write8(priv, 0x3702, (pclk + 1500000) / 3000000, &ret);
+	ov1063x_write8(priv, 0x3703, (pclk + 666666) / 1333333, &ret);
+	ov1063x_write8(priv, 0x3704, (pclk + 961500) / 1923000, &ret);
 
 	/* Vertical cropping */
 	tmp = ((OV1063X_SENSOR_HEIGHT - height_pre_subsample) / 2) & ~0x1;
@@ -494,7 +482,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 		return ret;
 
 	if (vert_sub_sample) {
-		ret = regmap_update_bits(map, OV1063X_VFLIP,
+		ret = regmap_update_bits(priv->regmap, OV1063X_VFLIP,
 					 OV1063X_VFLIP_SUBSAMPLE,
 					 OV1063X_VFLIP_SUBSAMPLE);
 		if (ret)
@@ -518,18 +506,10 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 	ov1063x_write16(priv, 0xc4ce, nr_isp_pixels / 256, &ret);
 	ov1063x_write16(priv, 0xc512, nr_isp_pixels / 16, &ret);
 
-	if (ret)
-		return ret;
-
 	/* Horizontal sub-sampling */
 	if (horiz_sub_sample) {
-		ret = regmap_write(map, 0x5005, 0x9);
-		if (ret)
-			return ret;
-
-		ret = regmap_write(map, 0x3007, 0x2);
-		if (ret)
-			return ret;
+		ov1063x_write8(priv, 0x5005, 0x9, &ret);
+		ov1063x_write8(priv, 0x3007, 0x2, &ret);
 	}
 
 	ov1063x_write16(priv, 0xc518, vts, &ret);

@@ -222,56 +222,9 @@ static int ov1063x_write_array(struct ov1063x_priv *priv,
 	return 0;
 }
 
-/* Start/Stop streaming from the device */
-static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
-{
-	struct ov1063x_priv *priv = to_ov1063x(sd);
-	int ret = 0;
-
-	ov1063x_write8(priv, 0x0100, enable, &ret);
-	ov1063x_write8(priv, 0x301c, enable ? 0xf0 : 0x70, &ret);
-
-	return ret;
-}
-
-/* Set status of additional camera capabilities */
-static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
-{
-	struct ov1063x_priv *priv = container_of(ctrl->handler,
-					struct ov1063x_priv, hdl);
-	struct regmap *map = priv->regmap;
-	const struct ov1063x_reg *regs;
-	int n_regs, ret;
-
-	switch (ctrl->id) {
-	case V4L2_CID_VFLIP:
-		return regmap_update_bits(map, OV1063X_VFLIP,
-					  OV1063X_VFLIP_ON,
-					  ctrl->val ? OV1063X_VFLIP_ON : 0);
-	case V4L2_CID_HFLIP:
-		ret = regmap_update_bits(map, OV1063X_HORIZ_COLORCORRECT,
-					 OV1063X_HORIZ_COLORCORRECT_ON,
-					 ctrl->val ?
-					 OV1063X_HORIZ_COLORCORRECT_ON : 0);
-		if (ret)
-			return ret;
-
-		return regmap_update_bits(map, OV1063X_HMIRROR,
-					  OV1063X_HMIRROR_ON,
-					  ctrl->val ? OV1063X_HMIRROR_ON : 0);
-	case V4L2_CID_TEST_PATTERN:
-		if (ctrl->val) {
-			n_regs = ARRAY_SIZE(ov1063x_regs_colorbar_enable);
-			regs = ov1063x_regs_colorbar_enable;
-		} else {
-			n_regs = ARRAY_SIZE(ov1063x_regs_colorbar_disable);
-			regs = ov1063x_regs_colorbar_disable;
-		}
-		return ov1063x_write_array(priv, regs, n_regs);
-	}
-
-	return -EINVAL;
-}
+/* -----------------------------------------------------------------------------
+ * Hardware Configuration
+ */
 
 /*
  * Get the best pixel clock (pclk) that meets minimum hts/vts requirements.
@@ -526,9 +479,71 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 	return 0;
 }
 
-/*
- * V4L2 subdev video and pad level operations
+/* -----------------------------------------------------------------------------
+ * V5L2 Control Operations
  */
+
+static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct ov1063x_priv *priv = container_of(ctrl->handler,
+					struct ov1063x_priv, hdl);
+	struct regmap *map = priv->regmap;
+	const struct ov1063x_reg *regs;
+	int n_regs, ret;
+
+	switch (ctrl->id) {
+	case V4L2_CID_VFLIP:
+		return regmap_update_bits(map, OV1063X_VFLIP,
+					  OV1063X_VFLIP_ON,
+					  ctrl->val ? OV1063X_VFLIP_ON : 0);
+	case V4L2_CID_HFLIP:
+		ret = regmap_update_bits(map, OV1063X_HORIZ_COLORCORRECT,
+					 OV1063X_HORIZ_COLORCORRECT_ON,
+					 ctrl->val ?
+					 OV1063X_HORIZ_COLORCORRECT_ON : 0);
+		if (ret)
+			return ret;
+
+		return regmap_update_bits(map, OV1063X_HMIRROR,
+					  OV1063X_HMIRROR_ON,
+					  ctrl->val ? OV1063X_HMIRROR_ON : 0);
+	case V4L2_CID_TEST_PATTERN:
+		if (ctrl->val) {
+			n_regs = ARRAY_SIZE(ov1063x_regs_colorbar_enable);
+			regs = ov1063x_regs_colorbar_enable;
+		} else {
+			n_regs = ARRAY_SIZE(ov1063x_regs_colorbar_disable);
+			regs = ov1063x_regs_colorbar_disable;
+		}
+		return ov1063x_write_array(priv, regs, n_regs);
+	}
+
+	return -EINVAL;
+}
+
+static const struct v4l2_ctrl_ops ov1063x_ctrl_ops = {
+	.s_ctrl = ov1063x_s_ctrl,
+};
+
+static const char * const ov1063x_test_pattern_menu[] = {
+	"Disabled",
+	"Vertical Color Bars",
+};
+
+/* -----------------------------------------------------------------------------
+ * V4L2 Subdev Operations
+ */
+
+static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
+{
+	struct ov1063x_priv *priv = to_ov1063x(sd);
+	int ret = 0;
+
+	ov1063x_write8(priv, 0x0100, enable, &ret);
+	ov1063x_write8(priv, 0x301c, enable ? 0xf0 : 0x70, &ret);
+
+	return ret;
+}
 
 static void ov1063x_get_default_format(struct v4l2_mbus_framefmt *mf)
 {
@@ -686,9 +701,6 @@ static void ov1063x_set_power(struct ov1063x_priv *priv, bool on)
 	priv->power = on;
 }
 
-/*
- * V4L2 subdev internal operations
- */
 static int ov1063x_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
 	struct ov1063x_priv *priv = to_ov1063x(sd);
@@ -700,15 +712,6 @@ static int ov1063x_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	ov1063x_get_default_format(mf);
 	return 0;
 }
-
-static const struct v4l2_ctrl_ops ov1063x_ctrl_ops = {
-	.s_ctrl = ov1063x_s_ctrl,
-};
-
-static const char * const ov1063x_test_pattern_menu[] = {
-	"Disabled",
-	"Vertical Color Bars",
-};
 
 static const struct v4l2_subdev_video_ops ov1063x_subdev_video_ops = {
 	.s_stream	= ov1063x_s_stream,

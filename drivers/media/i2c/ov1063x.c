@@ -858,10 +858,11 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 
 	ov1063x_write(priv, OV1063X_ANA_ARRAY1, h_crop_mode, &ret);
 
-	val = ((OV1063X_SENSOR_HEIGHT - priv->analog_crop.height) / 2) & ~0x1;
-	ov1063x_write(priv, OV1063X_TIMING_Y_START_ADDR, val, &ret);
-	val += priv->analog_crop.height + 3;
-	ov1063x_write(priv, OV1063X_TIMING_Y_END_ADDR, val, &ret);
+	ov1063x_write(priv, OV1063X_TIMING_Y_START_ADDR,
+		      priv->analog_crop.top, &ret);
+	ov1063x_write(priv, OV1063X_TIMING_Y_END_ADDR,
+		      priv->analog_crop.top + priv->analog_crop.height + 3,
+		      &ret);
 
 
 	ov1063x_write(priv, OV1063X_SENSOR_RSTGOLOW,
@@ -1144,6 +1145,10 @@ static int ov1063x_init_cfg(struct v4l2_subdev *sd,
 	if (which == V4L2_SUBDEV_FORMAT_ACTIVE) {
 		priv->analog_crop.width = format->width;
 		priv->analog_crop.height = format->height;
+		priv->analog_crop.left = ((OV1063X_SENSOR_WIDTH -
+					   priv->analog_crop.width) / 2) & ~1;
+		priv->analog_crop.top = ((OV1063X_SENSOR_HEIGHT -
+					  priv->analog_crop.height) / 2) & ~1;
 	}
 
 	return 0;
@@ -1267,6 +1272,15 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 			priv->analog_crop.width = 768;
 		else
 			priv->analog_crop.width = 656;
+
+		/*
+		 * Center the crop rectangle, rounding coordinates to a
+		 * multiple of 2 to avoid changing the Bayer pattern.
+		 */
+		priv->analog_crop.left = ((OV1063X_SENSOR_WIDTH -
+					   priv->analog_crop.width) / 2) & ~1;
+		priv->analog_crop.top = ((OV1063X_SENSOR_HEIGHT -
+					  priv->analog_crop.height) / 2) & ~1;
 	}
 
 	fmt->format = *format;

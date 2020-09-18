@@ -469,6 +469,7 @@ struct ov1063x_priv {
 	 * lock.
 	 */
 	bool				streaming;
+	struct v4l2_rect		analog_crop;
 	struct v4l2_mbus_framefmt	format;
 
 	unsigned int			fps_numerator;
@@ -769,13 +770,9 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	struct ov1063x_pll_config pll_cfg;
 	unsigned int hts, vts;
 	u32 val;
-	u32 height_pre_subsample;
 	u32 width_pre_subsample;
-	u8 horiz_crop_mode;
+	u32 h_crop_mode;
 	int nr_isp_pixels;
-	int vert_sub_sample = 0;
-	int horiz_sub_sample = 0;
-	int sensor_width;
 	u32 width;
 	u32 height;
 	int ret = 0;
@@ -783,38 +780,9 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	width = priv->format.width;
 	height = priv->format.height;
 
-	/* Vertical sub-sampling? */
-	height_pre_subsample = height;
-	if (height <= 400) {
-		vert_sub_sample = 1;
-		height_pre_subsample <<= 1;
-	}
-
-	/* Horizontal sub-sampling? */
-	width_pre_subsample = width;
-	if (width <= 640) {
-		horiz_sub_sample = 1;
-		width_pre_subsample <<= 1;
-	}
-
-	/* Horizontal cropping */
-	if (width_pre_subsample > 768) {
-		sensor_width = OV1063X_SENSOR_WIDTH;
-		horiz_crop_mode = 0x60 | OV1063X_ANA_ARRAY1_FULL
-				| OV1063X_ANA_ARRAY1_DELAY(3);
-	} else if (width_pre_subsample > 656) {
-		sensor_width = 768;
-		horiz_crop_mode = 0x60 | OV1063X_ANA_ARRAY1_CROP_768
-				| OV1063X_ANA_ARRAY1_DELAY(3);
-	} else {
-		sensor_width = 656;
-		horiz_crop_mode = 0x60 | OV1063X_ANA_ARRAY1_CROP_656
-				| OV1063X_ANA_ARRAY1_DELAY(3);
-	}
-
 	/* minimum values for hts and vts */
-	hts = sensor_width;
-	vts = height_pre_subsample + 50;
+	hts = priv->analog_crop.width;
+	vts = priv->analog_crop.height + 50;
 	dev_dbg(priv->dev, "fps=(%u/%u), hts=%u, vts=%u\n",
 		priv->fps_numerator, priv->fps_denominator, hts, vts);
 
@@ -871,8 +839,30 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	ov1063x_write(priv, OV1063X_VFIFO_LLEN_FIRS1_SEL,
 		      OV1063X_VFIFO_LLEN_FIRS1_SEL_8B_YUV, &ret);
 
-	/* Horizontal cropping */
-	ov1063x_write(priv, OV1063X_ANA_ARRAY1, horiz_crop_mode, &ret);
+	/* Analog cropping. */
+	switch (priv->analog_crop.width) {
+	case OV1063X_SENSOR_WIDTH:
+	default:
+		h_crop_mode = 0x60 | OV1063X_ANA_ARRAY1_FULL
+			    | OV1063X_ANA_ARRAY1_DELAY(3);
+		break;
+	case 768:
+		h_crop_mode = 0x60 | OV1063X_ANA_ARRAY1_CROP_768
+			    | OV1063X_ANA_ARRAY1_DELAY(3);
+		break;
+	case 656:
+		h_crop_mode = 0x60 | OV1063X_ANA_ARRAY1_CROP_656
+			    | OV1063X_ANA_ARRAY1_DELAY(3);
+		break;
+	}
+
+	ov1063x_write(priv, OV1063X_ANA_ARRAY1, h_crop_mode, &ret);
+
+	val = ((OV1063X_SENSOR_HEIGHT - priv->analog_crop.height) / 2) & ~0x1;
+	ov1063x_write(priv, OV1063X_TIMING_Y_START_ADDR, val, &ret);
+	val += priv->analog_crop.height + 3;
+	ov1063x_write(priv, OV1063X_TIMING_Y_END_ADDR, val, &ret);
+
 
 	ov1063x_write(priv, OV1063X_SENSOR_RSTGOLOW,
 		      (pll_cfg.clk_out + 1500000) / 3000000, &ret);
@@ -880,12 +870,6 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 		      (pll_cfg.clk_out + 666666) / 1333333, &ret);
 	ov1063x_write(priv, OV1063X_SENSOR_TXWIDTH,
 		      (pll_cfg.clk_out + 961500) / 1923000, &ret);
-
-	/* Vertical cropping */
-	val = ((OV1063X_SENSOR_HEIGHT - height_pre_subsample) / 2) & ~0x1;
-	ov1063x_write(priv, OV1063X_TIMING_Y_START_ADDR, val, &ret);
-	val += height_pre_subsample + 3;
-	ov1063x_write(priv, OV1063X_TIMING_Y_END_ADDR, val, &ret);
 
 	dev_dbg(priv->dev, "width x height = %x x %x\n", width, height);
 	/* Output size */
@@ -900,7 +884,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	if (ret < 0)
 		return ret;
 
-	if (vert_sub_sample) {
+	if (height <= 400) {
 		ret = ov1063x_write_array(priv, ov1063x_regs_vert_sub2,
 					  ARRAY_SIZE(ov1063x_regs_vert_sub2));
 	} else {
@@ -910,6 +894,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	if (ret)
 		return ret;
 
+	width_pre_subsample = width <= 640 ? width * 2 : width;
 	ov1063x_write(priv, OV1063X_VFIFO_LINE_LENGTH_MAN, 2 * hts, &ret);
 	ov1063x_write(priv, OV1063X_VFIFO_HSYNC_START_POSITION,
 		      2 * (hts - width_pre_subsample), &ret);
@@ -918,14 +903,14 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_LONG, val, &ret);
 	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_SHORT, val, &ret);
 
-	nr_isp_pixels = sensor_width * (height + 4);
+	nr_isp_pixels = priv->analog_crop.width * (height + 4);
 	ov1063x_write(priv, OV1063X_AWB_SIMPLE_MIN_NUM, nr_isp_pixels / 256, &ret);
 	ov1063x_write(priv, OV1063X_AWB_CT_MIN_NUM, nr_isp_pixels / 256, &ret);
 	ov1063x_write(priv, OV1063X_REG_16BIT(0xc512), nr_isp_pixels / 16,
 		      &ret);
 
 	/* Horizontal sub-sampling */
-	if (horiz_sub_sample) {
+	if (width <= 640) {
 		ov1063x_write(priv, OV1063X_ISP_RW05, OV1063X_ISP_RW05_SUB_AVG |
 			      OV1063X_ISP_RW05_SUB_ENABLE, &ret);
 		ov1063x_write(priv, OV1063X_SC_CMMN_PCLK_DIV_CTRL, 2, &ret);
@@ -1156,6 +1141,11 @@ static int ov1063x_init_cfg(struct v4l2_subdev *sd,
 	format->field = V4L2_FIELD_NONE;
 	format->colorspace = V4L2_COLORSPACE_SMPTE170M;
 
+	if (which == V4L2_SUBDEV_FORMAT_ACTIVE) {
+		priv->analog_crop.width = format->width;
+		priv->analog_crop.height = format->height;
+	}
+
 	return 0;
 }
 
@@ -1252,6 +1242,32 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 	format->code = code;
 	format->width = fsize->width;
 	format->height = fsize->height;
+
+	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
+		/*
+		 * Enable horizontal or vertical sub-sampling automatically when
+		 * the width or height are smaller than half the maximum
+		 * resolution.
+		 */
+		priv->analog_crop.width = format->width <= 640
+					? format->width * 2
+					: format->width;
+		priv->analog_crop.height = format->height <= 400
+					 ? format->height * 2
+					 : format->height;
+
+		/*
+		 * The analog horizontal crop is restricted to the full sensor
+		 * width (1312 pixels), 768 or 656 pixels. Additional cropping
+		 * will be applied in the digital domain.
+		 */
+		if (priv->analog_crop.width > 768)
+			priv->analog_crop.width = OV1063X_SENSOR_WIDTH;
+		else if (priv->analog_crop.width > 656)
+			priv->analog_crop.width = 768;
+		else
+			priv->analog_crop.width = 656;
+	}
 
 	fmt->format = *format;
 

@@ -468,8 +468,8 @@ struct ov1063x_priv {
 	bool				streaming;
 	struct v4l2_mbus_framefmt	format;
 
-	int				fps_numerator;
-	int				fps_denominator;
+	unsigned int			fps_numerator;
+	unsigned int			fps_denominator;
 };
 
 static const struct v4l2_area ov1063x_framesizes[] = {
@@ -615,53 +615,64 @@ static int ov1063x_update(struct ov1063x_priv *priv, u32 reg, u32 mask, u32 val,
  * Hardware Configuration
  */
 
-/*
- * Get the best pixel clock (pclk) that meets minimum hts/vts requirements.
- * clk_rate => pre-divider => clk1 => multiplier => clk2 => post-divider
- * => pclk
- * We try all valid combinations of settings for the 3 blocks to get the pixel
- * clock, and from that calculate the actual hts/vts to use. The vts is
- * extended so as to achieve the required frame rate. The function also returns
- * the PLL register contents needed to set the pixel clock.
- */
-
 struct ov1063x_pll_config {
 	unsigned int pre_div;
 	unsigned int mult;
 	unsigned int div;
+	unsigned int clk_out;
 };
 
-static int ov1063x_get_pclk(int clk_rate, int *htsmin, int *vtsmin,
-			    int fps_numerator, int fps_denominator,
-			    struct ov1063x_pll_config *cfg)
+static int ov1063x_pll_setup(unsigned int clk_rate,
+			     unsigned int *htsmin, unsigned int *vtsmin,
+			     unsigned int fps_numerator,
+			     unsigned int fps_denominator,
+			     struct ov1063x_pll_config *cfg)
 {
 	static const unsigned int pre_divs[] = { 2, 3, 4, 6, 8, 10, 12, 14 };
 
-	int pclk;
-	int best_pclk = INT_MAX;
-	int best_hts = 0;
-	int i, j, k;
-	int best_i = 0, best_j = 0, best_k = 0;
-	int clk1, clk2;
-	int hts;
+	unsigned int best_pclk = UINT_MAX;
+	unsigned int best_pre_div = 0;
+	unsigned int best_mult = 0;
+	unsigned int best_div = 0;
+	unsigned int best_hts = 0;
+	unsigned int pre_div;
+	unsigned int mult;
+	unsigned int div;
+	unsigned int hts;
 
-	/* Pre-div, reg 0x3004, bits 6:4 */
-	for (i = 0; i < ARRAY_SIZE(pre_divs); i++) {
-		clk1 = (clk_rate / pre_divs[i]) * 2;
+	/*
+	 *  XVCLK --> pre-div -------> mult ----------> div --> output
+	 * 6-27 MHz           3-27 MHz      200-500 MHz
+	 *
+	 * Valid pre-divider values are 1, 1.5, 2, 3, 4, 5, 6 and 7. The
+	 * pre_divs array stores the pre-dividers multiplied by two, indexed by
+	 * register values.
+	 *
+	 * Valid multiplier values are [1, 31], stored as-is in registers.
+	 *
+	 * Valid divider values are 2 to 16 with a step of 2, stored in
+	 * registers as (div / 2) - 1.
+	 */
+
+	/*
+	 * We try all valid combinations of settings for the 3 blocks to get
+	 * the pixel clock, and from that calculate the actual hts/vts to use.
+	 * The vts is extended so as to achieve the required frame rate.
+	 */
+	for (pre_div = 0; pre_div < ARRAY_SIZE(pre_divs); pre_div++) {
+		unsigned int clk1 = clk_rate / pre_divs[pre_div] * 2;
 
 		if (clk1 < 3000000 || clk1 > 27000000)
 			continue;
 
-		/* Mult = reg 0x3003, bits 5:0 */
-		for (j = 1; j < 32; j++) {
-			clk2 = (clk1 * j);
+		for (mult = 1; mult < 32; mult++) {
+			unsigned int clk2 = clk1 * mult;
 
 			if (clk2 < 200000000 || clk2 > 500000000)
 				continue;
 
-			/* Post-div, reg 0x3004, bits 2:0 */
-			for (k = 0; k < 8; k++) {
-				pclk = clk2 / (2 * (k + 1));
+			for (div = 0; div < 8; div++) {
+				unsigned int pclk = clk2 / (2 * (div + 1));
 
 				if (pclk > 96000000)
 					continue;
@@ -676,30 +687,29 @@ static int ov1063x_get_pclk(int clk_rate, int *htsmin, int *vtsmin,
 				if (pclk < best_pclk) {
 					best_pclk = pclk;
 					best_hts = hts;
-					best_i = i;
-					best_j = j;
-					best_k = k;
+					best_pre_div = pre_div;
+					best_mult = mult;
+					best_div = div;
 				}
 			}
 		}
 	}
 
-	/* register contents */
-	cfg->mult = best_j;
-	cfg->pre_div = best_i;
-	cfg->div = best_k;
+	if (best_pclk == UINT_MAX)
+		return -EINVAL;
 
-	/* Did we get a valid PCLK? */
-	if (best_pclk == INT_MAX)
-		return -1;
+	cfg->mult = best_mult;
+	cfg->pre_div = best_pre_div;
+	cfg->div = best_div;
+	cfg->clk_out = best_pclk;
 
 	*htsmin = best_hts;
 
-	/* Adjust vts to get as close to the desired frame rate as we can */
+	/* Adjust vts to get as close to the desired frame rate as we can. */
 	*vtsmin = best_pclk / ((best_hts / fps_denominator) *
 		  fps_numerator * 2);
 
-	return best_pclk;
+	return 0;
 }
 
 static int ov1063x_isp_reset(struct ov1063x_priv *priv, bool reset)
@@ -745,8 +755,7 @@ static int ov1063x_isp_reset(struct ov1063x_priv *priv, bool reset)
 static int ov1063x_set_params(struct ov1063x_priv *priv)
 {
 	struct ov1063x_pll_config pll_cfg;
-	int pclk;
-	int hts, vts;
+	unsigned int hts, vts;
 	u32 val;
 	int tmp;
 	u32 height_pre_subsample;
@@ -795,17 +804,18 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	/* minimum values for hts and vts */
 	hts = sensor_width;
 	vts = height_pre_subsample + 50;
-	dev_dbg(priv->dev, "fps=(%d/%d), hts=%d, vts=%d\n",
+	dev_dbg(priv->dev, "fps=(%u/%u), hts=%u, vts=%u\n",
 		priv->fps_numerator, priv->fps_denominator, hts, vts);
 
 	/* Get the best PCLK & adjust hts,vts accordingly */
-	pclk = ov1063x_get_pclk(priv->clk_rate, &hts, &vts,
+	ret = ov1063x_pll_setup(priv->clk_rate, &hts, &vts,
 				priv->fps_numerator, priv->fps_denominator,
 				&pll_cfg);
-	if (pclk < 0)
+	if (ret < 0)
 		return -EINVAL;
 
-	dev_dbg(priv->dev, "pclk=%d, hts=%d, vts=%d\n", pclk, hts, vts);
+	dev_dbg(priv->dev, "pclk=%u, hts=%u, vts=%u\n",
+		pll_cfg.clk_out, hts, vts);
 	dev_dbg(priv->dev, "PLL pre-div %u mult %u div %u\n",
 		pll_cfg.pre_div, pll_cfg.mult, pll_cfg.div);
 
@@ -849,9 +859,12 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	/* Horizontal cropping */
 	ov1063x_write(priv, OV1063X_ANA_ARRAY1, horiz_crop_mode, &ret);
 
-	ov1063x_write(priv, OV1063X_SENSOR_RSTGOLOW, (pclk + 1500000) / 3000000, &ret);
-	ov1063x_write(priv, OV1063X_SENSOR_HLDWIDTH, (pclk + 666666) / 1333333, &ret);
-	ov1063x_write(priv, OV1063X_SENSOR_TXWIDTH, (pclk + 961500) / 1923000, &ret);
+	ov1063x_write(priv, OV1063X_SENSOR_RSTGOLOW,
+		      (pll_cfg.clk_out + 1500000) / 3000000, &ret);
+	ov1063x_write(priv, OV1063X_SENSOR_HLDWIDTH,
+		      (pll_cfg.clk_out + 666666) / 1333333, &ret);
+	ov1063x_write(priv, OV1063X_SENSOR_TXWIDTH,
+		      (pll_cfg.clk_out + 961500) / 1923000, &ret);
 
 	/* Vertical cropping */
 	tmp = ((OV1063X_SENSOR_HEIGHT - height_pre_subsample) / 2) & ~0x1;

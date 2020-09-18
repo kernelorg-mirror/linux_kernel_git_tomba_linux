@@ -626,7 +626,7 @@ struct ov1063x_pll_config {
 };
 
 static int ov1063x_pll_setup(unsigned int clk_rate,
-			     unsigned int *htsmin, unsigned int *vtsmin,
+			     unsigned int *htsmin, unsigned int vts,
 			     unsigned int fps_numerator,
 			     unsigned int fps_denominator,
 			     struct ov1063x_pll_config *cfg)
@@ -690,12 +690,14 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 
 			for (div = min_div; div <= 16; div += 2) {
 				unsigned int pclk = clk2 / div;
+				unsigned int min_pclk;
 
 				hts = *htsmin + 200 + pclk / (300*1000);
 
-				/* 2 clock cycles for every YUV422 pixel */
-				if (pclk < (((hts * *vtsmin) / fps_denominator)
-					* fps_numerator * 2))
+				/* 2 clock cycles for every YUV422 pixel. */
+				min_pclk = hts * vts / fps_denominator
+					 * fps_numerator * 2;
+				if (pclk < min_pclk)
 					continue;
 
 				if (pclk < best_pclk) {
@@ -718,10 +720,6 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 	cfg->clk_out = best_pclk;
 
 	*htsmin = best_hts;
-
-	/* Adjust vts to get as close to the desired frame rate as we can. */
-	*vtsmin = best_pclk / ((best_hts / fps_denominator) *
-		  fps_numerator * 2);
 
 	return 0;
 }
@@ -820,12 +818,16 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	dev_dbg(priv->dev, "fps=(%u/%u), hts=%u, vts=%u\n",
 		priv->fps_numerator, priv->fps_denominator, hts, vts);
 
-	/* Get the best PCLK & adjust hts,vts accordingly */
-	ret = ov1063x_pll_setup(priv->clk_rate, &hts, &vts,
+	/* Get the best PCLK and adjust HTS accordingly. */
+	ret = ov1063x_pll_setup(priv->clk_rate, &hts, vts,
 				priv->fps_numerator, priv->fps_denominator,
 				&pll_cfg);
 	if (ret < 0)
 		return -EINVAL;
+
+	/* Adjust VTS to get as close to the desired frame rate as we can. */
+	vts = pll_cfg.clk_out
+	    / (hts * 2 * priv->fps_numerator / priv->fps_denominator);
 
 	dev_dbg(priv->dev, "pclk=%u, hts=%u, vts=%u\n",
 		pll_cfg.clk_out, hts, vts);

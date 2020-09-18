@@ -18,6 +18,7 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
 #include <linux/v4l2-mediabus.h>
@@ -81,14 +82,15 @@ struct ov1063x_priv {
 	struct v4l2_ctrl_handler	hdl;
 	struct v4l2_ctrl		*colorbar;
 
-	/* Protects the streaming and format fields. */
-	struct mutex			lock;
+	/*
+	 * The streaming and format fields are protected by the control handler
+	 * lock.
+	 */
 	bool				streaming;
 	struct v4l2_mbus_framefmt	format;
 
 	int				fps_numerator;
 	int				fps_denominator;
-	bool				power;
 };
 
 static const struct v4l2_area ov1063x_framesizes[] = {
@@ -463,6 +465,9 @@ static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
 	const struct ov1063x_reg *regs;
 	int n_regs, ret;
 
+	if (!priv->streaming)
+		return 0;
+
 	switch (ctrl->id) {
 	case V4L2_CID_VFLIP:
 		return regmap_update_bits(map, OV1063X_VFLIP,
@@ -515,28 +520,48 @@ static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 		ov1063x_write8(priv, 0x0100, 0x00, &ret);
 		ov1063x_write8(priv, 0x301c, 0x70, &ret);
 
-		mutex_lock(&priv->lock);
+		pm_runtime_mark_last_busy(priv->dev);
+		pm_runtime_put_autosuspend(priv->dev);
+
+		mutex_lock(priv->hdl.lock);
 		priv->streaming = false;
-		mutex_unlock(&priv->lock);
+		mutex_unlock(priv->hdl.lock);
 
 		return ret;
 	}
 
-	mutex_lock(&priv->lock);
+	mutex_lock(priv->hdl.lock);
+
+	/* Streaming needs to be true for ov1063x_s_ctrl() to proceed. */
+	priv->streaming = true;
+
+	ret = pm_runtime_get_sync(priv->dev);
+	if (ret < 0)
+		goto done;
 
 	ret = ov1063x_set_params(priv);
 	if (ret < 0)
 		goto done;
 
-	ov1063x_write8(priv, 0x0100, 0x01, &ret);
-	ov1063x_write8(priv, 0x301c, 0xf0, &ret);
+	ret = __v4l2_ctrl_handler_setup(&priv->hdl);
 	if (ret < 0)
 		goto done;
 
-	priv->streaming = false;
+	ret = 0;
+	ov1063x_write8(priv, 0x0100, 0x01, &ret);
+	ov1063x_write8(priv, 0x301c, 0xf0, &ret);
 
 done:
-	mutex_unlock(&priv->lock);
+	if (ret < 0) {
+		/*
+		 * In case of error, turn the power off synchronously as the
+		 * device likely has no other chance to recover.
+		 */
+		pm_runtime_put_sync(priv->dev);
+		priv->streaming = false;
+	}
+
+	mutex_unlock(priv->hdl.lock);
 
 	return ret;
 }
@@ -619,7 +644,7 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 	/* Update the stored format and return it. */
 	format = __ov1063x_get_pad_format(priv, cfg, fmt->pad, fmt->which);
 
-	mutex_lock(&priv->lock);
+	mutex_lock(priv->hdl.lock);
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE && priv->streaming) {
 		ret = -EBUSY;
@@ -633,7 +658,7 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 	fmt->format = *format;
 
 done:
-	mutex_unlock(&priv->lock);
+	mutex_unlock(priv->hdl.lock);
 
 	return ret;
 }
@@ -675,32 +700,6 @@ static int ov1063x_enum_frame_sizes(struct v4l2_subdev *sd,
 }
 #endif
 
-static void ov1063x_set_power(struct ov1063x_priv *priv, bool on)
-{
-	dev_dbg(priv->dev, "%s: on: %d\n", __func__, on);
-
-	if (priv->power == on)
-		return;
-
-	if (on) {
-		if (priv->pwdn_gpio) {
-			gpiod_set_value_cansleep(priv->pwdn_gpio, 0);
-			usleep_range(1000, 1200);
-		}
-		if (priv->reset_gpio) {
-			gpiod_set_value_cansleep(priv->reset_gpio, 0);
-			usleep_range(250000, 260000);
-		}
-	} else {
-		if (priv->pwdn_gpio)
-			gpiod_set_value_cansleep(priv->pwdn_gpio, 1);
-		if (priv->reset_gpio)
-			gpiod_set_value_cansleep(priv->reset_gpio, 1);
-	}
-
-	priv->power = on;
-}
-
 static const struct v4l2_subdev_video_ops ov1063x_subdev_video_ops = {
 	.s_stream	= ov1063x_s_stream,
 };
@@ -726,6 +725,87 @@ static struct v4l2_subdev_ops ov1063x_subdev_ops = {
 };
 
 /* -----------------------------------------------------------------------------
+ * Power Management
+ */
+
+static int ov1063x_power_on_init(struct ov1063x_priv *priv)
+{
+	int ret;
+
+	ret = ov1063x_write_array(priv, ov1063x_regs_default,
+				  ARRAY_SIZE(ov1063x_regs_default));
+	if (ret < 0)
+		return ret;
+
+	usleep_range(500, 510);
+	return 0;
+}
+
+static int ov1063x_power_on(struct ov1063x_priv *priv)
+{
+	int ret;
+
+	ret = clk_prepare_enable(priv->clk);
+	if (ret < 0)
+		return ret;
+
+	if (priv->pwdn_gpio) {
+		gpiod_set_value_cansleep(priv->pwdn_gpio, 0);
+		usleep_range(1000, 1200);
+	}
+
+	if (priv->reset_gpio) {
+		gpiod_set_value_cansleep(priv->reset_gpio, 0);
+		usleep_range(250000, 260000);
+	}
+
+	return 0;
+}
+
+static void ov1063x_power_off(struct ov1063x_priv *priv)
+{
+	gpiod_set_value_cansleep(priv->pwdn_gpio, 1);
+	gpiod_set_value_cansleep(priv->reset_gpio, 1);
+
+	clk_disable_unprepare(priv->clk);
+}
+
+static int ov1063x_runtime_resume(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
+	struct ov1063x_priv *priv = to_ov1063x(subdev);
+	int ret;
+
+	ret = ov1063x_power_on(priv);
+	if (ret < 0)
+		return ret;
+
+	ret = ov1063x_power_on_init(priv);
+	if (ret < 0) {
+		ov1063x_power_off(priv);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int ov1063x_runtime_suspend(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
+	struct ov1063x_priv *priv = to_ov1063x(subdev);
+
+	ov1063x_power_off(priv);
+
+	return 0;
+}
+
+static const struct dev_pm_ops ov1063x_pm_ops = {
+	SET_RUNTIME_PM_OPS(ov1063x_runtime_suspend, ov1063x_runtime_resume, NULL)
+};
+
+/* -----------------------------------------------------------------------------
  * I2C Driver, Probe & Remove
  */
 
@@ -735,15 +815,6 @@ static int ov1063x_detect(struct ov1063x_priv *priv)
 	const char *name;
 	u32 pid, ver;
 	int ret;
-
-	ov1063x_set_power(priv, true);
-
-	ret = ov1063x_write_array(priv, ov1063x_regs_default,
-				  ARRAY_SIZE(ov1063x_regs_default));
-	if (ret)
-		return ret;
-
-	usleep_range(500, 510);
 
 	/* Read and check the product ID. */
 	ret = regmap_read(map, OV1063X_PID, &pid);
@@ -791,52 +862,47 @@ static int ov1063x_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	priv->dev = &client->dev;
-	mutex_init(&priv->lock);
 
 	/* Acquire resources: regmap, GPIOs and clock. The GPIOs are optional. */
 	priv->regmap = devm_regmap_init_i2c(client, &ov1063x_regmap_config);
-	if (IS_ERR(priv->regmap)) {
-		ret = PTR_ERR(priv->regmap);
-		goto err_mutex;
-	}
+	if (IS_ERR(priv->regmap))
+		return PTR_ERR(priv->regmap);
 
 	priv->pwdn_gpio = devm_gpiod_get_optional(priv->dev, "powerdown",
 						  GPIOD_OUT_HIGH);
-	if (IS_ERR(priv->pwdn_gpio)) {
-		ret = PTR_ERR(priv->pwdn_gpio);
-		goto err_mutex;
-	}
+	if (IS_ERR(priv->pwdn_gpio))
+		return PTR_ERR(priv->pwdn_gpio);
 
 	priv->reset_gpio = devm_gpiod_get_optional(priv->dev, "reset",
 						   GPIOD_OUT_HIGH);
-	if (IS_ERR(priv->reset_gpio)) {
-		ret = PTR_ERR(priv->reset_gpio);
-		goto err_mutex;
-	}
-
+	if (IS_ERR(priv->reset_gpio))
+		return PTR_ERR(priv->reset_gpio);
 	priv->clk = devm_clk_get(priv->dev, "xvclk");
 	if (IS_ERR(priv->clk)) {
 		ret = PTR_ERR(priv->clk);
 		dev_err(priv->dev, "Failed to get xvclk clock: %d\n", ret);
-		goto err_mutex;
+		return ret;
 	}
 
 	priv->clk_rate = clk_get_rate(priv->clk);
 	dev_dbg(priv->dev, "xvclk rate: %lu Hz\n", priv->clk_rate);
 
-	if (priv->clk_rate < 6000000 || priv->clk_rate > 27000000) {
-		ret = -EINVAL;
-		goto err_mutex;
-	}
+	if (priv->clk_rate < 6000000 || priv->clk_rate > 27000000)
+		return -EINVAL;
 
-	/* Enable the clock and detect the device. */
-	ret = clk_prepare_enable(priv->clk);
+	/*
+	 * Enable power and detect the device.
+	 *
+	 * The driver supports runtime PM, but needs to work when runtime PM is
+	 * disabled in the kernel. To that end, power it on manually here.
+	 */
+	ret = ov1063x_power_on(priv);
 	if (ret < 0)
-		goto err_mutex;
+		return ret;
 
 	ret = ov1063x_detect(priv);
 	if (ret)
-		goto err_clock;
+		goto err_power;
 
 	/* Initialize the subdev and its controls. */
 	sd = &priv->subdev;
@@ -857,13 +923,10 @@ static int ov1063x_probe(struct i2c_client *client)
 
 	if (priv->hdl.error) {
 		ret = priv->hdl.error;
-		goto err_clock;
+		goto err_power;
 	}
 
 	sd->ctrl_handler = &priv->hdl;
-	ret = v4l2_ctrl_handler_setup(&priv->hdl);
-	if (ret < 0)
-		goto err_ctrls;
 
 	/* Default framerate */
 	priv->fps_numerator = 30;
@@ -877,22 +940,57 @@ static int ov1063x_probe(struct i2c_client *client)
 	if (ret < 0)
 		goto err_ctrls;
 
+	/*
+	 * Enable runtime PM. As the device has been powered manually, mark it
+	 * as active, and increase the usage count without resuming the device.
+	 */
+	pm_runtime_set_active(priv->dev);
+	pm_runtime_get_noresume(priv->dev);
+	pm_runtime_enable(priv->dev);
+
+	/*
+	 * Enable autosuspend as it can help avoiding costly power transitions
+	 * when reconfiguring the sensor.
+	 */
+	pm_runtime_set_autosuspend_delay(priv->dev, 1000);
+	pm_runtime_use_autosuspend(priv->dev);
+
+	/*
+	 * At this point the device is powered on and active from a runtime PM
+	 * point of view, but hasn't gone through the full initialization
+	 * performed by the runtime resume operation. Suspend it synchronously
+	 * to turn the power off, ensuring proper initialization will take
+	 * place before the first usage.
+	 */
+	pm_runtime_put_sync(priv->dev);
+
+	/*
+	 * In case runtime PM is disabled in the kernel, the device remains
+	 * active and needs to be fully initialized at this point.
+	 */
+	if (!pm_runtime_status_suspended(priv->dev)) {
+		ret = ov1063x_power_on_init(priv);
+		if (ret < 0)
+			goto err_pm;
+	}
+
+	/* Finally, register the subdev. */
 	ret = v4l2_async_register_subdev(sd);
 	if (ret < 0)
-		goto err_media;
+		goto err_pm;
 
 	dev_info(priv->dev, "%s sensor driver registered !!\n", sd->name);
 
 	return 0;
 
-err_media:
+err_pm:
+	pm_runtime_disable(priv->dev);
 	media_entity_cleanup(&priv->subdev.entity);
 err_ctrls:
 	v4l2_ctrl_handler_free(&priv->hdl);
-err_clock:
-	clk_disable_unprepare(priv->clk);
-err_mutex:
-	mutex_destroy(&priv->lock);
+err_power:
+	if (!pm_runtime_status_suspended(priv->dev))
+		ov1063x_power_off(priv);
 	return ret;
 }
 
@@ -902,10 +1000,16 @@ static int ov1063x_remove(struct i2c_client *client)
 
 	v4l2_ctrl_handler_free(&priv->hdl);
 	v4l2_async_unregister_subdev(&priv->subdev);
-	mutex_destroy(&priv->lock);
 	media_entity_cleanup(&priv->subdev.entity);
-	ov1063x_set_power(priv, false);
-	clk_disable_unprepare(priv->clk);
+
+	/*
+	 * Disable runtime PM. In case runtime PM is disabled in the kernel,
+	 * make sure to turn power off manually.
+	 */
+	pm_runtime_disable(priv->dev);
+	if (!pm_runtime_status_suspended(priv->dev))
+		ov1063x_power_off(priv);
+	pm_runtime_set_suspended(priv->dev);
 
 	return 0;
 }
@@ -926,8 +1030,9 @@ MODULE_DEVICE_TABLE(of, ov1063x_dt_id);
 
 static struct i2c_driver ov1063x_i2c_driver = {
 	.driver = {
-		.name	= "ov1063x",
+		.name = "ov1063x",
 		.of_match_table = of_match_ptr(ov1063x_dt_id),
+		.pm = &ov1063x_pm_ops,
 	},
 	.probe_new = ov1063x_probe,
 	.remove = ov1063x_remove,

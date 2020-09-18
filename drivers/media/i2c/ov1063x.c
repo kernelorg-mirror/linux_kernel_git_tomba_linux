@@ -43,11 +43,20 @@
 #define OV1063X_SC_CMMN_SCCB_ID			0x300c
 #define OV1063X_SC_CMMN_SCCB_ID_ADDR(n)		((n) << 1)
 #define OV1063X_SC_CMMN_SCCB_ID_SEL		BIT(0)
+#define OV1063X_SC_CMMN_CLKRST0			0x301a
+#define OV1063X_SC_CMMN_CLKRST0_SCLK		GENMASK(7, 4)
+#define OV1063X_SC_CMMN_CLKRST0_RST		GENMASK(3, 0)
+#define OV1063X_SC_CMMN_CLKRST1			0x301b
+#define OV1063X_SC_CMMN_CLKRST1_SCLK		GENMASK(7, 4)
+#define OV1063X_SC_CMMN_CLKRST1_RST		GENMASK(3, 0)
 #define OV1063X_SC_CMMN_CLKRST2			0x301c
 #define OV1063X_SC_CMMN_CLKRST2_PCLK_DVP	BIT(7)
 #define OV1063X_SC_CMMN_CLKRST2_SCLK		GENMASK(6, 4)
 #define OV1063X_SC_CMMN_CLKRST2_RST_DVP		BIT(3)
 #define OV1063X_SC_CMMN_CLKRST2_RST		GENMASK(2, 0)
+#define OV1063X_SC_SOC_CLKRST7			0x3042
+#define OV1063X_SC_SOC_CLKRST7_SCLK		GENMASK(7, 4)
+#define OV1063X_SC_SOC_CLKRST7_RST		GENMASK(3, 0)
 
 #define OV1063X_ANA_ARRAY1			0x3621
 #define OV1063X_ANA_ARRAY1_FULL			(0 << 3)
@@ -364,6 +373,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	int n_regs;
 	u32 width;
 	u32 height;
+	unsigned int i;
 	int ret;
 
 	width = priv->format.width;
@@ -514,16 +524,24 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 
 	ov1063x_write16(priv, OV1063X_VTS_ADDR, vts, &ret);
 	ov1063x_write16(priv, OV1063X_HTS_ADDR, hts, &ret);
-	if (ret < 0)
-		return ret;
 
-	/* Enable ISP blocks */
-	ret = ov1063x_write_array(priv, ov1063x_regs_enable,
-				  ARRAY_SIZE(ov1063x_regs_enable));
-	if (ret)
-		return ret;
+	/*
+	 * Enable ISP blocks. Why OV1063X_SC_SOC_CLKRST7 needs to be written 26
+	 * times is unknown.
+	 */
+	for (i = 0; i < 26; ++i)
+		ov1063x_write8(priv, OV1063X_SC_SOC_CLKRST7,
+			       OV1063X_SC_SOC_CLKRST7_SCLK, &ret);
 
-	return 0;
+	ov1063x_write8(priv, OV1063X_SC_CMMN_CLKRST1,
+		       OV1063X_SC_CMMN_CLKRST1_SCLK, &ret);
+	ov1063x_write8(priv, OV1063X_SC_CMMN_CLKRST2,
+		       OV1063X_SC_CMMN_CLKRST2_PCLK_DVP |
+		       OV1063X_SC_CMMN_CLKRST2_SCLK, &ret);
+	ov1063x_write8(priv, OV1063X_SC_CMMN_CLKRST0,
+		       OV1063X_SC_CMMN_CLKRST0_SCLK, &ret);
+
+	return ret;
 }
 
 /* -----------------------------------------------------------------------------

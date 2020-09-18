@@ -607,21 +607,22 @@ static int ov1063x_enum_mbus_code(struct v4l2_subdev *sd,
 	return 0;
 }
 
-#if 0
 static int ov1063x_enum_frame_sizes(struct v4l2_subdev *sd,
 				    struct v4l2_subdev_pad_config *cfg,
 				    struct v4l2_subdev_frame_size_enum *fse)
 {
-	int i = ARRAY_SIZE(ov1063x_mbus_formats);
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(ov1063x_mbus_formats); ++i) {
+		if (ov1063x_mbus_formats[i] == fse->code)
+			break;
+	}
+
+	if (i == ARRAY_SIZE(ov1063x_mbus_formats))
+		return -EINVAL;
 
 	if (fse->index >= ARRAY_SIZE(ov1063x_framesizes))
 		return -EINVAL;
-
-	while (--i)
-		if (ov1063x_mbus_formats[i] == fse->code)
-			break;
-
-	fse->code = ov1063x_mbus_formats[i];
 
 	fse->min_width  = ov1063x_framesizes[fse->index].width;
 	fse->max_width  = fse->min_width;
@@ -630,7 +631,6 @@ static int ov1063x_enum_frame_sizes(struct v4l2_subdev *sd,
 
 	return 0;
 }
-#endif
 
 static int ov1063x_get_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_pad_config *cfg,
@@ -710,7 +710,7 @@ static const struct v4l2_subdev_video_ops ov1063x_subdev_video_ops = {
 static const struct v4l2_subdev_pad_ops ov1063x_subdev_pad_ops = {
 	.init_cfg		= ov1063x_init_cfg,
 	.enum_mbus_code		= ov1063x_enum_mbus_code,
-//	.enum_frame_size	= ov1063x_enum_frame_sizes,
+	.enum_frame_size	= ov1063x_enum_frame_sizes,
 	.get_fmt		= ov1063x_get_fmt,
 	.set_fmt		= ov1063x_set_fmt,
 };

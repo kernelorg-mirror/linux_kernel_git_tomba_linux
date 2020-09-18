@@ -370,11 +370,10 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	int vert_sub_sample = 0;
 	int horiz_sub_sample = 0;
 	int sensor_width;
-	int n_regs;
 	u32 width;
 	u32 height;
 	unsigned int i;
-	int ret;
+	int ret = 0;
 
 	width = priv->format.width;
 	height = priv->format.height;
@@ -423,11 +422,18 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	dev_dbg(priv->dev, "pclk=%d, hts=%d, vts=%d\n", pclk, hts, vts);
 	dev_dbg(priv->dev, "r3003=0x%X r3004=0x%X\n", r3003, r3004);
 
-	/* Disable ISP & program all registers that we might modify */
-	ret = ov1063x_write_array(priv, ov1063x_regs_change_mode,
-				  ARRAY_SIZE(ov1063x_regs_change_mode));
-	if (ret)
-		return ret;
+	/* Reset the ISP. */
+	ov1063x_write8(priv, OV1063X_SC_CMMN_CLKRST1,
+		       OV1063X_SC_CMMN_CLKRST1_SCLK |
+		       OV1063X_SC_CMMN_CLKRST1_RST, &ret);
+	ov1063x_write8(priv, OV1063X_SC_CMMN_CLKRST2,
+		       OV1063X_SC_CMMN_CLKRST2_PCLK_DVP |
+		       OV1063X_SC_CMMN_CLKRST2_SCLK |
+		       OV1063X_SC_CMMN_CLKRST2_RST_DVP |
+		       OV1063X_SC_CMMN_CLKRST2_RST, &ret);
+	ov1063x_write8(priv, OV1063X_SC_CMMN_CLKRST0,
+		       OV1063X_SC_CMMN_CLKRST0_SCLK |
+		       OV1063X_SC_CMMN_CLKRST0_RST, &ret);
 
 	/* Set PLL */
 	ov1063x_write8(priv, OV1063X_SC_CMMN_PLL_CTRL0, r3003, &ret);
@@ -490,17 +496,14 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 		return ret;
 
 	if (vert_sub_sample) {
-		ret = regmap_update_bits(priv->regmap, OV1063X_TIMING_CTRL1C,
-					 OV1063X_TIMING_CTRL1C_VSUB2,
-					 OV1063X_TIMING_CTRL1C_VSUB2);
-		if (ret)
-			return ret;
-		n_regs = ARRAY_SIZE(ov1063x_regs_vert_sub_sample);
-		ret = ov1063x_write_array(priv, ov1063x_regs_vert_sub_sample,
-					  n_regs);
-		if (ret)
-			return ret;
+		ret = ov1063x_write_array(priv, ov1063x_regs_vert_sub2,
+					  ARRAY_SIZE(ov1063x_regs_vert_sub2));
+	} else {
+		ret = ov1063x_write_array(priv, ov1063x_regs_vert_no_sub,
+					  ARRAY_SIZE(ov1063x_regs_vert_no_sub));
 	}
+	if (ret)
+		return ret;
 
 	ov1063x_write16(priv, OV1063X_VFIFO_LINE_LENGTH_MAN, 2 * hts, &ret);
 	ov1063x_write16(priv, OV1063X_VFIFO_HSYNC_START_POSITION,
@@ -520,6 +523,10 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 		ov1063x_write8(priv, OV1063X_ISP_RW05, OV1063X_ISP_RW05_SUB_AVG |
 			       OV1063X_ISP_RW05_SUB_ENABLE, &ret);
 		ov1063x_write8(priv, OV1063X_SC_CMMN_PCLK_DIV_CTRL, 2, &ret);
+	} else {
+		ov1063x_write8(priv, OV1063X_ISP_RW05, OV1063X_ISP_RW05_SUB_AVG,
+			       &ret);
+		ov1063x_write8(priv, OV1063X_SC_CMMN_PCLK_DIV_CTRL, 1, &ret);
 	}
 
 	ov1063x_write16(priv, OV1063X_VTS_ADDR, vts, &ret);

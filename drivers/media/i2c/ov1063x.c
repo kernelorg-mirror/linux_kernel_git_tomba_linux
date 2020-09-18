@@ -635,7 +635,8 @@ static int ov1063x_get_pclk(int clk_rate, int *htsmin, int *vtsmin,
 			    int fps_numerator, int fps_denominator,
 			    struct ov1063x_pll_config *cfg)
 {
-	int pre_divs[] = { 2, 3, 4, 6, 8, 10, 12, 14 };
+	static const unsigned int pre_divs[] = { 2, 3, 4, 6, 8, 10, 12, 14 };
+
 	int pclk;
 	int best_pclk = INT_MAX;
 	int best_hts = 0;

@@ -56,8 +56,7 @@
 #define OV1063X_SC_CMMN_PLL_PCLK_CP2(n)		((n) << 3)
 #define OV1063X_SC_CMMN_PLL_PCLK_DIV(n)		((n) << 0)	/* Divider = 2 * (1 + n) */
 #define OV1063X_SC_CMMN_PCLK_DIV_CTRL		OV1063X_REG_8BIT(0x3007)
-#define OV1063X_PID				OV1063X_REG_8BIT(0x300a)
-#define OV1063X_VER				OV1063X_REG_8BIT(0x300b)
+#define OV1063X_PID				OV1063X_REG_16BIT(0x300a)
 #define OV1063X_SC_CMMN_SCCB_ID			OV1063X_REG_8BIT(0x300c)
 #define OV1063X_SC_CMMN_SCCB_ID_ADDR(n)		((n) << 1)
 #define OV1063X_SC_CMMN_SCCB_ID_SEL		BIT(0)
@@ -433,7 +432,6 @@
 /* IDs */
 #define OV10633_VERSION_REG			0xa630
 #define OV10635_VERSION_REG			0xa635
-#define OV1063X_VERSION(pid, ver)		(((pid) << 8) | ((ver) & 0xff))
 
 enum ov1063x_model {
 	SENSOR_OV10633,
@@ -1407,19 +1405,13 @@ static const struct dev_pm_ops ov1063x_pm_ops = {
 
 static int ov1063x_detect(struct ov1063x_priv *priv)
 {
-	u32 pid, ver;
+	u32 pid;
 	int ret;
 
 	/* Read and check the product ID. */
 	ret = ov1063x_read(priv, OV1063X_PID, &pid);
 	if (ret)
 		return ret;
-
-	ret = ov1063x_read(priv, OV1063X_VER, &ver);
-	if (ret)
-		return ret;
-
-	pid = OV1063X_VERSION(pid, ver);
 
 	switch (pid) {
 	case OV10633_VERSION_REG:

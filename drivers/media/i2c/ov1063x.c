@@ -466,7 +466,6 @@ struct ov1063x_priv {
 	struct media_pad		pad;
 
 	struct v4l2_ctrl_handler	hdl;
-	struct v4l2_ctrl		*colorbar;
 
 	/*
 	 * The streaming and format fields are protected by the control handler
@@ -1504,10 +1503,10 @@ static int ov1063x_probe(struct i2c_client *client)
 			  V4L2_CID_VFLIP, 0, 1, 1, 0);
 	v4l2_ctrl_new_std(&priv->hdl, &ov1063x_ctrl_ops,
 			  V4L2_CID_HFLIP, 0, 1, 1, 0);
-	priv->colorbar = v4l2_ctrl_new_std_menu_items(
-		&priv->hdl, &ov1063x_ctrl_ops, V4L2_CID_TEST_PATTERN,
-		ARRAY_SIZE(ov1063x_test_pattern_menu) - 1, 0, 0,
-		ov1063x_test_pattern_menu);
+	v4l2_ctrl_new_std_menu_items(&priv->hdl, &ov1063x_ctrl_ops,
+				     V4L2_CID_TEST_PATTERN,
+				     ARRAY_SIZE(ov1063x_test_pattern_menu) - 1,
+				     0, 0, ov1063x_test_pattern_menu);
 
 	if (priv->hdl.error) {
 		ret = priv->hdl.error;

@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * OmniVision OV1063X Camera Driver
+ * OmniVision OV1063x Camera Driver
  *
  * Copyright (C) 2018 Texas Instruments Incorporated -  http://www.ti.com/
+ * Copyright (C) 2020 Laurent Pinchart <laurent.pinchart@ideasonboard.com>
  */
 
 struct ov1063x_reg {

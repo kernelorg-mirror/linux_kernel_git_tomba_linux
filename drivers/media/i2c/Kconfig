@@ -352,17 +352,14 @@ config VIDEO_OV08D10
 config VIDEO_OV10633
 	tristate "OmniVision OV10633/OV10635 sensor support"
 	depends on I2C && VIDEO_V4L2
-	depends on OF && GPIOLIB
-	select REGMAP_I2C
+	depends on GPIOLIB && OF
 	select MEDIA_CONTROLLER
-	select VIDEO_V4L2_SUBDEV_API
+	select REGMAP_I2C
 	select V4L2_FWNODE
+	select VIDEO_V4L2_SUBDEV_API
 	help
-	  This is a Video4Linux2 sensor-level driver for the OmniVision
-	  OV10633/OV10635 Sensor.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called ov1063x.
+	  This is a Video4Linux2 driver for the OmniVision
+	  OV10633 and OV10635 camera sensors.
 
 config VIDEO_OV13858
 	tristate "OmniVision OV13858 sensor support"

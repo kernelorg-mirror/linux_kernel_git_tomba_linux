@@ -693,7 +693,7 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 				unsigned int pclk = clk2 / div;
 				unsigned int min_pclk;
 
-				hts = *htsmin + 200 + pclk / (300*1000);
+				hts = *htsmin + pclk / (300*1000);
 
 				/* 2 clock cycles for every YUV422 pixel. */
 				min_pclk = hts * vts / fps_denominator
@@ -774,8 +774,8 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	u32 val;
 	int ret;
 
-	/* minimum values for hts and vts */
-	hts = priv->analog_crop.width;
+	/* Minimum values for HTS anv VTS. */
+	hts = priv->analog_crop.width + 200;
 	vts = priv->analog_crop.height + 50;
 	dev_dbg(priv->dev, "fps=(%u/%u), hts=%u, vts=%u\n",
 		priv->fps_numerator, priv->fps_denominator, hts, vts);

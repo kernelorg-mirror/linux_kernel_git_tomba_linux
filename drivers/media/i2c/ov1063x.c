@@ -154,10 +154,10 @@ static const struct ov1063x_color_format ov1063x_cfmts[] = {
 	},
 };
 
-static struct ov1063x_priv *to_ov1063x(const struct i2c_client *client)
+static inline struct ov1063x_priv *to_ov1063x(const struct i2c_client *client)
 {
 	return container_of(i2c_get_clientdata(client), struct ov1063x_priv,
-			subdev);
+			    subdev);
 }
 
 /* Helper function to write consecutive 8 bit registers */

@@ -447,9 +447,6 @@ enum ov1063x_model {
 #define OV1063X_SENSOR_WIDTH			1312
 #define OV1063X_SENSOR_HEIGHT			814
 
-#define OV1063X_MAX_WIDTH			1280
-#define OV1063X_MAX_HEIGHT			800
-
 struct ov1063x_priv {
 	struct device			*dev;
 

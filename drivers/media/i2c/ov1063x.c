@@ -284,7 +284,6 @@ static int ov1063x_get_pclk(int clk_rate, int *htsmin, int *vtsmin,
 /* Setup registers according to resolution and color encoding */
 static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 {
-	int ret = -EINVAL;
 	int pclk;
 	int hts, vts;
 	u8 r3003, r3004, r4300;
@@ -297,9 +296,10 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 	int horiz_sub_sample = 0;
 	int sensor_width;
 	int n_regs;
+	int ret;
 
 	if (width > OV1063X_MAX_WIDTH || height > OV1063X_MAX_HEIGHT)
-		return ret;
+		return -EINVAL;
 
 	priv->width = width;
 	priv->height = height;
@@ -341,7 +341,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv, u32 width, u32 height)
 				priv->fps_numerator, priv->fps_denominator,
 				&r3003, &r3004);
 	if (pclk < 0)
-		return ret;
+		return -EINVAL;
 	dev_dbg(priv->dev, "pclk=%d, hts=%d, vts=%d\n", pclk, hts, vts);
 	dev_dbg(priv->dev, "r3003=0x%X r3004=0x%X\n", r3003, r3004);
 
@@ -776,7 +776,7 @@ static int ov1063x_probe(struct i2c_client *client)
 {
 	struct ov1063x_priv *priv;
 	struct v4l2_subdev *sd;
-	int ret = 0;
+	int ret;
 
 	priv = devm_kzalloc(&client->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)

@@ -772,12 +772,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	unsigned int nr_isp_pixels;
 	unsigned int hts, vts;
 	u32 val;
-	u32 width;
-	u32 height;
 	int ret;
-
-	width = priv->format.width;
-	height = priv->format.height;
 
 	/* minimum values for hts and vts */
 	hts = priv->analog_crop.width;
@@ -842,16 +837,19 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 		      priv->analog_crop.top + priv->analog_crop.height + 3,
 		      &ret);
 
-	dev_dbg(priv->dev, "width x height = %x x %x\n", width, height);
+	dev_dbg(priv->dev, "width x height = %x x %x\n",
+		priv->format.width, priv->format.height);
 	dev_dbg(priv->dev, "hts x vts = %x x %x\n", hts, vts);
 
-	ov1063x_write(priv, OV1063X_TIMING_X_OUTPUT_SIZE, width, &ret);
-	ov1063x_write(priv, OV1063X_TIMING_Y_OUTPUT_SIZE, height, &ret);
+	ov1063x_write(priv, OV1063X_TIMING_X_OUTPUT_SIZE, priv->format.width,
+		      &ret);
+	ov1063x_write(priv, OV1063X_TIMING_Y_OUTPUT_SIZE, priv->format.height,
+		      &ret);
 	ov1063x_write(priv, OV1063X_TIMING_HTS, hts, &ret);
 	ov1063x_write(priv, OV1063X_TIMING_VTS, vts, &ret);
 
 	/* ISP sub-sampling */
-	if (width <= 640) {
+	if (priv->format.width <= 640) {
 		ov1063x_write(priv, OV1063X_ISP_RW05, OV1063X_ISP_RW05_SUB_AVG |
 			      OV1063X_ISP_RW05_SUB_ENABLE, &ret);
 		ov1063x_write(priv, OV1063X_SC_CMMN_PCLK_DIV_CTRL, 2, &ret);
@@ -864,7 +862,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	if (ret < 0)
 		return ret;
 
-	if (height <= 400)
+	if (priv->format.height <= 400)
 		ret = ov1063x_write_array(priv, ov1063x_regs_vert_sub2,
 					  ARRAY_SIZE(ov1063x_regs_vert_sub2));
 	else
@@ -876,7 +874,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_LONG, val, &ret);
 	ov1063x_write(priv, OV1063X_AEC_MAX_EXP_SHORT, val, &ret);
 
-	nr_isp_pixels = priv->analog_crop.width * (height + 4);
+	nr_isp_pixels = priv->analog_crop.width * (priv->format.height + 4);
 	ov1063x_write(priv, OV1063X_AWB_SIMPLE_MIN_NUM, nr_isp_pixels / 256, &ret);
 	ov1063x_write(priv, OV1063X_AWB_CT_MIN_NUM, nr_isp_pixels / 256, &ret);
 	ov1063x_write(priv, OV1063X_REG_16BIT(0xc512), nr_isp_pixels / 16,
@@ -888,7 +886,8 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	/* FIFO */
 	ov1063x_write(priv, OV1063X_VFIFO_LLEN_FIRS1_SEL,
 		      OV1063X_VFIFO_LLEN_FIRS1_SEL_8B_YUV, &ret);
-	width_pre_subsample = width <= 640 ? width * 2 : width;
+	width_pre_subsample = priv->format.width <= 640
+			    ? priv->format.width * 2 : priv->format.width;
 	ov1063x_write(priv, OV1063X_VFIFO_LINE_LENGTH_MAN, 2 * hts, &ret);
 	ov1063x_write(priv, OV1063X_VFIFO_HSYNC_START_POSITION,
 		      2 * (hts - width_pre_subsample), &ret);

@@ -761,9 +761,7 @@ static int ov1063x_video_probe(struct i2c_client *client)
 	dev_info(&client->dev, "ov1063x Product ID %x Manufacturer ID %x\n",
 		 pid, ver);
 
-	/* Program all the 'standard' registers */
-
-	return v4l2_ctrl_handler_setup(&priv->hdl);
+	return 0;
 }
 
 /*
@@ -830,48 +828,62 @@ static int ov1063x_probe(struct i2c_client *client)
 {
 	struct ov1063x_priv *priv;
 	struct v4l2_subdev *sd;
-	struct clk *clk;
-	unsigned int menu_size;
 	int ret = 0;
 
 	priv = devm_kzalloc(&client->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
+	mutex_init(&priv->lock);
 	i2c_set_clientdata(client, priv);
 
+	/* Acquire resources: regmap, GPIOs and clock. The GPIOs are optional. */
 	priv->regmap = devm_regmap_init_i2c(client, &ov1063x_regmap_config);
-	if (IS_ERR(priv->regmap))
-		return PTR_ERR(priv->regmap);
-
-	clk = devm_clk_get(&client->dev, "xvclk");
-	if (IS_ERR(clk)) {
-		dev_err(&client->dev, "xvclk reference is missing!\n");
-		ret = PTR_ERR(clk);
-		goto err;
+	if (IS_ERR(priv->regmap)) {
+		ret = PTR_ERR(priv->regmap);
+		goto err_mutex;
 	}
-	priv->xvclk = clk;
 
-	priv->xvclk_rate = clk_get_rate(clk);
+	priv->pwdn_gpio = devm_gpiod_get_optional(&client->dev, "powerdown",
+						  GPIOD_OUT_HIGH);
+	if (IS_ERR(priv->pwdn_gpio)) {
+		ret = PTR_ERR(priv->pwdn_gpio);
+		goto err_mutex;
+	}
+
+	priv->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset",
+						   GPIOD_OUT_HIGH);
+	if (IS_ERR(priv->reset_gpio)) {
+		ret = PTR_ERR(priv->reset_gpio);
+		goto err_mutex;
+	}
+
+	priv->xvclk = devm_clk_get(&client->dev, "xvclk");
+	if (IS_ERR(priv->xvclk)) {
+		dev_err(&client->dev, "xvclk reference is missing!\n");
+		ret = PTR_ERR(priv->xvclk);
+		goto err_mutex;
+	}
+
+	priv->xvclk_rate = clk_get_rate(priv->xvclk);
 	dev_dbg(&client->dev, "xvclk_rate: %d (Hz)\n", priv->xvclk_rate);
 
 	if (priv->xvclk_rate < 6000000 ||
 	    priv->xvclk_rate > 27000000) {
 		ret = -EINVAL;
-		goto err;
+		goto err_mutex;
 	}
 
+	/* Enable the clock and detect the device. */
 	ret = clk_prepare_enable(priv->xvclk);
 	if (ret < 0)
-		goto err_clk;
+		goto err_mutex;
 
-	/* Default framerate */
-	priv->fps_numerator = 30;
-	priv->fps_denominator = 1;
-	ov1063x_get_default_format(&priv->format);
-	priv->width = priv->format.width;
-	priv->height = priv->format.height;
+	ret = ov1063x_video_probe(client);
+	if (ret)
+		goto err_clock;
 
+	/* Initialize the subdev and its controls. */
 	sd = &priv->subdev;
 	v4l2_i2c_subdev_init(sd, client, &ov1063x_subdev_ops);
 
@@ -884,63 +896,52 @@ static int ov1063x_probe(struct i2c_client *client)
 			  V4L2_CID_VFLIP, 0, 1, 1, 0);
 	v4l2_ctrl_new_std(&priv->hdl, &ov1063x_ctrl_ops,
 			  V4L2_CID_HFLIP, 0, 1, 1, 0);
-	menu_size = ARRAY_SIZE(ov1063x_test_pattern_menu) - 1;
-	priv->colorbar =
-		v4l2_ctrl_new_std_menu_items(&priv->hdl, &ov1063x_ctrl_ops,
-					     V4L2_CID_TEST_PATTERN, menu_size,
-					     0, 0, ov1063x_test_pattern_menu);
-	priv->subdev.ctrl_handler = &priv->hdl;
+	priv->colorbar = v4l2_ctrl_new_std_menu_items(
+		&priv->hdl, &ov1063x_ctrl_ops, V4L2_CID_TEST_PATTERN,
+		ARRAY_SIZE(ov1063x_test_pattern_menu) - 1, 0, 0,
+		ov1063x_test_pattern_menu);
+
 	if (priv->hdl.error) {
 		ret = priv->hdl.error;
-		goto err_hdl;
+		goto err_clock;
 	}
 
-	mutex_init(&priv->lock);
-
-	/* Optional gpio don't fail if not present */
-	priv->pwdn_gpio = devm_gpiod_get_optional(&client->dev, "powerdown",
-						  GPIOD_OUT_HIGH);
-	if (IS_ERR(priv->pwdn_gpio)) {
-		ret = PTR_ERR(priv->pwdn_gpio);
-		goto err_unlock;
-	}
-
-	/* Optional gpio don't fail if not present */
-	priv->reset_gpio = devm_gpiod_get_optional(&client->dev, "reset",
-						   GPIOD_OUT_HIGH);
-	if (IS_ERR(priv->reset_gpio)) {
-		ret = PTR_ERR(priv->reset_gpio);
-		goto err_unlock;
-	}
-
-	priv->pad.flags = MEDIA_PAD_FL_SOURCE;
-	priv->subdev.entity.function = MEDIA_ENT_F_CAM_SENSOR;
-	ret = media_entity_pads_init(&priv->subdev.entity, 1, &priv->pad);
+	sd->ctrl_handler = &priv->hdl;
+	ret = v4l2_ctrl_handler_setup(&priv->hdl);
 	if (ret < 0)
-		goto err_unlock;
+		goto err_ctrls;
 
-	ret = ov1063x_video_probe(client);
-	if (ret) {
-		v4l2_ctrl_handler_free(&priv->hdl);
-		goto err_pads;
-	}
+	/* Default framerate */
+	priv->fps_numerator = 30;
+	priv->fps_denominator = 1;
+	ov1063x_get_default_format(&priv->format);
+	priv->width = priv->format.width;
+	priv->height = priv->format.height;
+
+	/* Initialize the media entity. */
+	priv->pad.flags = MEDIA_PAD_FL_SOURCE;
+	sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	ret = media_entity_pads_init(&sd->entity, 1, &priv->pad);
+	if (ret < 0)
+		goto err_ctrls;
 
 	sd->dev = &client->dev;
 	ret = v4l2_async_register_subdev(sd);
+	if (ret < 0)
+		goto err_media;
 
 	dev_info(&client->dev, "%s sensor driver registered !!\n", sd->name);
 
 	return 0;
 
-err_pads:
+err_media:
 	media_entity_cleanup(&priv->subdev.entity);
-err_unlock:
-	mutex_destroy(&priv->lock);
-err_hdl:
+err_ctrls:
 	v4l2_ctrl_handler_free(&priv->hdl);
-err_clk:
+err_clock:
 	clk_disable_unprepare(priv->xvclk);
-err:
+err_mutex:
+	mutex_destroy(&priv->lock);
 	return ret;
 }
 

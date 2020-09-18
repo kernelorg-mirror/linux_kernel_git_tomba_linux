@@ -595,6 +595,43 @@ static int ov1063x_init_cfg(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int ov1063x_enum_mbus_code(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_pad_config *cfg,
+				  struct v4l2_subdev_mbus_code_enum *code)
+{
+	if (code->index >= ARRAY_SIZE(ov1063x_mbus_formats))
+		return -EINVAL;
+
+	code->code = ov1063x_mbus_formats[code->index];
+
+	return 0;
+}
+
+#if 0
+static int ov1063x_enum_frame_sizes(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_pad_config *cfg,
+				    struct v4l2_subdev_frame_size_enum *fse)
+{
+	int i = ARRAY_SIZE(ov1063x_mbus_formats);
+
+	if (fse->index >= ARRAY_SIZE(ov1063x_framesizes))
+		return -EINVAL;
+
+	while (--i)
+		if (ov1063x_mbus_formats[i] == fse->code)
+			break;
+
+	fse->code = ov1063x_mbus_formats[i];
+
+	fse->min_width  = ov1063x_framesizes[fse->index].width;
+	fse->max_width  = fse->min_width;
+	fse->max_height = ov1063x_framesizes[fse->index].height;
+	fse->min_height = fse->max_height;
+
+	return 0;
+}
+#endif
+
 static int ov1063x_get_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_pad_config *cfg,
 			   struct v4l2_subdev_format *fmt)
@@ -660,51 +697,14 @@ done:
 	return ret;
 }
 
-static int ov1063x_enum_mbus_code(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_pad_config *cfg,
-				  struct v4l2_subdev_mbus_code_enum *code)
-{
-	if (code->index >= ARRAY_SIZE(ov1063x_mbus_formats))
-		return -EINVAL;
-
-	code->code = ov1063x_mbus_formats[code->index];
-
-	return 0;
-}
-
-#if 0
-static int ov1063x_enum_frame_sizes(struct v4l2_subdev *sd,
-				    struct v4l2_subdev_pad_config *cfg,
-				    struct v4l2_subdev_frame_size_enum *fse)
-{
-	int i = ARRAY_SIZE(ov1063x_mbus_formats);
-
-	if (fse->index >= ARRAY_SIZE(ov1063x_framesizes))
-		return -EINVAL;
-
-	while (--i)
-		if (ov1063x_mbus_formats[i] == fse->code)
-			break;
-
-	fse->code = ov1063x_mbus_formats[i];
-
-	fse->min_width  = ov1063x_framesizes[fse->index].width;
-	fse->max_width  = fse->min_width;
-	fse->max_height = ov1063x_framesizes[fse->index].height;
-	fse->min_height = fse->max_height;
-
-	return 0;
-}
-#endif
-
-static const struct v4l2_subdev_video_ops ov1063x_subdev_video_ops = {
-	.s_stream	= ov1063x_s_stream,
-};
-
 static const struct v4l2_subdev_core_ops ov1063x_subdev_core_ops = {
 	.log_status		= v4l2_ctrl_subdev_log_status,
 	.subscribe_event	= v4l2_ctrl_subdev_subscribe_event,
 	.unsubscribe_event	= v4l2_event_subdev_unsubscribe,
+};
+
+static const struct v4l2_subdev_video_ops ov1063x_subdev_video_ops = {
+	.s_stream	= ov1063x_s_stream,
 };
 
 static const struct v4l2_subdev_pad_ops ov1063x_subdev_pad_ops = {

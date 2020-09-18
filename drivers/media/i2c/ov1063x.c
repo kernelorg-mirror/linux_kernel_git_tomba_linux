@@ -554,19 +554,9 @@ static int ov1063x_get_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct ov1063x_priv *priv = to_ov1063x(sd);
-	struct v4l2_mbus_framefmt *mf;
 
-	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-		mf = v4l2_subdev_get_try_format(sd, cfg, 0);
-		mutex_lock(&priv->lock);
-		fmt->format = *mf;
-		mutex_unlock(&priv->lock);
-		return 0;
-	}
-
-	mutex_lock(&priv->lock);
-	fmt->format = priv->format;
-	mutex_unlock(&priv->lock);
+	fmt->format = *__ov1063x_get_pad_format(priv, cfg, fmt->pad,
+						fmt->which);
 
 	return 0;
 }
@@ -576,37 +566,45 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct ov1063x_priv *priv = to_ov1063x(sd);
-	struct v4l2_mbus_framefmt *mf = &fmt->format;
+	struct v4l2_mbus_framefmt *format;
 	const struct v4l2_area *fsize;
 	unsigned int i;
+	u32 code;
 	int ret = 0;
 
+	/*
+	 * Validate the media bus code, defaulting to the first one if the
+	 * requested code isn't supported.
+	 */
 	for (i = 0; i < ARRAY_SIZE(ov1063x_mbus_formats); ++i) {
-		if (ov1063x_mbus_formats[i] == mf->code)
+		if (ov1063x_mbus_formats[i] == fmt->format.code) {
+			code = fmt->format.code;
 			break;
+		}
 	}
 
 	if (i == ARRAY_SIZE(ov1063x_mbus_formats))
-		mf->code = ov1063x_mbus_formats[0];
+		code = ov1063x_mbus_formats[0];
 
+	/* Find the nearest supported frame size. */
 	fsize = v4l2_find_nearest_size(ov1063x_framesizes,
 				       ARRAY_SIZE(ov1063x_framesizes),
-				       width, height, mf->width, mf->height);
-	mf->width = fsize->width;
-	mf->height = fsize->height;
+				       width, height, fmt->format.width,
+				       fmt->format.height);
 
-	mf->colorspace = V4L2_COLORSPACE_SMPTE170M;
-	mf->field = V4L2_FIELD_NONE;
+	/* Update the stored format and return it. */
+	format = __ov1063x_get_pad_format(priv, cfg, fmt->pad, fmt->which);
 
 	mutex_lock(&priv->lock);
 
-	if (fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-		mf = v4l2_subdev_get_try_format(sd, cfg, fmt->pad);
-		*mf = fmt->format;
-	} else {
-		priv->format = fmt->format;
-		ret = ov1063x_set_params(priv, mf->width, mf->height);
-	}
+	format->code = code;
+	format->width = fsize->width;
+	format->height = fsize->height;
+
+	fmt->format = *format;
+
+	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
+		ret = ov1063x_set_params(priv, format->width, format->height);
 
 	mutex_unlock(&priv->lock);
 

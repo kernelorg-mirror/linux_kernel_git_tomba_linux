@@ -7,10 +7,6 @@
  * Copyright (C) 2013 Renesas Electronics
  * Copyright (C) 2018 Texas Instruments Incorporated - http://www.ti.com/
  * Copyright (C) 2020 Laurent Pinchart <laurent.pinchart@ideasonboard.com>
- *
- * This driver has been tested at QVGA, VGA and 720p, and 1280x800 at up to
- * 30fps and it should work at any resolution in between and any frame rate
- * up to 30fps.
  */
 
 #include <linux/clk.h>

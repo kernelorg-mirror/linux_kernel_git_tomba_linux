@@ -502,6 +502,45 @@ static int ov1063x_get_pclk(int clk_rate, int *htsmin, int *vtsmin,
 	return best_pclk;
 }
 
+static int ov1063x_isp_reset(struct ov1063x_priv *priv, bool reset)
+{
+	unsigned int i;
+	int ret = 0;
+
+	if (!reset) {
+		/*
+		 * Enable ISP blocks. Why OV1063X_SC_SOC_CLKRST7 needs to be
+		 * written 26 times is unknown.
+		 */
+		for (i = 0; i < 26; ++i)
+			ov1063x_write(priv, OV1063X_SC_SOC_CLKRST7,
+				      OV1063X_SC_SOC_CLKRST7_SCLK, &ret);
+
+		ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST1,
+			      OV1063X_SC_CMMN_CLKRST1_SCLK, &ret);
+		ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST2,
+			      OV1063X_SC_CMMN_CLKRST2_PCLK_DVP |
+			      OV1063X_SC_CMMN_CLKRST2_SCLK, &ret);
+		ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST0,
+			      OV1063X_SC_CMMN_CLKRST0_SCLK, &ret);
+	} else {
+		/* Reset the ISP. */
+		ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST1,
+			      OV1063X_SC_CMMN_CLKRST1_SCLK |
+			      OV1063X_SC_CMMN_CLKRST1_RST, &ret);
+		ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST2,
+			      OV1063X_SC_CMMN_CLKRST2_PCLK_DVP |
+			      OV1063X_SC_CMMN_CLKRST2_SCLK |
+			      OV1063X_SC_CMMN_CLKRST2_RST_DVP |
+			      OV1063X_SC_CMMN_CLKRST2_RST, &ret);
+		ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST0,
+			      OV1063X_SC_CMMN_CLKRST0_SCLK |
+			      OV1063X_SC_CMMN_CLKRST0_RST, &ret);
+	}
+
+	return ret;
+}
+
 /* Setup registers according to resolution and color encoding */
 static int ov1063x_set_params(struct ov1063x_priv *priv)
 {
@@ -518,7 +557,6 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	int sensor_width;
 	u32 width;
 	u32 height;
-	unsigned int i;
 	int ret = 0;
 
 	width = priv->format.width;
@@ -569,17 +607,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	dev_dbg(priv->dev, "r3003=0x%X r3004=0x%X\n", r3003, r3004);
 
 	/* Reset the ISP. */
-	ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST1,
-		      OV1063X_SC_CMMN_CLKRST1_SCLK |
-		      OV1063X_SC_CMMN_CLKRST1_RST, &ret);
-	ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST2,
-		      OV1063X_SC_CMMN_CLKRST2_PCLK_DVP |
-		      OV1063X_SC_CMMN_CLKRST2_SCLK |
-		      OV1063X_SC_CMMN_CLKRST2_RST_DVP |
-		      OV1063X_SC_CMMN_CLKRST2_RST, &ret);
-	ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST0,
-		      OV1063X_SC_CMMN_CLKRST0_SCLK |
-		      OV1063X_SC_CMMN_CLKRST0_RST, &ret);
+	ret = ov1063x_isp_reset(priv, true);
 
 	/* Set PLL */
 	ov1063x_write(priv, OV1063X_SC_CMMN_PLL_CTRL0, r3003, &ret);
@@ -679,23 +707,10 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	ov1063x_write(priv, OV1063X_VTS_ADDR, vts, &ret);
 	ov1063x_write(priv, OV1063X_HTS_ADDR, hts, &ret);
 
-	/*
-	 * Enable ISP blocks. Why OV1063X_SC_SOC_CLKRST7 needs to be written 26
-	 * times is unknown.
-	 */
-	for (i = 0; i < 26; ++i)
-		ov1063x_write(priv, OV1063X_SC_SOC_CLKRST7,
-			      OV1063X_SC_SOC_CLKRST7_SCLK, &ret);
+	if (ret)
+		return ret;
 
-	ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST1,
-		      OV1063X_SC_CMMN_CLKRST1_SCLK, &ret);
-	ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST2,
-		      OV1063X_SC_CMMN_CLKRST2_PCLK_DVP |
-		      OV1063X_SC_CMMN_CLKRST2_SCLK, &ret);
-	ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST0,
-		      OV1063X_SC_CMMN_CLKRST0_SCLK, &ret);
-
-	return ret;
+	return ov1063x_isp_reset(priv, false);
 }
 
 /* -----------------------------------------------------------------------------

@@ -706,7 +706,7 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 }
 
 /* -----------------------------------------------------------------------------
- * V5L2 Control Operations
+ * V4L2 Control Operations
  */
 
 static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)

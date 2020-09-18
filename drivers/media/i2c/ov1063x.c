@@ -771,7 +771,6 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	unsigned int hts, vts;
 	u32 val;
 	u32 width_pre_subsample;
-	u32 h_crop_mode;
 	int nr_isp_pixels;
 	u32 width;
 	u32 height;
@@ -813,20 +812,20 @@ static int ov1063x_set_params(struct ov1063x_priv *priv)
 	switch (priv->analog_crop.width) {
 	case OV1063X_SENSOR_WIDTH:
 	default:
-		h_crop_mode = 0x60 | OV1063X_ANA_ARRAY1_FULL
-			    | OV1063X_ANA_ARRAY1_DELAY(3);
+		val = 0x60 | OV1063X_ANA_ARRAY1_FULL
+		    | OV1063X_ANA_ARRAY1_DELAY(3);
 		break;
 	case 768:
-		h_crop_mode = 0x60 | OV1063X_ANA_ARRAY1_CROP_768
-			    | OV1063X_ANA_ARRAY1_DELAY(3);
+		val = 0x60 | OV1063X_ANA_ARRAY1_CROP_768
+		    | OV1063X_ANA_ARRAY1_DELAY(3);
 		break;
 	case 656:
-		h_crop_mode = 0x60 | OV1063X_ANA_ARRAY1_CROP_656
-			    | OV1063X_ANA_ARRAY1_DELAY(3);
+		val = 0x60 | OV1063X_ANA_ARRAY1_CROP_656
+		    | OV1063X_ANA_ARRAY1_DELAY(3);
 		break;
 	}
 
-	ov1063x_write(priv, OV1063X_ANA_ARRAY1, h_crop_mode, &ret);
+	ov1063x_write(priv, OV1063X_ANA_ARRAY1, val, &ret);
 
 	/* Sensor configuration */
 	ov1063x_write(priv, OV1063X_SENSOR_RSTGOLOW,

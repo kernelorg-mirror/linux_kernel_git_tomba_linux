@@ -76,11 +76,9 @@ struct ov1063x_framesize {
 
 struct ov1063x_priv {
 	struct v4l2_subdev		subdev;
-	struct v4l2_async_subdev	asd;
 	struct v4l2_ctrl_handler	hdl;
 	struct media_pad		pad;
 	int				model;
-	int				revision;
 	int				xvclk_rate;
 	/* Protects the struct fields below */
 	struct mutex lock;
@@ -753,10 +751,8 @@ static int ov1063x_video_probe(struct i2c_client *client)
 
 	if (OV1063X_VERSION(pid, ver) == OV10635_VERSION_REG) {
 		priv->model = SENSOR_OV10635;
-		priv->revision = 1;
 	} else if (OV1063X_VERSION(pid, ver) == OV10633_VERSION_REG) {
 		priv->model = SENSOR_OV10633;
-		priv->revision = 1;
 	} else {
 		dev_err(&client->dev, "Product ID error %x:%x\n", pid, ver);
 		return -ENODEV;

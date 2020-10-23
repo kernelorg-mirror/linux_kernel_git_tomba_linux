@@ -145,7 +145,7 @@ v4l2_fill_pix_format(struct v4l2_pix_format *pix_fmt,
 }
 
 /**
- * v4l2_fill_pix_format - Ancillary routine that fills a &struct
+ * v4l2_fill_mbus_format - Ancillary routine that fills a &struct
  *	v4l2_mbus_framefmt from a &struct v4l2_pix_format and a
  *	data format code.
  *
@@ -168,7 +168,7 @@ static inline void v4l2_fill_mbus_format(struct v4l2_mbus_framefmt *mbus_fmt,
 }
 
 /**
- * v4l2_fill_pix_format - Ancillary routine that fills a &struct
+ * v4l2_fill_pix_format_mplane - Ancillary routine that fills a &struct
  *	v4l2_pix_format_mplane fields from a media bus structure.
  *
  * @pix_mp_fmt:	pointer to &struct v4l2_pix_format_mplane to be filled
@@ -188,7 +188,7 @@ v4l2_fill_pix_format_mplane(struct v4l2_pix_format_mplane *pix_mp_fmt,
 }
 
 /**
- * v4l2_fill_pix_format - Ancillary routine that fills a &struct
+ * v4l2_fill_mbus_format_mplane - Ancillary routine that fills a &struct
  *	v4l2_mbus_framefmt from a &struct v4l2_pix_format_mplane.
  *
  * @mbus_fmt:	pointer to &struct v4l2_mbus_framefmt to be filled

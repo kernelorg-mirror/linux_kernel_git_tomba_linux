@@ -207,7 +207,7 @@ begin to form a list of subdevice descriptors that the bridge device
 needs for its operation. Subdevice descriptors are added to the notifier
 using the :c:func:`v4l2_async_notifier_add_subdev` call. This function
 takes two arguments: a pointer to struct :c:type:`v4l2_async_notifier`,
-and a pointer to the subdevice descripter, which is of type struct
+and a pointer to the subdevice descriptor, which is of type struct
 :c:type:`v4l2_async_subdev`.
 
 The V4L2 core will then use these descriptors to match asynchronously
@@ -225,7 +225,7 @@ contain several subdevs that use an I2C bus, but also a subdev that is
 controlled through GPIO pins. This distinction is only relevant when setting
 up the device, but once the subdev is registered it is completely transparent.
 
-Once te subdev has been registered you can call an ops function either
+Once the subdev has been registered you can call an ops function either
 directly:
 
 .. code-block:: c

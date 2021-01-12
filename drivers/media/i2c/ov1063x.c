@@ -1650,7 +1650,8 @@ err_power:
 
 static int ov1063x_remove(struct i2c_client *client)
 {
-	struct ov1063x_priv *priv = i2c_get_clientdata(client);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct ov1063x_priv *priv = to_ov1063x(sd);
 
 	v4l2_ctrl_handler_free(&priv->hdl);
 	v4l2_async_unregister_subdev(&priv->subdev);

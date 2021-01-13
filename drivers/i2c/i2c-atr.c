@@ -110,7 +110,7 @@ struct i2c_atr_chan {
 
 static struct i2c_atr_cli2alias_pair *
 i2c_atr_find_mapping_by_client(struct list_head *list,
-			       struct i2c_client *client)
+			       const struct i2c_client *client)
 {
 	struct i2c_atr_cli2alias_pair *c2a;
 

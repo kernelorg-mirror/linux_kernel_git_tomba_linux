@@ -25,7 +25,7 @@
 #include <media/v4l2-ctrls.h>
 
 /* TODO increase DS90_FPD_RX_NPORTS to 2, test, fix */
-#define DS90_FPD_RX_NPORTS	1  /* Physical FPD-link RX ports */
+#define DS90_FPD_RX_NPORTS	2  /* Physical FPD-link RX ports */
 #define DS90_CSI_TX_NPORTS	1  /* Physical CSI-2 TX ports */
 #define DS90_NPORTS		(DS90_FPD_RX_NPORTS + DS90_CSI_TX_NPORTS)
 
@@ -127,8 +127,12 @@
 
 #define DS90_XR_AEQ_CTL1		0x42
 #define DS90_XR_AEQ_ERR_THOLD		0x43
-#define DS90_XR_FPD3_CAP		0x4A
-#define DS90_XR_RAW_EMBED_DTYPE	0x4B
+
+#define DS90_RR_BCC_ERR_CTL		0x46
+#define DS90_RR_BCC_STATUS		0x47
+
+#define DS90_RR_FPD3_CAP		0x4A
+#define DS90_RR_RAW_EMBED_DTYPE	0x4B
 
 #define DS90_SR_FPD3_PORT_SEL		0x4C
 
@@ -465,6 +469,9 @@ static int ds90_update_bits_rxport(const struct ds90_data *ds90, int nport,
 
 static void ds90_reset(const struct ds90_data *ds90, bool keep_reset)
 {
+	if (!ds90->reset_gpio)
+		return;
+
 	gpiod_set_value_cansleep(ds90->reset_gpio, 1);
 	usleep_range(3000, 6000); /* min 2 ms */
 
@@ -837,7 +844,7 @@ static int ds90_rxport_add_serializer(struct ds90_data *ds90, int nport)
 	 * to the upstream adapter is way simpler.
 	 */
 	ser_info.addr = rxport->ser_alias;
-	rxport->ser_client = i2c_new_device(ds90->client->adapter, &ser_info);
+	rxport->ser_client = i2c_new_client_device(ds90->client->adapter, &ser_info);
 	if (!rxport->ser_client) {
 		dev_err(dev, "rx%d: cannot add %s i2c device",
 			nport, ser_info.type);
@@ -923,15 +930,60 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 	}
 
 	/* Initialize access to local registers */
-	rxport->reg_client = i2c_new_secondary_device(ds90->client,
+	rxport->reg_client = i2c_new_ancillary_device(ds90->client,
 						      info->local_name,
 						      info->local_def_alias);
-	if (!rxport->reg_client) {
-		err = -ENOMEM;
+	if (IS_ERR(rxport->reg_client)) {
+		err = PTR_ERR(rxport->reg_client);
 		goto err_new_secondary_device;
 	}
 	ds90_write_shared(ds90, DS90_SR_I2C_RX_ID(nport),
 			  rxport->reg_client->addr << 1);
+
+	dev_info(dev, "rx%d: at alias 0x%02x\n",
+		 nport, rxport->reg_client->addr);
+
+
+	// Override FREQ_SELECT from the strap
+	// FREQ_SELECT: 000: 2.5 Mbps (default for DS90UB913A-Q1 / DS90UB933-Q1 compatibility)
+	ds90_update_bits_rxport(ds90, nport, DS90_RR_BCC_CONFIG, 0x7, 0);
+
+	// Override FPD3_MODE from the strap
+	/*
+	00: CSI-2 Mode (DS90UB953-Q1 compatible)
+	01: RAW12 Low Frequency Mode (DS90UB913A-Q1 / DS90UB933-Q1 compatible)
+	10: RAW12 High Frequency Mode(DS90UB913A-Q1 / DS90UB933-Q1 compatible)
+	11: RAW10 Mode (DS90UB913A-Q1 / DS90UB933-Q1 compatible)
+	*/
+	ds90_update_bits_rxport(ds90, nport, DS90_RR_PORT_CONFIG, 0x3, 0x3);
+
+	/*
+	 * Changing FREQ_SELECT will result in some errors on the back channel
+	 * for a short period of time. Clear the status bits to ignore the errors.
+	 */
+#if 0
+	msleep(10);
+
+	{
+		u8 v1, v2, v3, v4;
+		ds90_read_rxport(ds90, nport, DS90_RR_BCC_STATUS, &v1);
+		ds90_read_rxport(ds90, nport, DS90_RR_RX_PORT_STS1, &v2);
+		ds90_read_rxport(ds90, nport, DS90_RR_RX_PORT_STS2, &v3);
+		ds90_read_rxport(ds90, nport, DS90_RR_CSI_RX_STS, &v4);
+	}
+
+
+	// XXX sleep a bit, and print the status again
+	{
+		u8 v1, v2, v3, v4;
+		msleep(10);
+		ds90_read_rxport(ds90, nport, DS90_RR_BCC_STATUS, &v1);
+		ds90_read_rxport(ds90, nport, DS90_RR_RX_PORT_STS1, &v2);
+		ds90_read_rxport(ds90, nport, DS90_RR_RX_PORT_STS2, &v3);
+		ds90_read_rxport(ds90, nport, DS90_RR_CSI_RX_STS, &v4);
+		printk("%x, %x, %x, %x\n", v1, v2, v3, v4);
+	}
+#endif
 
 	err = ds90_gpiochip_probe(ds90, nport);
 	if (err)
@@ -949,6 +1001,13 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 	ds90_write_rxport(ds90, nport,
 			  DS90_RR_SER_ALIAS_ID, rxport->ser_alias << 1);
 
+	dev_info(dev, "ser%d: at alias 0x%02x\n",
+		 nport, rxport->ser_alias);
+
+	// XXX not sure if we need to delay before accessing the Ser
+	// I sometimes get an error when accessing the first reg in Ser
+	msleep(10);
+
 	err = sysfs_create_group(&dev->kobj, &ds90_rxport_attr_group[nport]);
 	if (err) {
 		dev_err(dev, "rx%d: failed creating sysfs group", nport);
@@ -960,9 +1019,6 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 		dev_err(dev, "rx%d: cannot add adapter", nport);
 		goto err_add_adapter;
 	}
-
-	dev_info(dev, "rx%d: at alias 0x%02x\n",
-		 nport, rxport->reg_client->addr);
 
 	return 0;
 
@@ -1240,10 +1296,10 @@ static int ds90_get_fmt(struct v4l2_subdev *sd,
 
 static void ds90_init_format(struct v4l2_mbus_framefmt *fmt)
 {
-	fmt->width		= 1920;
-	fmt->height		= 1080;
-	fmt->code		= MEDIA_BUS_FMT_UYVY8_1X16;
-	fmt->colorspace		= V4L2_COLORSPACE_SRGB;
+	fmt->width		= 1280;
+	fmt->height		= 800;
+	fmt->code		= MEDIA_BUS_FMT_YUYV8_2X8;
+	fmt->colorspace		= V4L2_COLORSPACE_SMPTE170M;
 	fmt->field		= V4L2_FIELD_NONE;
 }
 
@@ -1255,8 +1311,34 @@ static const struct v4l2_subdev_video_ops ds90_video_ops = {
 	.s_stream	= ds90_s_stream,
 };
 
+static int ds90_enum_mbus_code(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_pad_config *cfg,
+				 struct v4l2_subdev_mbus_code_enum *code)
+{
+	if (code->pad != 0)
+		return -EINVAL;
+	if (code->index >= 1) //ARRAY_SIZE(ov5640_formats))
+		return -EINVAL;
+
+	//code->code = ov5640_formats[code->index].code;
+
+	code->code = MEDIA_BUS_FMT_YUYV8_2X8;
+	return 0;
+}
+
+
+static int ds90_set_fmt(struct v4l2_subdev *sd,
+			  struct v4l2_subdev_pad_config *cfg,
+			  struct v4l2_subdev_format *format)
+{
+	return 0;
+}
+
+
 static const struct v4l2_subdev_pad_ops ds90_pad_ops = {
+	.enum_mbus_code = ds90_enum_mbus_code,
 	.get_fmt	= ds90_get_fmt,
+	.set_fmt	= ds90_set_fmt,
 };
 
 static const struct v4l2_subdev_ops ds90_subdev_ops = {
@@ -1388,7 +1470,7 @@ static int ds90_probe(struct i2c_client *client)
 	mutex_init(&ds90->alias_table_lock);
 
 	/* get reset pin from DT */
-	ds90->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
+	ds90->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_LOW);
 	if (IS_ERR(ds90->reset_gpio)) {
 		err = PTR_ERR(ds90->reset_gpio);
 		if (err != -EPROBE_DEFER)
@@ -1544,14 +1626,14 @@ static int ds90_remove(struct i2c_client *client)
 }
 
 static const struct i2c_device_id ds90_id[] = {
-	{ "ds90ub954-q1", 0 },
+	{ "ds90ub960-q1", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ds90_id);
 
 #ifdef CONFIG_OF
 static const struct of_device_id ds90_dt_ids[] = {
-	{ .compatible = "ti,ds90ub954-q1", },
+	{ .compatible = "ti,ds90ub960-q1", },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, ds90_dt_ids);
@@ -1562,7 +1644,7 @@ static struct i2c_driver ds90ub954_driver = {
 	.remove		= ds90_remove,
 	.id_table	= ds90_id,
 	.driver = {
-		.name	= "ds90ub954",
+		.name	= "ds90ub960",
 		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(ds90_dt_ids),
 	},

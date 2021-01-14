@@ -1494,8 +1494,6 @@ static int ov1063x_detect(struct ov1063x_priv *priv)
 		return -ENODEV;
 	}
 
-	dev_dbg(priv->dev, "%s detected\n", priv->name);
-
 	return 0;
 }
 

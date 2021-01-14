@@ -842,12 +842,12 @@ int cal_ctx_v4l2_register(struct cal_ctx *ctx)
 	struct video_device *vfd = &ctx->vdev;
 	int ret;
 
+	ret = cal_ctx_v4l2_init_formats(ctx);
+	if (ret)
+		return ret;
+
 	if (!cal_mc_api) {
 		struct v4l2_ctrl_handler *hdl = &ctx->ctrl_handler;
-
-		ret = cal_ctx_v4l2_init_formats(ctx);
-		if (ret)
-			return ret;
 
 		ret = v4l2_ctrl_add_handler(hdl, ctx->phy->sensor->ctrl_handler,
 					    NULL, true);

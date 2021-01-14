@@ -25,7 +25,7 @@ properties:
   clocks:
     maxItems: 1
 
-  clocks-names:
+  clock-names:
     const: xvclk
 
   reset-gpios:
@@ -58,7 +58,7 @@ required:
   - compatible
   - reg
   - clocks
-  - clocks-names
+  - clock-names
   - port
 
 additionalProperties: false
@@ -77,7 +77,7 @@ examples:
             reg = <0x37>;
 
             clocks = <&fixed_clock>;
-            clocks-names = "xvclk";
+            clock-names = "xvclk";
 
             reset-gpios = <&gpio4 17 GPIO_ACTIVE_HIGH>;
             powerdown-gpios = <&gpio5 11 GPIO_ACTIVE_HIGH>;

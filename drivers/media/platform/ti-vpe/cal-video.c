@@ -676,7 +676,7 @@ static int cal_start_streaming(struct vb2_queue *vq, unsigned int count)
 	ret = media_pipeline_start(&ctx->vdev.entity, &ctx->phy->pipe);
 	if (ret < 0) {
 		ctx_err(ctx, "Failed to start media pipeline: %d\n", ret);
-		return ret;
+		goto error_release_buffers;
 	}
 
 	/*
@@ -718,6 +718,7 @@ error_stop:
 
 error_pipeline:
 	media_pipeline_stop(&ctx->vdev.entity);
+error_release_buffers:
 	cal_release_buffers(ctx, VB2_BUF_STATE_QUEUED);
 
 	return ret;

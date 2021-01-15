@@ -201,10 +201,24 @@
 		};
 	};
 
-	clk_fusion_25M_fixed: clock {
+	clk_fusion_25M_fixed: fixed-clock-25M {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency = <25000000>;
+	};
+
+	clk_cam_module_48M_fixed: fixed-clock-48M {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <48000000>;
+	};
+
+	clk_cam_24M: fixed-clock-24M {
+		compatible = "fixed-factor-clock";
+		clocks = <&clk_cam_module_48M_fixed>;
+		#clock-cells = <0>;
+		clock-div = <2>;
+		clock-mult = <1>;
 	};
 };
 
@@ -484,8 +498,13 @@
 					compatible = "ovti,ov10635";
 					reg = <0x30>;
 
-					clocks = <&clk_fusion_25M_fixed>; // XXX wrong clock
+					clocks = <&clk_cam_24M>;
 					clock-names = "xvclk";
+
+					/* powerdown-gpios = <GPO0 from ser>; */
+					/* framesync-gpios = <GPO1 from ser>; */
+
+					/* Note: PCLK must be 96MHz */
 
 					#address-cells = <1>;
 					#size-cells = <0>;
@@ -497,7 +516,7 @@
 							hsync-active = <1>;
 							vsync-active = <1>;
 							pclk-sample = <0>;
-							bus-width = <8>;
+							bus-width = <10>;
 						};
 					};
 				};

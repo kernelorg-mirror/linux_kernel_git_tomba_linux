@@ -664,8 +664,10 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 	 * The vts is extended so as to achieve the required frame rate.
 	 */
 
-	max_pre_div = max(clk_rate / (3 * 1000 * 1000),
+	max_pre_div = min(clk_rate / (3 * 1000 * 1000),
 			  ARRAY_SIZE(pre_divs) - 1);
+
+	max_pre_div = ARRAY_SIZE(pre_divs) - 1;
 
 	for (pre_div = 0; pre_div <= max_pre_div; pre_div++) {
 		unsigned int clk1 = clk_rate * 2 / pre_divs[pre_div];
@@ -675,6 +677,7 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 
 		if (clk1 < 3 * 1000 * 1000 || clk1 > 27 * 1000 * 1000)
 			continue;
+
 
 		min_mult = DIV_ROUND_UP(200 * 1000 * 1000, clk1);
 		max_mult = min(500 * 1000 * 1000 / clk1, 63U);
@@ -691,6 +694,7 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 				unsigned int pclk = clk2 / div;
 				unsigned int min_pclk;
 
+
 				/*
 				 * TODO: HTS calculation should ideally be split
 				 * from the PLL calculations. This requires
@@ -705,12 +709,16 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 				if (pclk < min_pclk)
 					continue;
 
-				if (pclk < best_pclk) {
+				//if (pclk < best_pclk) {
+				if (pclk == 96 * 1000 * 1000) { // XXX hardcode to 96MHz
+					printk("best pclk %u / %u * %u / %u = %u\n",
+					       clk_rate, pre_div, mult, div, pclk);
 					best_pclk = pclk;
 					best_hts = hts;
 					best_pre_div = pre_div;
 					best_mult = mult;
 					best_div = div;
+					break;
 				}
 			}
 		}

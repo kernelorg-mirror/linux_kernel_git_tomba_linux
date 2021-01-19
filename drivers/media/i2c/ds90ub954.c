@@ -109,6 +109,8 @@
 #define DS90_SR_TIMESTAMP_P1_HI		0x2C
 #define DS90_SR_TIMESTAMP_P1_LO		0x2D
 
+#define DS90_SR_CSI_PORT_SEL		0x32
+
 #define DS90_TR_CSI_CTL			0x33
 #define DS90_TR_CSI_CTL_CSI_CAL_EN		BIT(6)
 #define DS90_TR_CSI_CTL_CSI_ENABLE		BIT(0)
@@ -299,7 +301,23 @@ struct ds90_rxport {
 
 	struct ds90_data *ds90;
 	unsigned short nport; /* RX port number, and index in ds90->rxport[] */
+
+	struct v4l2_subdev *sd;
+	struct fwnode_handle *fwnode;
 };
+
+struct max9286_asd {
+	struct v4l2_async_subdev base;
+	struct ds90_rxport *rxport;
+};
+
+
+static inline struct max9286_asd *to_max9286_asd(struct v4l2_async_subdev *asd)
+{
+	return container_of(asd, struct max9286_asd, base);
+}
+
+
 
 struct ds90_csitxport {
 	u32                     data_rate; /* Nominal data rate (Gb/s) */
@@ -325,6 +343,10 @@ struct ds90_data {
 	u16          atr_alias_id[DS90_MAX_POOL_ALIASES]; /* 0 = no alias */
 	u16          atr_slave_id[DS90_MAX_POOL_ALIASES]; /* 0 = not in use */
 	struct mutex alias_table_lock;
+
+
+	unsigned int nsources;
+	struct v4l2_async_notifier notifier;
 };
 
 #define sd_to_ds90(_sd) container_of(_sd, struct ds90_data, sd)
@@ -929,6 +951,22 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 		goto err_remote_chip;
 	}
 
+
+	rxport->fwnode = fwnode_graph_get_remote_endpoint(of_fwnode_handle(np));
+	if (!rxport->fwnode) {
+		//dev_err(dev,
+		//	"Endpoint %pOF has no remote endpoint connection\n",
+		//	ep.local_node);
+		printk("XXX No remote endpoint!\n");
+
+		err = -EINVAL;
+		goto err_remote_chip;
+	}
+
+
+
+
+
 	/* Initialize access to local registers */
 	rxport->reg_client = i2c_new_ancillary_device(ds90->client,
 						      info->local_name,
@@ -956,6 +994,16 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 	11: RAW10 Mode (DS90UB913A-Q1 / DS90UB933-Q1 compatible)
 	*/
 	ds90_update_bits_rxport(ds90, nport, DS90_RR_PORT_CONFIG, 0x3, 0x3);
+
+	// LV_POLARITY & FV_POLARITY
+	ds90_update_bits_rxport(ds90, nport, DS90_RR_PORT_CONFIG2, 0x3, 0x1);
+
+	// RAW10_8BIT_CTL = 0b11 : 8-bit processing using lower 8 bits
+	// 0b10 : 8-bit processing using upper 8 bits
+	ds90_update_bits_rxport(ds90, nport, DS90_RR_PORT_CONFIG2, 0x3<<6, 0x2<<6);
+
+	ds90_write_rxport(ds90, nport, DS90_RR_RAW10_ID, 0x1e); // datatype = YUV422 8-bit
+
 
 	/*
 	 * Changing FREQ_SELECT will result in some errors on the back channel
@@ -1104,8 +1152,16 @@ static void ds90_rxport_handle_events(struct ds90_data *ds90, int nport)
 	if (rx_port_sts2 & DS90_RR_RX_PORT_STS2_LINE_LEN_UNSTABLE)
 		rxport->line_len_unstable_count++;
 
-	if (rx_port_sts2 & DS90_RR_RX_PORT_STS2_LINE_LEN_CHG)
+	if (rx_port_sts2 & DS90_RR_RX_PORT_STS2_LINE_LEN_CHG) {
+		u8 h, l;
+
 		rxport->line_len_chg_count++;
+
+		err = ds90_read_rxport(ds90, nport, DS90_RR_LINE_LEN_1, &h);
+		err = ds90_read_rxport(ds90, nport, DS90_RR_LINE_LEN_0, &l);
+
+		printk("PIXELS %u\n", (h << 8) | l);
+	}
 
 	if (rx_port_sts2 & DS90_RR_RX_PORT_STS2_FPD3_ENCODE_ERROR)
 		rxport->fpd3_encode_error_count++;
@@ -1113,8 +1169,16 @@ static void ds90_rxport_handle_events(struct ds90_data *ds90, int nport)
 	if (rx_port_sts2 & DS90_RR_RX_PORT_STS2_BUFFER_ERROR)
 		rxport->buffer_error_count++;
 
-	if (rx_port_sts2 & DS90_RR_RX_PORT_STS2_LINE_CNT_CHG)
+	if (rx_port_sts2 & DS90_RR_RX_PORT_STS2_LINE_CNT_CHG) {
+		u8 h, l;
+
 		rxport->line_cnt_chg_count++;
+
+		err = ds90_read_rxport(ds90, nport, DS90_RR_LINE_COUNT_HI, &h);
+		err = ds90_read_rxport(ds90, nport, DS90_RR_LINE_COUNT_LO, &l);
+
+		printk("LINES %u\n", (h << 8) | l);
+	}
 
 	if (csi_rx_sts & DS90_RR_CSI_RX_STS_LENGTH_ERR)
 		rxport->csi_rx_sts_length_err_count++;
@@ -1225,13 +1289,29 @@ static int ds90_s_ctrl(struct v4l2_ctrl *ctrl)
 	return 0;
 }
 
+static void ds90_set_tpg(struct ds90_data *ds90, int tpg_num);
+
 static int ds90_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct ds90_data *ds90 = sd_to_ds90(sd);
 	unsigned int csi_ctl = DS90_TR_CSI_CTL_CSI_ENABLE;
 	unsigned int speed_select = 3;
+	int ret;
+	int i;
 
 	if (enable) {
+		/* Start all cameras. */
+		for (i = 0; i < DS90_FPD_RX_NPORTS; ++i) {
+			struct ds90_rxport *rxport = ds90->rxport[i];
+
+			if (!rxport)
+				continue;
+
+			ret = v4l2_subdev_call(rxport->sd, video, s_stream, 1);
+			if (ret)
+				return ret;
+		}
+
 		switch (ds90->csitxport.data_rate) {
 		case 1600000000:
 			speed_select = 0;
@@ -1253,8 +1333,20 @@ static int ds90_s_stream(struct v4l2_subdev *sd, int enable)
 
 		ds90_write_shared(ds90, DS90_SR_CSI_PLL_CTL, speed_select);
 		ds90_write_shared(ds90, DS90_TR_CSI_CTL, csi_ctl);
+
+		//ds90_set_tpg(ds90, TEST_PATTERN_V_COLOR_BARS_8);
 	} else {
 		ds90_write_shared(ds90, DS90_TR_CSI_CTL, 0);
+
+		/* Stop all cameras. */
+		for (i = 0; i < DS90_FPD_RX_NPORTS; ++i) {
+			struct ds90_rxport *rxport = ds90->rxport[i];
+
+			if (!rxport)
+				continue;
+
+			v4l2_subdev_call(rxport->sd, video, s_stream, 0);
+		}
 	}
 
 	return 0;
@@ -1315,8 +1407,9 @@ static int ds90_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_pad_config *cfg,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
-	if (code->pad != 0)
+	if (code->pad >= DS90_NPORTS)
 		return -EINVAL;
+
 	if (code->index >= 1) //ARRAY_SIZE(ov5640_formats))
 		return -EINVAL;
 
@@ -1331,6 +1424,20 @@ static int ds90_set_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_pad_config *cfg,
 			  struct v4l2_subdev_format *format)
 {
+	struct ds90_data *ds90 = sd_to_ds90(sd);
+	struct v4l2_mbus_framefmt *cfg_fmt;
+
+	if (format->pad >= DS90_NPORTS)
+		return -EINVAL;
+
+	cfg_fmt = ds90_get_pad_format(ds90, cfg, format->pad, format->which);
+	if (!cfg_fmt) {
+		printk("bad get pdf\n");
+		return -EINVAL;
+	}
+
+	*cfg_fmt = format->format;
+
 	return 0;
 }
 
@@ -1452,6 +1559,155 @@ static int ds90_parse_dt(struct ds90_data *ds90)
 	return err;
 }
 
+
+
+static int max9286_notify_bound(struct v4l2_async_notifier *notifier,
+				struct v4l2_subdev *subdev,
+				struct v4l2_async_subdev *asd)
+{
+	struct ds90_data *priv = sd_to_ds90(notifier->sd);
+	struct ds90_rxport *source = to_max9286_asd(asd)->rxport;
+	unsigned int index = source->nport;
+	unsigned int src_pad;
+	int ret;
+
+	printk("XXX BOUND\n");
+
+	ret = media_entity_get_fwnode_pad(&subdev->entity,
+					  source->fwnode,
+					  MEDIA_PAD_FL_SOURCE);
+	if (ret < 0) {
+		dev_err(&priv->client->dev,
+			"Failed to find pad for %s\n", subdev->name);
+		return ret;
+	}
+
+	//priv->bound_sources |= BIT(index);
+	source->sd = subdev;
+	src_pad = ret;
+
+	ret = media_create_pad_link(&source->sd->entity, src_pad,
+				    &priv->sd.entity, index,
+				    MEDIA_LNK_FL_ENABLED |
+				    MEDIA_LNK_FL_IMMUTABLE);
+	if (ret) {
+		dev_err(&priv->client->dev,
+			"Unable to link %s:%u -> %s:%u\n",
+			source->sd->name, src_pad, priv->sd.name, index);
+		return ret;
+	}
+
+	dev_dbg(&priv->client->dev, "Bound %s pad: %u on index %u\n",
+		subdev->name, src_pad, index);
+#if 0
+	/*
+	 * We can only register v4l2_async_notifiers, which do not provide a
+	 * means to register a complete callback. bound_sources allows us to
+	 * identify when all remote serializers have completed their probe.
+	 */
+	if (priv->bound_sources != priv->source_mask)
+		return 0;
+
+	/*
+	 * All enabled sources have probed and enabled their reverse control
+	 * channels:
+	 *
+	 * - Verify all configuration links are properly detected
+	 * - Disable auto-ack as communication on the control channel are now
+	 *   stable.
+	 */
+	max9286_check_config_link(priv, priv->source_mask);
+
+	/*
+	 * Re-configure I2C with local acknowledge disabled after cameras have
+	 * probed.
+	 */
+	max9286_configure_i2c(priv, false);
+
+	return max9286_set_pixelrate(priv);
+#endif
+	return 0;
+}
+
+static void max9286_notify_unbind(struct v4l2_async_notifier *notifier,
+				  struct v4l2_subdev *subdev,
+				  struct v4l2_async_subdev *asd)
+{
+	//struct ds90_data *priv = sd_to_ds90(notifier->sd);
+	struct ds90_rxport *source = to_max9286_asd(asd)->rxport;
+	//unsigned int index = source->nport;
+
+	printk("XXX UNBIND\n");
+
+	source->sd = NULL;
+	//priv->bound_sources &= ~BIT(index);
+}
+
+static const struct v4l2_async_notifier_operations max9286_notify_ops = {
+	.bound = max9286_notify_bound,
+	.unbind = max9286_notify_unbind,
+};
+
+static int max9286_v4l2_notifier_register(struct ds90_data *priv)
+{
+	struct device *dev = &priv->client->dev;
+	int ret;
+	int i;
+
+	v4l2_async_notifier_init(&priv->notifier);
+
+	for (i = 0; i < DS90_FPD_RX_NPORTS; ++i) {
+		struct ds90_rxport *rxport = priv->rxport[i];
+		struct v4l2_async_subdev *asd;
+
+		if (!rxport)
+			continue;
+
+		printk("RXPORT %d %p, notif\n", i, rxport);
+
+		asd = v4l2_async_notifier_add_fwnode_subdev(&priv->notifier,
+							    rxport->fwnode,
+							    sizeof(struct max9286_asd));
+		if (IS_ERR(asd)) {
+			dev_err(dev, "Failed to add subdev for source %u: %ld",
+				i, PTR_ERR(asd));
+			v4l2_async_notifier_cleanup(&priv->notifier);
+			return PTR_ERR(asd);
+		}
+
+		to_max9286_asd(asd)->rxport = rxport;
+
+		printk("SUBDEF NOTIF %d\n", i);
+
+		break;
+	}
+
+	priv->notifier.ops = &max9286_notify_ops;
+
+	ret = v4l2_async_subdev_notifier_register(&priv->sd, &priv->notifier);
+	if (ret) {
+		dev_err(dev, "Failed to register subdev_notifier");
+		v4l2_async_notifier_cleanup(&priv->notifier);
+		return ret;
+	}
+
+	return 0;
+}
+
+static void max9286_v4l2_notifier_unregister(struct ds90_data *ds90)
+{
+	if (!ds90->nsources)
+		return;
+
+	v4l2_async_notifier_unregister(&ds90->notifier);
+	v4l2_async_notifier_cleanup(&ds90->notifier);
+}
+
+
+
+
+
+
 static int ds90_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
@@ -1497,6 +1753,9 @@ static int ds90_probe(struct i2c_client *client)
 		dev_err(dev, "Cannot read first register (%d), abort\n", err);
 		goto err_reg_read;
 	}
+
+
+	ds90_write_shared(ds90, DS90_SR_CSI_PORT_SEL, 1); // enable writes to CSI TX PORT 0
 
 	err = ds90_atr_probe(ds90);
 	if (err)
@@ -1546,6 +1805,8 @@ static int ds90_probe(struct i2c_client *client)
 		dev_err(dev, "v4l2_async_register_subdev error %d\n", err);
 		goto err_register_subdev;
 	}
+
+	max9286_v4l2_notifier_register(ds90);
 
 	/* Kick off */
 
@@ -1615,6 +1876,7 @@ static int ds90_remove(struct i2c_client *client)
 	if (ds90->kthread)
 		kthread_stop(ds90->kthread);
 	v4l2_async_unregister_subdev(&ds90->sd);
+	max9286_v4l2_notifier_unregister(ds90);
 	media_entity_cleanup(&ds90->sd.entity);
 	v4l2_ctrl_handler_free(&ds90->ctrl_handler);
 	ds90_remove_ports(ds90);

@@ -59,7 +59,7 @@ static s64 cal_camerarx_get_external_rate(struct cal_camerarx *phy)
 
 	rate = v4l2_ctrl_g_ctrl_int64(ctrl);
 */
-	rate = 50000000;
+	rate = 200000000;
 	phy_dbg(3, phy, "sensor Pixel Rate: %llu\n", rate);
 
 	return rate;

@@ -270,6 +270,7 @@ static int ds90_probe(struct i2c_client *client)
 	struct ds90_data *ds90;
 	s32 rev_mask;
 	int err;
+	u8 v;
 
 	dev_dbg(dev, "probing, addr 0x%02x\n", client->addr);
 

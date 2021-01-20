@@ -8,9 +8,10 @@
 #ifndef _DS90UB953_H
 #define _DS90UB953_H
 
-#define DS90_GPIO_FUNC_UNUSED             0
-#define DS90_GPIO_FUNC_INPUT              1
-#define DS90_GPIO_FUNC_OUTPUT_REMOTE      2
-#define DS90_GPIO_N_FUNCS                 3
+#define DS90_GPIO_FUNC_UNUSED		0
+#define DS90_GPIO_FUNC_OUTPUT		1
+#define DS90_GPIO_FUNC_INPUT		2
+#define DS90_GPIO_FUNC_OUTPUT_REMOTE	3
+#define DS90_GPIO_N_FUNCS		4
 
 #endif /* _DS90UB953_H */

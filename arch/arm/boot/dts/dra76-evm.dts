@@ -464,8 +464,8 @@
 					remote-chip {
 						compatible = "ti,ds90ub913a-q1";
 
-						gpio-functions = <DS90_GPIO_FUNC_UNUSED
-								  DS90_GPIO_FUNC_UNUSED
+						gpio-functions = <DS90_GPIO_FUNC_OUTPUT
+								  DS90_GPIO_FUNC_OUTPUT
 								  DS90_GPIO_FUNC_UNUSED
 								  DS90_GPIO_FUNC_UNUSED>;
 					};

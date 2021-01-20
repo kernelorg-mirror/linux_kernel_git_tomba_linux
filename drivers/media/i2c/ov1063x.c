@@ -630,24 +630,21 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 			     unsigned int fps_denominator,
 			     struct ov1063x_pll_config *cfg)
 {
-	static const unsigned int pre_divs[] = { 2, 3, 4, 6, 8, 10, 12, 14 };
-
 	unsigned int best_pclk = UINT_MAX;
-	unsigned int best_pre_div;
+	unsigned int best_pre_div_x2;
 	unsigned int best_mult;
 	unsigned int best_div;
 	unsigned int best_hts;
-	unsigned int max_pre_div;
-	unsigned int pre_div;
+	unsigned int max_pre_div_x2;
+	unsigned int pre_div_x2;
 	unsigned int hts;
 
 	/*
 	 *  XVCLK --> pre-div -------> mult ----------> div --> output
 	 * 6-27 MHz           3-27 MHz      200-500 MHz       Max 96 MHz
 	 *
-	 * Valid pre-divider values are 1, 1.5, 2, 3, 4, 5, 6 and 7. The
-	 * pre_divs array stores the pre-dividers multiplied by two, indexed by
-	 * register values.
+	 * Valid pre-divider values are 1, 1.5, 2, 3, 4, 5, 6 and 7, stored in
+	 * registers as the index in this list of values.
 	 *
 	 * Valid multiplier values are [1, 63], stored as-is in registers.
 	 *
@@ -664,11 +661,15 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 	 * The vts is extended so as to achieve the required frame rate.
 	 */
 
-	max_pre_div = max(clk_rate / (3 * 1000 * 1000),
-			  ARRAY_SIZE(pre_divs) - 1);
+	/*
+	 * The pre_div_x2 variable stores the pre-div value multiplied by 2, to
+	 * support the fractional divider 1.5.
+	 */
+	max_pre_div_x2 = min(clk_rate * 2 / (3 * 1000 * 1000), 14U);
 
-	for (pre_div = 0; pre_div <= max_pre_div; pre_div++) {
-		unsigned int clk1 = clk_rate * 2 / pre_divs[pre_div];
+	for (pre_div_x2 = 2; pre_div_x2 <= max_pre_div_x2;
+	     pre_div_x2 += (pre_div_x2 < 4 ? 1 : 2)) {
+		unsigned int clk1 = clk_rate * 2 / pre_div_x2;
 		unsigned int min_mult;
 		unsigned int max_mult;
 		unsigned int mult;
@@ -708,7 +709,7 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 				if (pclk < best_pclk) {
 					best_pclk = pclk;
 					best_hts = hts;
-					best_pre_div = pre_div;
+					best_pre_div_x2 = pre_div_x2;
 					best_mult = mult;
 					best_div = div;
 				}
@@ -719,8 +720,10 @@ static int ov1063x_pll_setup(unsigned int clk_rate,
 	if (best_pclk == UINT_MAX)
 		return -EINVAL;
 
+	/* Store the mult, pre_div and div as register values. */
 	cfg->mult = best_mult;
-	cfg->pre_div = best_pre_div;
+	cfg->pre_div = best_pre_div_x2 < 4 ? best_pre_div_x2 - 2
+		     : best_pre_div_x2 / 2;
 	cfg->div = (best_div / 2) - 1;
 	cfg->clk_out = best_pclk;
 

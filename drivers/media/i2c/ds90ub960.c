@@ -294,7 +294,7 @@ struct ds90_rxport {
 	struct gpio_chip        gpio_chip;
 	char                    gpio_chip_name[64];
 
-	struct i2c_client      *reg_client; /* for per-port local registers */
+	struct i2c_client      *reg_client; /* for per-port local registers, for debugging */
 
 	struct device_node     *remote_of_node; /* "remote-chip" OF node */
 	struct i2c_client      *ser_client; /* remote serializer */
@@ -348,6 +348,9 @@ struct ds90_data {
 	struct mutex alias_table_lock;
 
 	struct v4l2_async_notifier notifier;
+
+	u8 current_read_rxport;
+	u8 current_write_rxport_mask;
 };
 
 #define sd_to_ds90(_sd) container_of(_sd, struct ds90_data, sd)
@@ -372,78 +375,123 @@ static const char * const ds90_tpg_qmenu[] = {
  * Basic device access
  */
 
-static int ds90_read(const struct ds90_data *priv,
-		     const struct i2c_client *client,
-		     u8 reg, u8 *val)
-{
-	int ret = i2c_smbus_read_byte_data(client, reg);
-
-	if (ret < 0) {
-		dev_err(&priv->client->dev,
-			"%s[0x%02x]: cannot read register 0x%02x (%d)!\n",
-			__func__, client->addr, reg, ret);
-	} else {
-		*val = ret;
-		ret = 0;
-	}
-
-	return ret;
-}
-
 static int ds90_read_shared(const struct ds90_data *priv, u8 reg, u8 *val)
 {
+	struct device *dev = &priv->client->dev;
 	unsigned int v;
 	int ret;
 
 	ret = regmap_read(priv->regmap, reg, &v);
-	if (ret)
-		dev_err(&priv->client->dev,
-				"%s: cannot read register 0x%02x (%d)!\n",
+	if (ret) {
+		dev_err(dev, "%s: cannot read register 0x%02x (%d)!\n",
 				__func__, reg, ret);
+		return ret;
+	}
+
 	*val = v;
-	return ret;
-}
 
-static int ds90_read_rxport(const struct ds90_data *priv, int nport,
-			    u8 reg, u8 *val)
-{
-	return ds90_read(priv, priv->rxport[nport]->reg_client, reg, val);
-}
-
-static int ds90_write(const struct ds90_data *priv,
-		      const struct i2c_client *client,
-		      u8 reg, u8 val)
-{
-	int ret = i2c_smbus_write_byte_data(client, reg, val);
-
-	if (ret < 0)
-		dev_err(&priv->client->dev,
-			"%s[0x%02x]: cannot write register 0x%02x (%d)!\n",
-			__func__, client->addr, reg, ret);
-	else
-		ret = 0;
-
-	return ret;
+	return 0;
 }
 
 static int ds90_write_shared(const struct ds90_data *priv, u8 reg, u8 val)
 {
+	struct device *dev = &priv->client->dev;
 	int ret;
 
 	ret = regmap_write(priv->regmap, reg, val);
 	if (ret < 0)
-		dev_err(&priv->client->dev,
-			"%s: cannot write register 0x%02x (%d)!\n",
+		dev_err(dev, "%s: cannot write register 0x%02x (%d)!\n",
 			__func__, reg, ret);
 
 	return ret;
 }
 
-static int ds90_write_rxport(const struct ds90_data *priv, int nport,
-			     u8 reg, u8 val)
+static int ds90_update_bits_shared(const struct ds90_data *priv, u8 reg, u8 mask, u8 val)
 {
-	return ds90_write(priv, priv->rxport[nport]->reg_client, reg, val);
+	struct device *dev = &priv->client->dev;
+	int ret;
+
+	ret = regmap_update_bits(priv->regmap, reg, mask, val);
+	if (ret < 0)
+		dev_err(dev, "%s: cannot update register 0x%02x (%d)!\n",
+			__func__, reg, ret);
+
+	return ret;
 }
+
+static int ds90_select_rxport(struct ds90_data *priv, int nport)
+{
+	struct device *dev = &priv->client->dev;
+	int ret;
+
+	if (priv->current_read_rxport == nport && priv->current_write_rxport_mask == BIT(nport))
+		return 0;
+
+	ret = regmap_write(priv->regmap, DS90_SR_FPD3_PORT_SEL, (nport << 4) | (1 << nport));
+	if (ret) {
+		dev_err(dev, "%s: cannot select rxport %d (%d)!\n",
+			__func__, nport, ret);
+		return ret;
+	}
+
+	priv->current_read_rxport = nport;
+	priv->current_write_rxport_mask = BIT(nport);
+
+	return 0;
+}
+
+static int ds90_read_rxport(struct ds90_data *priv, int nport, u8 reg, u8 *val)
+{
+	struct device *dev = &priv->client->dev;
+	unsigned int v;
+	int ret;
+
+	ds90_select_rxport(priv, nport);
+
+	ret = regmap_read(priv->regmap, reg, &v);
+	if (ret) {
+		dev_err(dev, "%s: cannot read register 0x%02x (%d)!\n",
+			__func__, reg, ret);
+		return ret;
+	}
+
+	*val = v;
+
+	return 0;
+}
+
+static int ds90_write_rxport(struct ds90_data *priv, int nport, u8 reg, u8 val)
+{
+	struct device *dev = &priv->client->dev;
+	int ret;
+
+	ds90_select_rxport(priv, nport);
+
+	ret = regmap_write(priv->regmap, reg, val);
+	if (ret)
+		dev_err(dev, "%s: cannot write register 0x%02x (%d)!\n",
+			__func__, reg, ret);
+
+	return ret;
+}
+
+static int ds90_update_bits_rxport(struct ds90_data *priv, int nport,
+				   u8 reg, u8 mask, u8 val)
+{
+	struct device *dev = &priv->client->dev;
+	int ret;
+
+	ds90_select_rxport(priv, nport);
+
+	ret = regmap_update_bits(priv->regmap, reg, mask, val);
+
+	if (ret)
+		dev_err(dev, "%s: cannot update register 0x%02x (%d)!\n",
+			__func__, reg, ret);
+
+	return ret;
+}
+
 
 static int ds90_write_ind8(const struct ds90_data *priv, u8 reg, u8 val)
 {
@@ -466,45 +514,6 @@ static int ds90_write_ind16(const struct ds90_data *priv, u8 reg, u16 val)
 	if (!err)
 		err = ds90_write_shared(priv, DS90_SR_IND_ACC_DATA, val & 0xff);
 	return err;
-}
-
-static int ds90_update_bits(const struct ds90_data *priv,
-			    const struct i2c_client *client,
-			    u8 reg, u8 mask, u8 val)
-{
-	int ret = i2c_smbus_read_byte_data(client, reg);
-
-	if (ret < 0) {
-		dev_err(&priv->client->dev,
-			"%s[0x%02x]: cannot read register 0x%02x (%d)!\n",
-			__func__, client->addr, reg, ret);
-		return ret;
-	}
-
-	ret = i2c_smbus_write_byte_data(client, reg,
-					(ret & ~mask) | (val & mask));
-	if (ret < 0) {
-		dev_err(&priv->client->dev,
-			"%s[0x%02x]: cannot write register 0x%02x (%d)!\n",
-			__func__, client->addr, reg, ret);
-		return ret;
-	}
-
-	return 0;
-}
-
-static int ds90_update_bits_shared(const struct ds90_data *priv,
-				   u8 reg, u8 mask, u8 val)
-{
-	return ds90_update_bits(priv, priv->client,
-				reg, mask, val);
-}
-
-static int ds90_update_bits_rxport(const struct ds90_data *priv, int nport,
-				   u8 reg, u8 mask, u8 val)
-{
-	return ds90_update_bits(priv, priv->rxport[nport]->reg_client,
-				reg, mask, val);
 }
 
 static void ds90_reset(const struct ds90_data *priv, bool keep_reset)
@@ -1722,11 +1731,13 @@ static void ds90_v4l2_notifier_unregister(struct ds90_data *priv)
 	v4l2_async_notifier_cleanup(&priv->notifier);
 }
 
-
-
 static const struct regmap_config ds90_regmap_config = {
+	.name = "ds90ub960",
+
 	.reg_bits = 8,
 	.val_bits = 8,
+
+	.max_register = 0xff,
 };
 
 static int ds90_probe(struct i2c_client *client)

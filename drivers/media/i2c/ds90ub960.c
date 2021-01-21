@@ -1153,22 +1153,29 @@ static void ds90_rxport_handle_events(struct ds90_data *priv, int nport)
 	u8 rx_port_sts1;
 	u8 rx_port_sts2;
 	u8 csi_rx_sts;
+	u8 bcc_sts;
 	bool locked;
 	int err = 0;
 
 	/* Read interrupts (also clears most of them) */
 	if (!err)
-		err = ds90_read_rxport(priv, nport,
-				       DS90_RR_RX_PORT_STS1, &rx_port_sts1);
+		err = ds90_read_rxport(priv, nport, DS90_RR_RX_PORT_STS1, &rx_port_sts1);
 	if (!err)
-		err = ds90_read_rxport(priv, nport,
-				       DS90_RR_RX_PORT_STS2, &rx_port_sts2);
+		err = ds90_read_rxport(priv, nport, DS90_RR_RX_PORT_STS2, &rx_port_sts2);
 	if (!err)
-		err = ds90_read_rxport(priv, nport,
-				       DS90_RR_CSI_RX_STS, &csi_rx_sts);
+		err = ds90_read_rxport(priv, nport, DS90_RR_CSI_RX_STS, &csi_rx_sts);
+	if (!err)
+		err = ds90_read_rxport(priv, nport, DS90_RR_BCC_STATUS, &bcc_sts);
 
 	if (err)
 		return;
+
+	printk("Handle RX %d events: STS: %x, %x, %x, BCC %x\n", nport,
+	       rx_port_sts1, rx_port_sts2, csi_rx_sts,
+	       bcc_sts);
+
+	if (bcc_sts)
+		dev_err(dev, "BCC error: %#02x\n", bcc_sts);
 
 	if (rx_port_sts1 & DS90_RR_RX_PORT_STS1_BCC_CRC_ERROR)
 		rxport->bcc_crc_error_count++;
@@ -1491,16 +1498,23 @@ static irqreturn_t ds90_handle_events(int irq, void *arg)
 	int err;
 	int i;
 
+	// XXX needs mutex!
+
 	err = ds90_read_shared(priv, DS90_SR_INTERRUPT_STS, &int_sts);
 
 	if (!err && int_sts) {
+		printk("INTERRUPT_STS %x\n", int_sts);
+
 		if (int_sts & DS90_SR_INTERRUPT_STS_IS_CSI_TX0)
 			ds90_csi_handle_events(priv);
 
-		for (i = 0; i < DS90_FPD_RX_NPORTS; i++)
-			if (int_sts & DS90_SR_INTERRUPT_STS_IS_RX(i) &&
-			    priv->rxport[i])
+		for (i = 0; i < DS90_FPD_RX_NPORTS; i++) {
+			if (!priv->rxport[i])
+				continue;
+
+			if (int_sts & DS90_SR_INTERRUPT_STS_IS_RX(i))
 				ds90_rxport_handle_events(priv, i);
+		}
 	}
 
 	return IRQ_HANDLED;
@@ -1845,7 +1859,29 @@ static int ds90_probe(struct i2c_client *client)
 
 	ds90_v4l2_notifier_register(priv);
 
+	/* By default enable forwarding from both ports */
+	ds90_write_shared(priv, DS90_SR_FWD_CTL1, 0x00);
+
 	/* Kick off */
+	{
+		// Check the initial LOCK status before adding the IRQ handler.
+		// If we already have a LOCK, we don't seem to get an irq (at least when polling)
+		int i;
+
+		for (i = 0; i < DS90_FPD_RX_NPORTS; i++) {
+			u8 rx_port_sts1;
+
+			if (!priv->rxport[i])
+				continue;
+
+			err = ds90_read_rxport(priv, i, DS90_RR_RX_PORT_STS1, &rx_port_sts1);
+			if (rx_port_sts1 & DS90_RR_RX_PORT_STS1_LOCK_STS) {
+				dev_info(dev, "rx%d: INITIAL LOCKED\n", i);
+				ds90_rxport_add_serializer(priv, i);
+				priv->rxport[i]->locked = true;
+			}
+		}
+	}
 
 	if (client->irq) {
 		dev_info(dev, "using IRQ %d\n", client->irq);
@@ -1878,9 +1914,6 @@ static int ds90_probe(struct i2c_client *client)
 		}
 		dev_info(dev, "using polling mode\n");
 	}
-
-	/* By default enable forwarding from both ports */
-	ds90_write_shared(priv, DS90_SR_FWD_CTL1, 0x00);
 
 	dev_info(dev, "Successfully probed (rev/mask %02x)\n", rev_mask);
 

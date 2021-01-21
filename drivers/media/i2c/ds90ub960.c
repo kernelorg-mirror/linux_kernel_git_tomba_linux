@@ -37,6 +37,8 @@
 #define DS90_NUM_SLAVE_ALIASES	8
 #define DS90_MAX_POOL_ALIASES	(DS90_FPD_RX_NPORTS * DS90_NUM_SLAVE_ALIASES)
 
+#define HACK_CSI_PORT		0
+
 /*
  * Register map
  *
@@ -351,6 +353,9 @@ struct ds90_data {
 
 	u8 current_read_rxport;
 	u8 current_write_rxport_mask;
+
+	u8 current_read_csiport;
+	u8 current_write_csiport_mask;
 };
 
 #define sd_to_ds90(_sd) container_of(_sd, struct ds90_data, sd)
@@ -492,6 +497,61 @@ static int ds90_update_bits_rxport(struct ds90_data *priv, int nport,
 	return ret;
 }
 
+static int ds90_select_csiport(struct ds90_data *priv, int nport)
+{
+	struct device *dev = &priv->client->dev;
+	int ret;
+
+	if (priv->current_read_csiport == nport && priv->current_write_csiport_mask == BIT(nport))
+		return 0;
+
+	ret = regmap_write(priv->regmap, DS90_SR_CSI_PORT_SEL, (nport << 4) | (1 << nport));
+	if (ret) {
+		dev_err(dev, "%s: cannot select csi port %d (%d)!\n",
+			__func__, nport, ret);
+		return ret;
+	}
+
+	priv->current_read_csiport = nport;
+	priv->current_write_csiport_mask = BIT(nport);
+
+	return 0;
+}
+
+static int ds90_read_csiport(struct ds90_data *priv, int nport, u8 reg, u8 *val)
+{
+	struct device *dev = &priv->client->dev;
+	unsigned int v;
+	int ret;
+
+	ds90_select_csiport(priv, nport);
+
+	ret = regmap_read(priv->regmap, reg, &v);
+	if (ret) {
+		dev_err(dev, "%s: cannot read register 0x%02x (%d)!\n",
+			__func__, reg, ret);
+		return ret;
+	}
+
+	*val = v;
+
+	return 0;
+}
+
+static int ds90_write_csiport(struct ds90_data *priv, int nport, u8 reg, u8 val)
+{
+	struct device *dev = &priv->client->dev;
+	int ret;
+
+	ds90_select_csiport(priv, nport);
+
+	ret = regmap_write(priv->regmap, reg, val);
+	if (ret)
+		dev_err(dev, "%s: cannot write register 0x%02x (%d)!\n",
+			__func__, reg, ret);
+
+	return ret;
+}
 
 static int ds90_write_ind8(const struct ds90_data *priv, u8 reg, u8 val)
 {
@@ -698,7 +758,7 @@ static void ds90_csi_handle_events(struct ds90_data *priv)
 	u8 csi_tx_isr;
 	int err;
 
-	err = ds90_read_shared(priv, DS90_TR_CSI_TX_ISR, &csi_tx_isr);
+	err = ds90_read_csiport(priv, HACK_CSI_PORT, DS90_TR_CSI_TX_ISR, &csi_tx_isr);
 
 	if (!err) {
 		if (csi_tx_isr & DS90_TR_CSI_TX_ISR_IS_CSI_SYNC_ERROR)
@@ -1366,11 +1426,11 @@ static int ds90_s_stream(struct v4l2_subdev *sd, int enable)
 			csi_ctl |= DS90_TR_CSI_CTL_CSI_CAL_EN;
 
 		ds90_write_shared(priv, DS90_SR_CSI_PLL_CTL, speed_select);
-		ds90_write_shared(priv, DS90_TR_CSI_CTL, csi_ctl);
+		ds90_write_csiport(priv, HACK_CSI_PORT, DS90_TR_CSI_CTL, csi_ctl);
 
 		//ds90_set_tpg(priv, TEST_PATTERN_V_COLOR_BARS_8);
 	} else {
-		ds90_write_shared(priv, DS90_TR_CSI_CTL, 0);
+		ds90_write_csiport(priv, HACK_CSI_PORT, DS90_TR_CSI_CTL, 0);
 
 		/* Stop all cameras. */
 		for (i = 0; i < DS90_FPD_RX_NPORTS; ++i) {
@@ -1805,9 +1865,6 @@ static int ds90_probe(struct i2c_client *client)
 		goto err_reg_read;
 	}
 
-
-	ds90_write_shared(priv, DS90_SR_CSI_PORT_SEL, 1); // enable writes to CSI TX PORT 0
-
 	err = ds90_atr_probe(priv);
 	if (err)
 		goto err_atr_probe;
@@ -1867,6 +1924,8 @@ static int ds90_probe(struct i2c_client *client)
 		// Check the initial LOCK status before adding the IRQ handler.
 		// If we already have a LOCK, we don't seem to get an irq (at least when polling)
 		int i;
+
+		printk("INITIAL CHECK\n");
 
 		for (i = 0; i < DS90_FPD_RX_NPORTS; i++) {
 			u8 rx_port_sts1;

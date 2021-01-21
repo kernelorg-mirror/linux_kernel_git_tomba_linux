@@ -69,6 +69,8 @@ static int ub913_write(const struct ub913_data *priv, u8 reg, u8 val)
 
 static void ub913_configure_gpios(struct ub913_data *priv)
 {
+	// XXX disable for now
+#if 0
 	struct device *dev = &priv->client->dev;
 	u8 gpio_reg_val[2] = { 0 };
 	int i;
@@ -107,6 +109,7 @@ static void ub913_configure_gpios(struct ub913_data *priv)
 
 	ub913_write(priv, UB913_REG_GPIO_CFG(0), gpio_reg_val[0]);
 	ub913_write(priv, UB913_REG_GPIO_CFG(1), gpio_reg_val[1]);
+#endif
 }
 
 /*

@@ -15,6 +15,7 @@
 #include <linux/of.h>
 #include <linux/delay.h>
 #include <dt-bindings/media/ds90ub953.h>
+#include <linux/regmap.h>
 
 #define UB913_NUM_GPIOS			4
 
@@ -33,27 +34,32 @@
 
 struct ub913_data {
 	struct i2c_client *client;
+	struct regmap *regmap;
 
 	u32 gpio_func[UB913_NUM_GPIOS];
 };
 
-static s32 ub913_read(const struct ub913_data *priv, u8 reg)
+static int ub913_read(const struct ub913_data *priv, u8 reg, u8 *val)
 {
-	s32 ret;
+	unsigned int v;
+	int ret;
 
-	ret = i2c_smbus_read_byte_data(priv->client, reg);
-	if (ret < 0)
+	ret = regmap_read(priv->regmap, reg, &v);
+	if (ret < 0) {
 		dev_err(&priv->client->dev, "Cannot read register 0x%02x: %d!\n",
 			reg, ret);
+		return ret;
+	}
 
-	return ret;
+	*val = v;
+	return 0;
 }
 
-static s32 ub913_write(const struct ub913_data *priv, u8 reg, u8 val)
+static int ub913_write(const struct ub913_data *priv, u8 reg, u8 val)
 {
-	s32 ret;
+	int ret;
 
-	ret = i2c_smbus_write_byte_data(priv->client, reg, val);
+	ret = regmap_write(priv->regmap, reg, val);
 	if (ret < 0)
 		dev_err(&priv->client->dev, "Cannot write register 0x%02x: %d!\n",
 			reg, ret);
@@ -63,7 +69,6 @@ static s32 ub913_write(const struct ub913_data *priv, u8 reg, u8 val)
 
 static void ub913_configure_gpios(struct ub913_data *priv)
 {
-	#if 0
 	struct device *dev = &priv->client->dev;
 	u8 gpio_reg_val[2] = { 0 };
 	int i;
@@ -80,7 +85,7 @@ static void ub913_configure_gpios(struct ub913_data *priv)
 			break;
 		case DS90_GPIO_FUNC_OUTPUT:
 			gpio_reg_val[reg_idx] |=
-				UB913_REG_GPIO_CFG_ENABLE(field_idx) | UB913_REG_GPIO_CFG_OUT_VAL(field_idx);
+				UB913_REG_GPIO_CFG_ENABLE(field_idx);
 			break;
 		case DS90_GPIO_FUNC_INPUT:
 			gpio_reg_val[reg_idx] |=
@@ -102,9 +107,7 @@ static void ub913_configure_gpios(struct ub913_data *priv)
 
 	ub913_write(priv, UB913_REG_GPIO_CFG(0), gpio_reg_val[0]);
 	ub913_write(priv, UB913_REG_GPIO_CFG(1), gpio_reg_val[1]);
-#endif
 }
-
 
 /*
  * Reset via registers (useful from remote).
@@ -112,26 +115,30 @@ static void ub913_configure_gpios(struct ub913_data *priv)
  */
 static void ub913_soft_reset(struct ub913_data *priv)
 {
-	int retries = 10;
-	s32 ret;
+	struct device *dev = &priv->client->dev;
+	int retries;
 
-	while (retries-- > 0) {
-		ret = ub913_write(priv, UB913_REG_RESET_CTL,
-				 UB913_REG_RESET_CTL_DIGITAL_RESET_0);
-		if (ret >= 0)
-			break;
-		usleep_range(1000, 3000);
-	}
+	ub913_write(priv, UB913_REG_RESET_CTL, UB913_REG_RESET_CTL_DIGITAL_RESET_0);
+
+	usleep_range(10000, 30000);
 
 	retries = 10;
 	while (retries-- > 0) {
-		ret = ub913_read(priv, UB913_REG_RESET_CTL);
-		if (ret >= 0 && (ret & UB913_REG_RESET_CTL_DIGITAL_RESET_0) == 0) {
-			printk("ub913 reset done\n");
+		int ret;
+		u8 v;
+
+		ret = ub913_read(priv, UB913_REG_RESET_CTL, &v);
+
+		if (ret >= 0 && (v & UB913_REG_RESET_CTL_DIGITAL_RESET_0) == 0) {
+			dev_dbg(dev, "reset done\n");
 			break;
 		}
+
 		usleep_range(1000, 3000);
 	}
+
+	if (retries == 0)
+		dev_err(dev, "reset timeout\n");
 }
 
 static int ub913_parse_dt(struct ub913_data *priv)
@@ -154,6 +161,14 @@ static int ub913_parse_dt(struct ub913_data *priv)
 	return 0;
 }
 
+static const struct regmap_config ub913_regmap_config = {
+	.name = "ds90ub913",
+	.reg_bits = 8,
+	.val_bits = 8,
+	.reg_format_endian = REGMAP_ENDIAN_DEFAULT,
+	.val_format_endian = REGMAP_ENDIAN_DEFAULT,
+};
+
 static int ub913_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
@@ -168,6 +183,12 @@ static int ub913_probe(struct i2c_client *client)
 
 	priv->client = client;
 	i2c_set_clientdata(client, priv);
+
+	priv->regmap = devm_regmap_init_i2c(client, &ub913_regmap_config);
+	if (IS_ERR(priv->regmap)) {
+		dev_err(dev, "Failed to init regmap\n");
+		return PTR_ERR(priv->regmap);
+	}
 
 	ub913_soft_reset(priv);
 

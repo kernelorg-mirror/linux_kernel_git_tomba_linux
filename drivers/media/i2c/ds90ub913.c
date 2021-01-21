@@ -14,7 +14,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/delay.h>
-#include <dt-bindings/media/ds90ub953.h>
+#include <dt-bindings/media/ds90ub9xx.h>
 #include <linux/regmap.h>
 
 #define UB913_NUM_GPIOS			4

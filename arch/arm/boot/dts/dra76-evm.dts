@@ -8,7 +8,7 @@
 #include "dra7-evm-common.dtsi"
 #include "dra76x-mmc-iodelay.dtsi"
 #include <dt-bindings/net/ti-dp83867.h>
-#include <dt-bindings/media/ds90ub953.h>
+#include <dt-bindings/media/ds90ub9xx.h>
 
 / {
 	model = "TI DRA762 EVM";

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /**
- * Driver for the Texas Instruments DS90UB954-Q1 video deserializer
+ * Driver for the Texas Instruments DS90UB960-Q1 video deserializer
  *
  * Copyright (c) 2019 Luca Ceresoli <luca@lucaceresoli.net>
  * Copyright (c) 2021 Tomi Valkeinen <tomi.valkeinen@ideasonboard.com>
@@ -24,6 +24,7 @@
 #include <linux/slab.h>
 #include <media/v4l2-subdev.h>
 #include <media/v4l2-ctrls.h>
+#include <linux/regmap.h>
 
 /* TODO increase DS90_FPD_RX_NPORTS to 2, test, fix */
 #define DS90_FPD_RX_NPORTS	2  /* Physical FPD-link RX ports */
@@ -300,8 +301,8 @@ struct ds90_rxport {
 	unsigned short          ser_alias; /* ser i2c alias (lower 7 bits) */
 	bool                    locked;
 
-	struct ds90_data *ds90;
-	unsigned short nport; /* RX port number, and index in ds90->rxport[] */
+	struct ds90_data *priv;
+	unsigned short nport; /* RX port number, and index in priv->rxport[] */
 
 	struct v4l2_subdev *sd;
 	struct fwnode_handle *fwnode;
@@ -326,6 +327,7 @@ struct ds90_csitxport {
 
 struct ds90_data {
 	struct i2c_client      *client;  /* for shared local registers */
+	struct regmap          *regmap;
 	struct gpio_desc       *reset_gpio;
 	struct task_struct     *kthread;
 	struct i2c_atr         *atr;
@@ -345,8 +347,6 @@ struct ds90_data {
 	u16          atr_slave_id[DS90_MAX_POOL_ALIASES]; /* 0 = not in use */
 	struct mutex alias_table_lock;
 
-
-	unsigned int nsources;
 	struct v4l2_async_notifier notifier;
 };
 
@@ -372,14 +372,14 @@ static const char * const ds90_tpg_qmenu[] = {
  * Basic device access
  */
 
-static int ds90_read(const struct ds90_data *ds90,
+static int ds90_read(const struct ds90_data *priv,
 		     const struct i2c_client *client,
 		     u8 reg, u8 *val)
 {
 	int ret = i2c_smbus_read_byte_data(client, reg);
 
 	if (ret < 0) {
-		dev_err(&ds90->client->dev,
+		dev_err(&priv->client->dev,
 			"%s[0x%02x]: cannot read register 0x%02x (%d)!\n",
 			__func__, client->addr, reg, ret);
 	} else {
@@ -390,25 +390,34 @@ static int ds90_read(const struct ds90_data *ds90,
 	return ret;
 }
 
-static int ds90_read_shared(const struct ds90_data *ds90, u8 reg, u8 *val)
+static int ds90_read_shared(const struct ds90_data *priv, u8 reg, u8 *val)
 {
-	return ds90_read(ds90, ds90->client, reg, val);
+	unsigned int v;
+	int ret;
+
+	ret = regmap_read(priv->regmap, reg, &v);
+	if (ret)
+		dev_err(&priv->client->dev,
+				"%s: cannot read register 0x%02x (%d)!\n",
+				__func__, reg, ret);
+	*val = v;
+	return ret;
 }
 
-static int ds90_read_rxport(const struct ds90_data *ds90, int nport,
+static int ds90_read_rxport(const struct ds90_data *priv, int nport,
 			    u8 reg, u8 *val)
 {
-	return ds90_read(ds90, ds90->rxport[nport]->reg_client, reg, val);
+	return ds90_read(priv, priv->rxport[nport]->reg_client, reg, val);
 }
 
-static int ds90_write(const struct ds90_data *ds90,
+static int ds90_write(const struct ds90_data *priv,
 		      const struct i2c_client *client,
 		      u8 reg, u8 val)
 {
 	int ret = i2c_smbus_write_byte_data(client, reg, val);
 
 	if (ret < 0)
-		dev_err(&ds90->client->dev,
+		dev_err(&priv->client->dev,
 			"%s[0x%02x]: cannot write register 0x%02x (%d)!\n",
 			__func__, client->addr, reg, ret);
 	else
@@ -417,48 +426,56 @@ static int ds90_write(const struct ds90_data *ds90,
 	return ret;
 }
 
-static int ds90_write_shared(const struct ds90_data *ds90, u8 reg, u8 val)
+static int ds90_write_shared(const struct ds90_data *priv, u8 reg, u8 val)
 {
-	return ds90_write(ds90, ds90->client, reg, val);
+	int ret;
+
+	ret = regmap_write(priv->regmap, reg, val);
+	if (ret < 0)
+		dev_err(&priv->client->dev,
+			"%s: cannot write register 0x%02x (%d)!\n",
+			__func__, reg, ret);
+
+	return ret;
 }
 
-static int ds90_write_rxport(const struct ds90_data *ds90, int nport,
+static int ds90_write_rxport(const struct ds90_data *priv, int nport,
 			     u8 reg, u8 val)
 {
-	return ds90_write(ds90, ds90->rxport[nport]->reg_client, reg, val);
+	return ds90_write(priv, priv->rxport[nport]->reg_client, reg, val);
 }
 
-static int ds90_write_ind8(const struct ds90_data *ds90, u8 reg, u8 val)
+static int ds90_write_ind8(const struct ds90_data *priv, u8 reg, u8 val)
 {
 	int err;
 
-	err = ds90_write_shared(ds90, DS90_SR_IND_ACC_ADDR, reg);
+	err = ds90_write_shared(priv, DS90_SR_IND_ACC_ADDR, reg);
 	if (!err)
-		err = ds90_write_shared(ds90, DS90_SR_IND_ACC_DATA, val);
+		err = ds90_write_shared(priv, DS90_SR_IND_ACC_DATA, val);
 	return err;
 }
 
 /* Assumes IA_AUTO_INC is set in DS90_SR_IND_ACC_CTL */
-static int ds90_write_ind16(const struct ds90_data *ds90, u8 reg, u16 val)
+static int ds90_write_ind16(const struct ds90_data *priv, u8 reg, u16 val)
 {
 	int err;
 
-	err = ds90_write_shared(ds90, DS90_SR_IND_ACC_ADDR, reg);
+	err = ds90_write_shared(priv, DS90_SR_IND_ACC_ADDR, reg);
 	if (!err)
-		err = ds90_write_shared(ds90, DS90_SR_IND_ACC_DATA, val >> 8);
+		err = ds90_write_shared(priv, DS90_SR_IND_ACC_DATA, val >> 8);
 	if (!err)
-		err = ds90_write_shared(ds90, DS90_SR_IND_ACC_DATA, val & 0xff);
+		err = ds90_write_shared(priv, DS90_SR_IND_ACC_DATA, val & 0xff);
 	return err;
 }
 
-static int ds90_update_bits(const struct ds90_data *ds90,
+static int ds90_update_bits(const struct ds90_data *priv,
 			    const struct i2c_client *client,
 			    u8 reg, u8 mask, u8 val)
 {
 	int ret = i2c_smbus_read_byte_data(client, reg);
 
 	if (ret < 0) {
-		dev_err(&ds90->client->dev,
+		dev_err(&priv->client->dev,
 			"%s[0x%02x]: cannot read register 0x%02x (%d)!\n",
 			__func__, client->addr, reg, ret);
 		return ret;
@@ -467,7 +484,7 @@ static int ds90_update_bits(const struct ds90_data *ds90,
 	ret = i2c_smbus_write_byte_data(client, reg,
 					(ret & ~mask) | (val & mask));
 	if (ret < 0) {
-		dev_err(&ds90->client->dev,
+		dev_err(&priv->client->dev,
 			"%s[0x%02x]: cannot write register 0x%02x (%d)!\n",
 			__func__, client->addr, reg, ret);
 		return ret;
@@ -476,30 +493,30 @@ static int ds90_update_bits(const struct ds90_data *ds90,
 	return 0;
 }
 
-static int ds90_update_bits_shared(const struct ds90_data *ds90,
+static int ds90_update_bits_shared(const struct ds90_data *priv,
 				   u8 reg, u8 mask, u8 val)
 {
-	return ds90_update_bits(ds90, ds90->client,
+	return ds90_update_bits(priv, priv->client,
 				reg, mask, val);
 }
 
-static int ds90_update_bits_rxport(const struct ds90_data *ds90, int nport,
+static int ds90_update_bits_rxport(const struct ds90_data *priv, int nport,
 				   u8 reg, u8 mask, u8 val)
 {
-	return ds90_update_bits(ds90, ds90->rxport[nport]->reg_client,
+	return ds90_update_bits(priv, priv->rxport[nport]->reg_client,
 				reg, mask, val);
 }
 
-static void ds90_reset(const struct ds90_data *ds90, bool keep_reset)
+static void ds90_reset(const struct ds90_data *priv, bool keep_reset)
 {
-	if (!ds90->reset_gpio)
+	if (!priv->reset_gpio)
 		return;
 
-	gpiod_set_value_cansleep(ds90->reset_gpio, 1);
+	gpiod_set_value_cansleep(priv->reset_gpio, 1);
 	usleep_range(3000, 6000); /* min 2 ms */
 
 	if (!keep_reset) {
-		gpiod_set_value_cansleep(ds90->reset_gpio, 0);
+		gpiod_set_value_cansleep(priv->reset_gpio, 0);
 		usleep_range(2000, 4000); /* min 1 ms */
 	}
 }
@@ -513,9 +530,9 @@ static int ds90_atr_attach_client(struct i2c_atr *atr, u32 chan_id,
 				  const struct i2c_client *client,
 				  u16 *alias_id)
 {
-	struct ds90_data *ds90 = i2c_atr_get_clientdata(atr);
-	struct ds90_rxport *rxport = ds90->rxport[chan_id];
-	struct device *dev = &ds90->client->dev;
+	struct ds90_data *priv = i2c_atr_get_clientdata(atr);
+	struct ds90_rxport *rxport = priv->rxport[chan_id];
+	struct device *dev = &priv->client->dev;
 	u16 alias = 0;
 	int reg_idx;
 	int pool_idx;
@@ -523,28 +540,28 @@ static int ds90_atr_attach_client(struct i2c_atr *atr, u32 chan_id,
 
 	dev_dbg(dev, "rx%d: %s\n", chan_id, __func__);
 
-	mutex_lock(&ds90->alias_table_lock);
+	mutex_lock(&priv->alias_table_lock);
 
 	/* Find unused alias in table */
 
-	for (pool_idx = 0; pool_idx < ds90->atr_alias_num; pool_idx++)
-		if (ds90->atr_slave_id[pool_idx] == 0)
+	for (pool_idx = 0; pool_idx < priv->atr_alias_num; pool_idx++)
+		if (priv->atr_slave_id[pool_idx] == 0)
 			break;
 
-	if (pool_idx == ds90->atr_alias_num) {
+	if (pool_idx == priv->atr_alias_num) {
 		dev_warn(dev, "rx%d: alias pool exhausted\n", rxport->nport);
 		err = -EADDRNOTAVAIL;
 		goto out;
 	}
 
-	alias = ds90->atr_alias_id[pool_idx];
+	alias = priv->atr_alias_id[pool_idx];
 
 	/* Find first unused alias register */
 
 	for (reg_idx = 0; reg_idx < DS90_NUM_SLAVE_ALIASES; reg_idx++) {
 		u8 regval;
 
-		err = ds90_read_rxport(ds90, chan_id,
+		err = ds90_read_rxport(priv, chan_id,
 				       DS90_RR_SLAVE_ALIAS(reg_idx), &regval);
 		if (!err && regval == 0)
 			break;
@@ -558,12 +575,12 @@ static int ds90_atr_attach_client(struct i2c_atr *atr, u32 chan_id,
 
 	/* Map alias to slave */
 
-	ds90_write_rxport(ds90, chan_id,
+	ds90_write_rxport(priv, chan_id,
 			  DS90_RR_SLAVE_ID(reg_idx), client->addr << 1);
-	ds90_write_rxport(ds90, chan_id,
+	ds90_write_rxport(priv, chan_id,
 			  DS90_RR_SLAVE_ALIAS(reg_idx), alias << 1);
 
-	ds90->atr_slave_id[pool_idx] = client->addr;
+	priv->atr_slave_id[pool_idx] = client->addr;
 
 	*alias_id = alias; /* tell the atr which alias we chose */
 
@@ -571,35 +588,35 @@ static int ds90_atr_attach_client(struct i2c_atr *atr, u32 chan_id,
 		 rxport->nport, client->addr, alias, client->name);
 
 out:
-	mutex_unlock(&ds90->alias_table_lock);
+	mutex_unlock(&priv->alias_table_lock);
 	return err;
 }
 
 static void ds90_atr_detach_client(struct i2c_atr *atr, u32 chan_id,
 				   const struct i2c_client *client)
 {
-	struct ds90_data *ds90 = i2c_atr_get_clientdata(atr);
-	struct ds90_rxport *rxport = ds90->rxport[chan_id];
-	struct device *dev = &ds90->client->dev;
+	struct ds90_data *priv = i2c_atr_get_clientdata(atr);
+	struct ds90_rxport *rxport = priv->rxport[chan_id];
+	struct device *dev = &priv->client->dev;
 	u16 alias = 0;
 	int reg_idx;
 	int pool_idx;
 
-	mutex_lock(&ds90->alias_table_lock);
+	mutex_lock(&priv->alias_table_lock);
 
 	/* Find alias mapped to this client */
 
-	for (pool_idx = 0; pool_idx < ds90->atr_alias_num; pool_idx++)
-		if (ds90->atr_slave_id[pool_idx] == client->addr)
+	for (pool_idx = 0; pool_idx < priv->atr_alias_num; pool_idx++)
+		if (priv->atr_slave_id[pool_idx] == client->addr)
 			break;
 
-	if (pool_idx == ds90->atr_alias_num) {
+	if (pool_idx == priv->atr_alias_num) {
 		dev_err(dev, "rx%d: client 0x%02x is not mapped!\n",
 			rxport->nport, client->addr);
 		goto out;
 	}
 
-	alias = ds90->atr_alias_id[pool_idx];
+	alias = priv->atr_alias_id[pool_idx];
 
 	/* Find alias register used for this client */
 
@@ -607,7 +624,7 @@ static void ds90_atr_detach_client(struct i2c_atr *atr, u32 chan_id,
 		u8 regval;
 		int err;
 
-		err = ds90_read_rxport(ds90, chan_id,
+		err = ds90_read_rxport(priv, chan_id,
 				       DS90_RR_SLAVE_ALIAS(reg_idx), &regval);
 		if (!err && regval == (alias << 1))
 			break;
@@ -622,14 +639,14 @@ static void ds90_atr_detach_client(struct i2c_atr *atr, u32 chan_id,
 
 	/* Unmap */
 
-	ds90_write_rxport(ds90, chan_id, DS90_RR_SLAVE_ALIAS(reg_idx), 0);
-	ds90->atr_slave_id[pool_idx] = 0;
+	ds90_write_rxport(priv, chan_id, DS90_RR_SLAVE_ALIAS(reg_idx), 0);
+	priv->atr_slave_id[pool_idx] = 0;
 
 	dev_info(dev, "rx%d: client 0x%02x unmapped from alias 0x%02x (%s)\n",
 		 rxport->nport, client->addr, alias, client->name);
 
 out:
-	mutex_unlock(&ds90->alias_table_lock);
+	mutex_unlock(&priv->alias_table_lock);
 }
 
 static const struct i2c_atr_ops ds90_atr_ops = {
@@ -641,11 +658,11 @@ static const struct i2c_atr_ops ds90_atr_ops = {
  * CSI ports
  */
 
-static int ds90_csiport_probe_one(struct ds90_data *ds90,
+static int ds90_csiport_probe_one(struct ds90_data *priv,
 				  const struct device_node *np)
 {
-	struct device *dev = &ds90->client->dev;
-	struct ds90_csitxport *csitxport = &ds90->csitxport;
+	struct device *dev = &priv->client->dev;
+	struct ds90_csitxport *csitxport = &priv->csitxport;
 
 	if (of_property_read_u32(np, "data-rate", &csitxport->data_rate) != 0) {
 		dev_err(dev, "OF: %s: missing \"data-rate\" node\n",
@@ -666,13 +683,13 @@ static int ds90_csiport_probe_one(struct ds90_data *ds90,
 	return 0;
 }
 
-static void ds90_csi_handle_events(struct ds90_data *ds90)
+static void ds90_csi_handle_events(struct ds90_data *priv)
 {
-	struct device *dev = &ds90->client->dev;
+	struct device *dev = &priv->client->dev;
 	u8 csi_tx_isr;
 	int err;
 
-	err = ds90_read_shared(ds90, DS90_TR_CSI_TX_ISR, &csi_tx_isr);
+	err = ds90_read_shared(priv, DS90_TR_CSI_TX_ISR, &csi_tx_isr);
 
 	if (!err) {
 		if (csi_tx_isr & DS90_TR_CSI_TX_ISR_IS_CSI_SYNC_ERROR)
@@ -694,7 +711,7 @@ static int ds90_gpio_direction_out(struct gpio_chip *chip,
 	unsigned int reg_addr = DS90_RR_BC_GPIO_CTL(offset / 2);
 	unsigned int reg_shift = (offset % 2) * 4;
 
-	ds90_update_bits_rxport(rxport->ds90, rxport->nport, reg_addr,
+	ds90_update_bits_rxport(rxport->priv, rxport->nport, reg_addr,
 				0xf << reg_shift,
 				(0x8 + !!value) << reg_shift);
 	return 0;
@@ -722,11 +739,11 @@ static int ds90_gpio_of_xlate(struct gpio_chip *chip,
 	return gpiospec->args[1];
 }
 
-static int ds90_gpiochip_probe(struct ds90_data *ds90, int nport)
+static int ds90_gpiochip_probe(struct ds90_data *priv, int nport)
 {
-	struct ds90_rxport *rxport = ds90->rxport[nport];
+	struct ds90_rxport *rxport = priv->rxport[nport];
 	struct gpio_chip *gc = &rxport->gpio_chip;
-	struct device *dev = &ds90->client->dev;
+	struct device *dev = &priv->client->dev;
 	int err;
 
 	scnprintf(rxport->gpio_chip_name, sizeof(rxport->gpio_chip_name),
@@ -741,7 +758,7 @@ static int ds90_gpiochip_probe(struct ds90_data *ds90, int nport)
 	gc->direction_output    = ds90_gpio_direction_out;
 	gc->set                 = ds90_gpio_set;
 	gc->of_xlate            = ds90_gpio_of_xlate;
-	gc->of_node             = ds90->client->dev.of_node;
+	gc->of_node             = priv->client->dev.of_node;
 	gc->of_gpio_n_cells     = 3;
 
 	err = gpiochip_add_data(gc, rxport);
@@ -753,9 +770,9 @@ static int ds90_gpiochip_probe(struct ds90_data *ds90, int nport)
 	return 0;
 }
 
-static void ds90_gpiochip_remove(struct ds90_data *ds90, int nport)
+static void ds90_gpiochip_remove(struct ds90_data *priv, int nport)
 {
-	struct ds90_rxport *rxport = ds90->rxport[nport];
+	struct ds90_rxport *rxport = priv->rxport[nport];
 	struct gpio_chip *gc = &rxport->gpio_chip;
 
 	gpiochip_remove(gc);
@@ -799,8 +816,8 @@ static ssize_t locked_show(struct device *dev,
 			   char *buf)
 {
 	int nport = (attr - dev_attr_locked);
-	const struct ds90_data *ds90 = dev_get_drvdata(dev);
-	const struct ds90_rxport *rxport = ds90->rxport[nport];
+	const struct ds90_data *priv = dev_get_drvdata(dev);
+	const struct ds90_rxport *rxport = priv->rxport[nport];
 
 	return scnprintf(buf, PAGE_SIZE, "%d", rxport->locked);
 }
@@ -810,8 +827,8 @@ static ssize_t status_show(struct device *dev,
 			   char *buf)
 {
 	int nport = (attr - dev_attr_status);
-	const struct ds90_data *ds90 = dev_get_drvdata(dev);
-	const struct ds90_rxport *rxport = ds90->rxport[nport];
+	const struct ds90_data *priv = dev_get_drvdata(dev);
+	const struct ds90_rxport *rxport = priv->rxport[nport];
 
 	return scnprintf(buf, PAGE_SIZE,
 			 "bcc_crc_error_count = %llu\n"
@@ -847,18 +864,18 @@ struct attribute_group ds90_rxport_attr_group[] = {
  * Instantiate serializer and i2c adapter for the just-locked remote
  * end.
  *
- * @note Must be called with ds90->alias_table_lock not held! The added i2c
+ * @note Must be called with priv->alias_table_lock not held! The added i2c
  * adapter will probe new slaves, which can request i2c transfers, ending
  * up in calling ds90_atr_attach_client() where the lock is taken.
  */
-static int ds90_rxport_add_serializer(struct ds90_data *ds90, int nport)
+static int ds90_rxport_add_serializer(struct ds90_data *priv, int nport)
 {
-	struct ds90_rxport *rxport = ds90->rxport[nport];
-	struct device *dev = &ds90->client->dev;
+	struct ds90_rxport *rxport = priv->rxport[nport];
+	struct device *dev = &priv->client->dev;
 	struct i2c_board_info ser_info = { .type = "ds90ub953-q1",
 					   .of_node = rxport->remote_of_node,
 					   // TODO is this OK?
-					   .platform_data = &ds90->refclk };
+					   .platform_data = &priv->refclk };
 	int err;
 
 	/*
@@ -867,7 +884,7 @@ static int ds90_rxport_add_serializer(struct ds90_data *ds90, int nport)
 	 * to the upstream adapter is way simpler.
 	 */
 	ser_info.addr = rxport->ser_alias;
-	rxport->ser_client = i2c_new_client_device(ds90->client->adapter, &ser_info);
+	rxport->ser_client = i2c_new_client_device(priv->client->adapter, &ser_info);
 	if (!rxport->ser_client) {
 		dev_err(dev, "rx%d: cannot add %s i2c device",
 			nport, ser_info.type);
@@ -880,9 +897,9 @@ static int ds90_rxport_add_serializer(struct ds90_data *ds90, int nport)
 	return err;
 }
 
-static void ds90_rxport_remove_serializer(struct ds90_data *ds90, int nport)
+static void ds90_rxport_remove_serializer(struct ds90_data *priv, int nport)
 {
-	struct ds90_rxport *rxport = ds90->rxport[nport];
+	struct ds90_rxport *rxport = priv->rxport[nport];
 
 	if (rxport->ser_client) {
 		i2c_unregister_device(rxport->ser_client);
@@ -895,10 +912,10 @@ static void ds90_rxport_remove_serializer(struct ds90_data *ds90, int nport)
  * Get it from devicetree, if absent fallback to the default.
  */
 static unsigned short
-ds90_rxport_get_remote_alias(struct ds90_data *ds90,
+ds90_rxport_get_remote_alias(struct ds90_data *priv,
 			     const struct ds90_rxport_info *info)
 {
-	struct device_node *np = ds90->client->dev.of_node;
+	struct device_node *np = priv->client->dev.of_node;
 	u32 alias = info->remote_def_alias;
 	int i;
 
@@ -912,11 +929,11 @@ ds90_rxport_get_remote_alias(struct ds90_data *ds90,
 	return alias;
 }
 
-static int ds90_rxport_probe_one(struct ds90_data *ds90,
+static int ds90_rxport_probe_one(struct ds90_data *priv,
 				 const struct device_node *np,
 				 unsigned int nport)
 {
-	struct device *dev = &ds90->client->dev;
+	struct device *dev = &priv->client->dev;
 	const struct ds90_rxport_info *info;
 	struct ds90_rxport *rxport;
 	int err;
@@ -926,7 +943,7 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 		{ "rxport1", "ser1", 0x41, 0x51 },
 	};
 
-	if (ds90->rxport[nport]) {
+	if (priv->rxport[nport]) {
 		dev_err(dev, "OF: %s: reg value %d is duplicated\n",
 			of_node_full_name(np), nport);
 		return -EADDRINUSE;
@@ -936,13 +953,13 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 	if (!rxport)
 		return -ENOMEM;
 
-	ds90->rxport[nport] = rxport;
+	priv->rxport[nport] = rxport;
 
 	info = &rxport_info[nport];
 
 	rxport->nport     = nport;
-	rxport->ds90      = ds90;
-	rxport->ser_alias = ds90_rxport_get_remote_alias(ds90, info);
+	rxport->priv      = priv;
+	rxport->ser_alias = ds90_rxport_get_remote_alias(priv, info);
 
 	rxport->remote_of_node = of_get_child_by_name(np, "remote-chip");
 	if (!rxport->remote_of_node) {
@@ -969,14 +986,14 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 
 
 	/* Initialize access to local registers */
-	rxport->reg_client = i2c_new_ancillary_device(ds90->client,
+	rxport->reg_client = i2c_new_ancillary_device(priv->client,
 						      info->local_name,
 						      info->local_def_alias);
 	if (IS_ERR(rxport->reg_client)) {
 		err = PTR_ERR(rxport->reg_client);
 		goto err_new_secondary_device;
 	}
-	ds90_write_shared(ds90, DS90_SR_I2C_RX_ID(nport),
+	ds90_write_shared(priv, DS90_SR_I2C_RX_ID(nport),
 			  rxport->reg_client->addr << 1);
 
 	dev_info(dev, "rx%d: at alias 0x%02x\n",
@@ -985,7 +1002,7 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 
 	// Override FREQ_SELECT from the strap
 	// FREQ_SELECT: 000: 2.5 Mbps (default for DS90UB913A-Q1 / DS90UB933-Q1 compatibility)
-	ds90_update_bits_rxport(ds90, nport, DS90_RR_BCC_CONFIG, 0x7, 0);
+	ds90_update_bits_rxport(priv, nport, DS90_RR_BCC_CONFIG, 0x7, 0);
 
 	// Override FPD3_MODE from the strap
 	/*
@@ -994,16 +1011,16 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 	10: RAW12 High Frequency Mode(DS90UB913A-Q1 / DS90UB933-Q1 compatible)
 	11: RAW10 Mode (DS90UB913A-Q1 / DS90UB933-Q1 compatible)
 	*/
-	ds90_update_bits_rxport(ds90, nport, DS90_RR_PORT_CONFIG, 0x3, 0x3);
+	ds90_update_bits_rxport(priv, nport, DS90_RR_PORT_CONFIG, 0x3, 0x3);
 
 	// LV_POLARITY & FV_POLARITY
-	ds90_update_bits_rxport(ds90, nport, DS90_RR_PORT_CONFIG2, 0x3, 0x1);
+	ds90_update_bits_rxport(priv, nport, DS90_RR_PORT_CONFIG2, 0x3, 0x1);
 
 	// RAW10_8BIT_CTL = 0b11 : 8-bit processing using lower 8 bits
 	// 0b10 : 8-bit processing using upper 8 bits
-	ds90_update_bits_rxport(ds90, nport, DS90_RR_PORT_CONFIG2, 0x3<<6, 0x2<<6);
+	ds90_update_bits_rxport(priv, nport, DS90_RR_PORT_CONFIG2, 0x3<<6, 0x2<<6);
 
-	ds90_write_rxport(ds90, nport, DS90_RR_RAW10_ID, 0x1e); // datatype = YUV422 8-bit
+	ds90_write_rxport(priv, nport, DS90_RR_RAW10_ID, 0x1e); // datatype = YUV422 8-bit
 
 
 	/*
@@ -1015,10 +1032,10 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 
 	{
 		u8 v1, v2, v3, v4;
-		ds90_read_rxport(ds90, nport, DS90_RR_BCC_STATUS, &v1);
-		ds90_read_rxport(ds90, nport, DS90_RR_RX_PORT_STS1, &v2);
-		ds90_read_rxport(ds90, nport, DS90_RR_RX_PORT_STS2, &v3);
-		ds90_read_rxport(ds90, nport, DS90_RR_CSI_RX_STS, &v4);
+		ds90_read_rxport(priv, nport, DS90_RR_BCC_STATUS, &v1);
+		ds90_read_rxport(priv, nport, DS90_RR_RX_PORT_STS1, &v2);
+		ds90_read_rxport(priv, nport, DS90_RR_RX_PORT_STS2, &v3);
+		ds90_read_rxport(priv, nport, DS90_RR_CSI_RX_STS, &v4);
 	}
 
 
@@ -1026,28 +1043,28 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 	{
 		u8 v1, v2, v3, v4;
 		msleep(10);
-		ds90_read_rxport(ds90, nport, DS90_RR_BCC_STATUS, &v1);
-		ds90_read_rxport(ds90, nport, DS90_RR_RX_PORT_STS1, &v2);
-		ds90_read_rxport(ds90, nport, DS90_RR_RX_PORT_STS2, &v3);
-		ds90_read_rxport(ds90, nport, DS90_RR_CSI_RX_STS, &v4);
+		ds90_read_rxport(priv, nport, DS90_RR_BCC_STATUS, &v1);
+		ds90_read_rxport(priv, nport, DS90_RR_RX_PORT_STS1, &v2);
+		ds90_read_rxport(priv, nport, DS90_RR_RX_PORT_STS2, &v3);
+		ds90_read_rxport(priv, nport, DS90_RR_CSI_RX_STS, &v4);
 		printk("%x, %x, %x, %x\n", v1, v2, v3, v4);
 	}
 #endif
 
-	err = ds90_gpiochip_probe(ds90, nport);
+	err = ds90_gpiochip_probe(priv, nport);
 	if (err)
 		goto err_gpiochip_probe;
 
 	/* Enable all interrupt sources from this port */
-	ds90_write_rxport(ds90, nport, DS90_RR_PORT_ICR_HI, 0x07);
-	ds90_write_rxport(ds90, nport, DS90_RR_PORT_ICR_LO, 0x7f);
+	ds90_write_rxport(priv, nport, DS90_RR_PORT_ICR_HI, 0x07);
+	ds90_write_rxport(priv, nport, DS90_RR_PORT_ICR_LO, 0x7f);
 
 	/* Set pass-through, but preserve BC_FREQ_SELECT strapping options */
-	ds90_update_bits_rxport(ds90, nport, DS90_RR_BCC_CONFIG,
+	ds90_update_bits_rxport(priv, nport, DS90_RR_BCC_CONFIG,
 				DS90_RR_BCC_CONFIG_I2C_PASS_THROUGH, ~0);
 
 	/* Enable I2C communication to the serializer via the alias addr */
-	ds90_write_rxport(ds90, nport,
+	ds90_write_rxport(priv, nport,
 			  DS90_RR_SER_ALIAS_ID, rxport->ser_alias << 1);
 
 	dev_info(dev, "ser%d: at alias 0x%02x\n",
@@ -1063,7 +1080,7 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 		goto err_sysfs;
 	}
 
-	err = i2c_atr_add_adapter(ds90->atr, nport);
+	err = i2c_atr_add_adapter(priv->atr, nport);
 	if (err) {
 		dev_err(dev, "rx%d: cannot add adapter", nport);
 		goto err_add_adapter;
@@ -1074,56 +1091,56 @@ static int ds90_rxport_probe_one(struct ds90_data *ds90,
 err_add_adapter:
 	sysfs_remove_group(&dev->kobj, &ds90_rxport_attr_group[nport]);
 err_sysfs:
-	ds90_gpiochip_remove(ds90, nport);
+	ds90_gpiochip_remove(priv, nport);
 err_gpiochip_probe:
 	i2c_unregister_device(rxport->reg_client);
 err_new_secondary_device:
 	of_node_put(rxport->remote_of_node);
 err_remote_chip:
-	ds90->rxport[nport] = NULL;
+	priv->rxport[nport] = NULL;
 	kfree(rxport);
 	return err;
 }
 
-static void ds90_rxport_remove_one(struct ds90_data *ds90, int nport)
+static void ds90_rxport_remove_one(struct ds90_data *priv, int nport)
 {
-	struct ds90_rxport *rxport = ds90->rxport[nport];
-	struct device *dev = &ds90->client->dev;
+	struct ds90_rxport *rxport = priv->rxport[nport];
+	struct device *dev = &priv->client->dev;
 
-	i2c_atr_del_adapter(ds90->atr, nport);
-	ds90_rxport_remove_serializer(ds90, nport);
-	ds90_gpiochip_remove(ds90, nport);
+	i2c_atr_del_adapter(priv->atr, nport);
+	ds90_rxport_remove_serializer(priv, nport);
+	ds90_gpiochip_remove(priv, nport);
 	i2c_unregister_device(rxport->reg_client);
 	sysfs_remove_group(&dev->kobj, &ds90_rxport_attr_group[nport]);
 	of_node_put(rxport->remote_of_node);
 	kfree(rxport);
 }
 
-static int ds90_atr_probe(struct ds90_data *ds90)
+static int ds90_atr_probe(struct ds90_data *priv)
 {
-	struct i2c_adapter *parent_adap = ds90->client->adapter;
-	struct device *dev = &ds90->client->dev;
+	struct i2c_adapter *parent_adap = priv->client->adapter;
+	struct device *dev = &priv->client->dev;
 
-	ds90->atr = i2c_atr_new(parent_adap, dev, &ds90_atr_ops,
+	priv->atr = i2c_atr_new(parent_adap, dev, &ds90_atr_ops,
 				DS90_FPD_RX_NPORTS);
-	if (IS_ERR(ds90->atr))
-		return PTR_ERR(ds90->atr);
+	if (IS_ERR(priv->atr))
+		return PTR_ERR(priv->atr);
 
-	i2c_atr_set_clientdata(ds90->atr, ds90);
+	i2c_atr_set_clientdata(priv->atr, priv);
 
 	return 0;
 }
 
-static void ds90_atr_remove(struct ds90_data *ds90)
+static void ds90_atr_remove(struct ds90_data *priv)
 {
-	i2c_atr_delete(ds90->atr);
-	ds90->atr = NULL;
+	i2c_atr_delete(priv->atr);
+	priv->atr = NULL;
 }
 
-static void ds90_rxport_handle_events(struct ds90_data *ds90, int nport)
+static void ds90_rxport_handle_events(struct ds90_data *priv, int nport)
 {
-	struct ds90_rxport *rxport = ds90->rxport[nport];
-	struct device *dev = &ds90->client->dev;
+	struct ds90_rxport *rxport = priv->rxport[nport];
+	struct device *dev = &priv->client->dev;
 	u8 rx_port_sts1;
 	u8 rx_port_sts2;
 	u8 csi_rx_sts;
@@ -1132,13 +1149,13 @@ static void ds90_rxport_handle_events(struct ds90_data *ds90, int nport)
 
 	/* Read interrupts (also clears most of them) */
 	if (!err)
-		err = ds90_read_rxport(ds90, nport,
+		err = ds90_read_rxport(priv, nport,
 				       DS90_RR_RX_PORT_STS1, &rx_port_sts1);
 	if (!err)
-		err = ds90_read_rxport(ds90, nport,
+		err = ds90_read_rxport(priv, nport,
 				       DS90_RR_RX_PORT_STS2, &rx_port_sts2);
 	if (!err)
-		err = ds90_read_rxport(ds90, nport,
+		err = ds90_read_rxport(priv, nport,
 				       DS90_RR_CSI_RX_STS, &csi_rx_sts);
 
 	if (err)
@@ -1158,8 +1175,8 @@ static void ds90_rxport_handle_events(struct ds90_data *ds90, int nport)
 
 		rxport->line_len_chg_count++;
 
-		err = ds90_read_rxport(ds90, nport, DS90_RR_LINE_LEN_1, &h);
-		err = ds90_read_rxport(ds90, nport, DS90_RR_LINE_LEN_0, &l);
+		err = ds90_read_rxport(priv, nport, DS90_RR_LINE_LEN_1, &h);
+		err = ds90_read_rxport(priv, nport, DS90_RR_LINE_LEN_0, &l);
 
 		printk("PIXELS %u\n", (h << 8) | l);
 	}
@@ -1175,8 +1192,8 @@ static void ds90_rxport_handle_events(struct ds90_data *ds90, int nport)
 
 		rxport->line_cnt_chg_count++;
 
-		err = ds90_read_rxport(ds90, nport, DS90_RR_LINE_COUNT_HI, &h);
-		err = ds90_read_rxport(ds90, nport, DS90_RR_LINE_COUNT_LO, &l);
+		err = ds90_read_rxport(priv, nport, DS90_RR_LINE_COUNT_HI, &h);
+		err = ds90_read_rxport(priv, nport, DS90_RR_LINE_COUNT_LO, &l);
 
 		printk("LINES %u\n", (h << 8) | l);
 	}
@@ -1198,12 +1215,12 @@ static void ds90_rxport_handle_events(struct ds90_data *ds90, int nport)
 	if (locked && !rxport->locked) {
 		dev_info(dev, "rx%d: LOCKED\n", nport);
 		/* See note about locking in ds90_rxport_add_serializer()! */
-		ds90_rxport_add_serializer(ds90, nport);
+		ds90_rxport_add_serializer(priv, nport);
 		sysfs_notify(&dev->kobj,
 			     ds90_rxport_attr_group[nport].name, "locked");
 	} else if (!locked && rxport->locked) {
 		dev_info(dev, "rx%d: NOT LOCKED\n", nport);
-		ds90_rxport_remove_serializer(ds90, nport);
+		ds90_rxport_remove_serializer(priv, nport);
 		sysfs_notify(&dev->kobj,
 			     ds90_rxport_attr_group[nport].name, "locked");
 	}
@@ -1214,7 +1231,7 @@ static void ds90_rxport_handle_events(struct ds90_data *ds90, int nport)
  * V4L2
  */
 
-static void ds90_set_tpg(struct ds90_data *ds90, int tpg_num)
+static void ds90_set_tpg(struct ds90_data *priv, int tpg_num)
 {
 	/*
 	 * Note: no need to write DS90_REG_IND_ACC_CTL: the only indirect
@@ -1224,9 +1241,9 @@ static void ds90_set_tpg(struct ds90_data *ds90, int tpg_num)
 
 	if (tpg_num == 0) {
 		/* TPG off, enable forwarding from FPD-3 RX ports */
-		ds90_write_shared(ds90, DS90_SR_FWD_CTL1, 0x00);
+		ds90_write_shared(priv, DS90_SR_FWD_CTL1, 0x00);
 
-		ds90_write_ind8(ds90, DS90_IR_PGEN_CTL, 0x00);
+		ds90_write_ind8(priv, DS90_IR_PGEN_CTL, 0x00);
 		return;
 	} else {
 		/* TPG on */
@@ -1235,8 +1252,8 @@ static void ds90_set_tpg(struct ds90_data *ds90, int tpg_num)
 		u8 vfp = 10;
 		u16 blank_lines = vbp + vfp + 2; /* total blanking lines */
 
-		u16 width  = ds90->fmt[DS90_NPORTS - 1].width;
-		u16 height = ds90->fmt[DS90_NPORTS - 1].height;
+		u16 width  = priv->fmt[DS90_NPORTS - 1].width;
+		u16 height = priv->fmt[DS90_NPORTS - 1].height;
 		u16 bytespp = 2; /* For MEDIA_BUS_FMT_UYVY8_1X16 */
 		u8 cbars_idx = tpg_num - TEST_PATTERN_V_COLOR_BARS_1;
 		u8 num_cbars = 1 << cbars_idx;
@@ -1249,52 +1266,52 @@ static void ds90_set_tpg(struct ds90_data *ds90, int tpg_num)
 		u16 line_pd = 100000000 / 60 / tot_lpf;
 
 		/* Disable forwarding from FPD-3 RX ports */
-		ds90_write_shared(ds90,
+		ds90_write_shared(priv,
 				  DS90_SR_FWD_CTL1,
 				  DS90_SR_FWD_CTL1_PORT_DIS(0) |
 				  DS90_SR_FWD_CTL1_PORT_DIS(1));
 
 		/* Access Indirect Pattern Gen */
-		ds90_write_shared(ds90,
+		ds90_write_shared(priv,
 				  DS90_SR_IND_ACC_CTL,
 				  DS90_SR_IND_ACC_CTL_IA_AUTO_INC | 0);
 
-		ds90_write_ind8(ds90,
+		ds90_write_ind8(priv,
 				DS90_IR_PGEN_CTL,
 				DS90_IR_PGEN_CTL_PGEN_ENABLE);
 
 		/* YUV422 8bit: 2 bytes/block, CSI-2 data type 0x1e */
-		ds90_write_ind8(ds90, DS90_IR_PGEN_CFG, cbars_idx << 4 | 0x2);
-		ds90_write_ind8(ds90, DS90_IR_PGEN_CSI_DI, 0x1e);
+		ds90_write_ind8(priv, DS90_IR_PGEN_CFG, cbars_idx << 4 | 0x2);
+		ds90_write_ind8(priv, DS90_IR_PGEN_CSI_DI, 0x1e);
 
-		ds90_write_ind16(ds90, DS90_IR_PGEN_LINE_SIZE1, line_size);
-		ds90_write_ind16(ds90, DS90_IR_PGEN_BAR_SIZE1,  bar_size);
-		ds90_write_ind16(ds90, DS90_IR_PGEN_ACT_LPF1,   act_lpf);
-		ds90_write_ind16(ds90, DS90_IR_PGEN_TOT_LPF1,   tot_lpf);
-		ds90_write_ind16(ds90, DS90_IR_PGEN_LINE_PD1,   line_pd);
-		ds90_write_ind8(ds90,  DS90_IR_PGEN_VBP,        vbp);
-		ds90_write_ind8(ds90,  DS90_IR_PGEN_VFP,        vfp);
+		ds90_write_ind16(priv, DS90_IR_PGEN_LINE_SIZE1, line_size);
+		ds90_write_ind16(priv, DS90_IR_PGEN_BAR_SIZE1,  bar_size);
+		ds90_write_ind16(priv, DS90_IR_PGEN_ACT_LPF1,   act_lpf);
+		ds90_write_ind16(priv, DS90_IR_PGEN_TOT_LPF1,   tot_lpf);
+		ds90_write_ind16(priv, DS90_IR_PGEN_LINE_PD1,   line_pd);
+		ds90_write_ind8(priv,  DS90_IR_PGEN_VBP,        vbp);
+		ds90_write_ind8(priv,  DS90_IR_PGEN_VFP,        vfp);
 	}
 }
 
 static int ds90_s_ctrl(struct v4l2_ctrl *ctrl)
 {
-	struct ds90_data *ds90 = container_of(ctrl->handler, struct ds90_data,
+	struct ds90_data *priv = container_of(ctrl->handler, struct ds90_data,
 					      ctrl_handler);
 
 	switch (ctrl->id) {
 	case V4L2_CID_TEST_PATTERN:
-		ds90_set_tpg(ds90, ctrl->val);
+		ds90_set_tpg(priv, ctrl->val);
 		break;
 	}
 	return 0;
 }
 
-static void ds90_set_tpg(struct ds90_data *ds90, int tpg_num);
+static void ds90_set_tpg(struct ds90_data *priv, int tpg_num);
 
 static int ds90_s_stream(struct v4l2_subdev *sd, int enable)
 {
-	struct ds90_data *ds90 = sd_to_ds90(sd);
+	struct ds90_data *priv = sd_to_ds90(sd);
 	unsigned int csi_ctl = DS90_TR_CSI_CTL_CSI_ENABLE;
 	unsigned int speed_select = 3;
 	int ret;
@@ -1303,7 +1320,7 @@ static int ds90_s_stream(struct v4l2_subdev *sd, int enable)
 	if (enable) {
 		/* Start all cameras. */
 		for (i = 0; i < DS90_FPD_RX_NPORTS; ++i) {
-			struct ds90_rxport *rxport = ds90->rxport[i];
+			struct ds90_rxport *rxport = priv->rxport[i];
 
 			if (!rxport)
 				continue;
@@ -1313,7 +1330,7 @@ static int ds90_s_stream(struct v4l2_subdev *sd, int enable)
 				return ret;
 		}
 
-		switch (ds90->csitxport.data_rate) {
+		switch (priv->csitxport.data_rate) {
 		case 1600000000:
 			speed_select = 0;
 			break;
@@ -1332,16 +1349,16 @@ static int ds90_s_stream(struct v4l2_subdev *sd, int enable)
 		if (speed_select == 0)
 			csi_ctl |= DS90_TR_CSI_CTL_CSI_CAL_EN;
 
-		ds90_write_shared(ds90, DS90_SR_CSI_PLL_CTL, speed_select);
-		ds90_write_shared(ds90, DS90_TR_CSI_CTL, csi_ctl);
+		ds90_write_shared(priv, DS90_SR_CSI_PLL_CTL, speed_select);
+		ds90_write_shared(priv, DS90_TR_CSI_CTL, csi_ctl);
 
-		//ds90_set_tpg(ds90, TEST_PATTERN_V_COLOR_BARS_8);
+		//ds90_set_tpg(priv, TEST_PATTERN_V_COLOR_BARS_8);
 	} else {
-		ds90_write_shared(ds90, DS90_TR_CSI_CTL, 0);
+		ds90_write_shared(priv, DS90_TR_CSI_CTL, 0);
 
 		/* Stop all cameras. */
 		for (i = 0; i < DS90_FPD_RX_NPORTS; ++i) {
-			struct ds90_rxport *rxport = ds90->rxport[i];
+			struct ds90_rxport *rxport = priv->rxport[i];
 
 			if (!rxport)
 				continue;
@@ -1354,15 +1371,15 @@ static int ds90_s_stream(struct v4l2_subdev *sd, int enable)
 }
 
 static struct v4l2_mbus_framefmt *
-ds90_get_pad_format(struct ds90_data *ds90,
+ds90_get_pad_format(struct ds90_data *priv,
 		    struct v4l2_subdev_pad_config *cfg,
 		    unsigned int pad, u32 which)
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_format(&ds90->sd, cfg, pad);
+		return v4l2_subdev_get_try_format(&priv->sd, cfg, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		return &ds90->fmt[pad];
+		return &priv->fmt[pad];
 	default:
 		return NULL;
 	}
@@ -1372,13 +1389,13 @@ static int ds90_get_fmt(struct v4l2_subdev *sd,
 			struct v4l2_subdev_pad_config *cfg,
 			struct v4l2_subdev_format *format)
 {
-	struct ds90_data *ds90 = sd_to_ds90(sd);
+	struct ds90_data *priv = sd_to_ds90(sd);
 	struct v4l2_mbus_framefmt *cfg_fmt;
 
 	if (format->pad >= DS90_NPORTS)
 		return -EINVAL;
 
-	cfg_fmt = ds90_get_pad_format(ds90, cfg, format->pad, format->which);
+	cfg_fmt = ds90_get_pad_format(priv, cfg, format->pad, format->which);
 	if (!cfg_fmt)
 		return -EINVAL;
 
@@ -1425,13 +1442,13 @@ static int ds90_set_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_pad_config *cfg,
 			  struct v4l2_subdev_format *format)
 {
-	struct ds90_data *ds90 = sd_to_ds90(sd);
+	struct ds90_data *priv = sd_to_ds90(sd);
 	struct v4l2_mbus_framefmt *cfg_fmt;
 
 	if (format->pad >= DS90_NPORTS)
 		return -EINVAL;
 
-	cfg_fmt = ds90_get_pad_format(ds90, cfg, format->pad, format->which);
+	cfg_fmt = ds90_get_pad_format(priv, cfg, format->pad, format->which);
 	if (!cfg_fmt) {
 		printk("bad get pdf\n");
 		return -EINVAL;
@@ -1460,21 +1477,21 @@ static const struct v4l2_subdev_ops ds90_subdev_ops = {
 
 static irqreturn_t ds90_handle_events(int irq, void *arg)
 {
-	struct ds90_data *ds90 = arg;
+	struct ds90_data *priv = arg;
 	u8 int_sts;
 	int err;
 	int i;
 
-	err = ds90_read_shared(ds90, DS90_SR_INTERRUPT_STS, &int_sts);
+	err = ds90_read_shared(priv, DS90_SR_INTERRUPT_STS, &int_sts);
 
 	if (!err && int_sts) {
 		if (int_sts & DS90_SR_INTERRUPT_STS_IS_CSI_TX0)
-			ds90_csi_handle_events(ds90);
+			ds90_csi_handle_events(priv);
 
 		for (i = 0; i < DS90_FPD_RX_NPORTS; i++)
 			if (int_sts & DS90_SR_INTERRUPT_STS_IS_RX(i) &&
-			    ds90->rxport[i])
-				ds90_rxport_handle_events(ds90, i);
+			    priv->rxport[i])
+				ds90_rxport_handle_events(priv, i);
 	}
 
 	return IRQ_HANDLED;
@@ -1482,13 +1499,13 @@ static irqreturn_t ds90_handle_events(int irq, void *arg)
 
 static int ds90_run(void *arg)
 {
-	struct ds90_data *ds90 = arg;
+	struct ds90_data *priv = arg;
 
 	while (1) {
 		if (kthread_should_stop())
 			break;
 
-		ds90_handle_events(0, ds90);
+		ds90_handle_events(0, priv);
 
 		msleep(1000);
 	}
@@ -1496,21 +1513,21 @@ static int ds90_run(void *arg)
 	return 0;
 }
 
-static void ds90_remove_ports(struct ds90_data *ds90)
+static void ds90_remove_ports(struct ds90_data *priv)
 {
 	int i;
 
 	for (i = 0; i < DS90_FPD_RX_NPORTS; i++)
-		if (ds90->rxport[i])
-			ds90_rxport_remove_one(ds90, i);
+		if (priv->rxport[i])
+			ds90_rxport_remove_one(priv, i);
 
 	/* CSI ports have no _remove_one(). No rollback needed. */
 }
 
-static int ds90_parse_dt(struct ds90_data *ds90)
+static int ds90_parse_dt(struct ds90_data *priv)
 {
-	struct device_node *np = ds90->client->dev.of_node;
-	struct device *dev = &ds90->client->dev;
+	struct device_node *np = priv->client->dev.of_node;
+	struct device *dev = &priv->client->dev;
 	struct device_node *ep_np = NULL;
 	int err = 0;
 	int n;
@@ -1521,15 +1538,15 @@ static int ds90_parse_dt(struct ds90_data *ds90)
 	}
 
 	n = of_property_read_variable_u16_array(np, "i2c-alias-pool",
-						ds90->atr_alias_id,
+						priv->atr_alias_id,
 						2, DS90_MAX_POOL_ALIASES);
 	if (n < 0)
 		dev_warn(dev,
 			 "OF: no i2c-alias-pool, can't access remote I2C slaves");
 
-	ds90->atr_alias_num = n;
+	priv->atr_alias_num = n;
 
-	dev_dbg(dev, "i2c-alias-pool has %zu aliases", ds90->atr_alias_num);
+	dev_dbg(dev, "i2c-alias-pool has %zu aliases", priv->atr_alias_num);
 
 	for_each_endpoint_of_node(np, ep_np) {
 		struct of_endpoint ep;
@@ -1544,9 +1561,9 @@ static int ds90_parse_dt(struct ds90_data *ds90)
 		}
 
 		if (ep.port < DS90_FPD_RX_NPORTS)
-			err = ds90_rxport_probe_one(ds90, ep_np, ep.port);
+			err = ds90_rxport_probe_one(priv, ep_np, ep.port);
 		else
-			err = ds90_csiport_probe_one(ds90, ep_np);
+			err = ds90_csiport_probe_one(priv, ep_np);
 
 		if (err) {
 			of_node_put(ep_np);
@@ -1555,7 +1572,7 @@ static int ds90_parse_dt(struct ds90_data *ds90)
 	}
 
 	if (err)
-		ds90_remove_ports(ds90);
+		ds90_remove_ports(priv);
 
 	return err;
 }
@@ -1664,7 +1681,7 @@ static int ds90_v4l2_notifier_register(struct ds90_data *priv)
 		if (!rxport)
 			continue;
 
-		printk("RXPORT %d %p, notif\n", i, rxport);
+		printk("RXPORT %d notif add\n", i);
 
 		asd = v4l2_async_notifier_add_fwnode_subdev(&priv->notifier,
 							    rxport->fwnode,
@@ -1695,47 +1712,55 @@ static int ds90_v4l2_notifier_register(struct ds90_data *priv)
 	return 0;
 }
 
-static void ds90_v4l2_notifier_unregister(struct ds90_data *ds90)
+static void ds90_v4l2_notifier_unregister(struct ds90_data *priv)
 {
-	if (!ds90->nsources)
-		return;
+	struct device *dev = &priv->client->dev;
 
-	v4l2_async_notifier_unregister(&ds90->notifier);
-	v4l2_async_notifier_cleanup(&ds90->notifier);
+	dev_dbg(dev, "Unregister async notif\n");
+
+	v4l2_async_notifier_unregister(&priv->notifier);
+	v4l2_async_notifier_cleanup(&priv->notifier);
 }
 
 
 
-
-
+static const struct regmap_config ds90_regmap_config = {
+	.reg_bits = 8,
+	.val_bits = 8,
+};
 
 static int ds90_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
-	struct ds90_data *ds90;
+	struct ds90_data *priv;
 	struct clk *clk;
 	u8 rev_mask;
 	int err;
 	int i;
 
-	ds90 = devm_kzalloc(dev, sizeof(*ds90), GFP_KERNEL);
-	if (!ds90)
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
 		return -ENOMEM;
 
-	ds90->client = client;
-	i2c_set_clientdata(client, ds90);
-	mutex_init(&ds90->alias_table_lock);
+	priv->client = client;
+	i2c_set_clientdata(client, priv);
+
+	mutex_init(&priv->alias_table_lock);
+
+	priv->regmap = devm_regmap_init_i2c(client, &ds90_regmap_config);
+	if (IS_ERR(priv->regmap))
+		return PTR_ERR(priv->regmap);
 
 	/* get reset pin from DT */
-	ds90->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_LOW);
-	if (IS_ERR(ds90->reset_gpio)) {
-		err = PTR_ERR(ds90->reset_gpio);
+	priv->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_LOW);
+	if (IS_ERR(priv->reset_gpio)) {
+		err = PTR_ERR(priv->reset_gpio);
 		if (err != -EPROBE_DEFER)
 			dev_err(dev, "Cannot get reset GPIO (%d)", err);
 		return err;
 	}
 
-	ds90_reset(ds90, false);
+	ds90_reset(priv, false);
 
 	clk = clk_get(dev, NULL);
 	if (IS_ERR(clk)) {
@@ -1744,70 +1769,70 @@ static int ds90_probe(struct i2c_client *client)
 			dev_err(dev, "Cannot get REFCLK (%d)", err);
 		return err;
 	}
-	ds90->refclk = clk_get_rate(clk);
+	priv->refclk = clk_get_rate(clk);
 	clk_put(clk);
-	dev_dbg(dev, "REFCLK %lu", ds90->refclk);
+	dev_dbg(dev, "REFCLK %lu", priv->refclk);
 
 	/* Runtime check register accessibility */
-	err = ds90_read_shared(ds90, DS90_SR_REV_MASK, &rev_mask);
+	err = ds90_read_shared(priv, DS90_SR_REV_MASK, &rev_mask);
 	if (err) {
 		dev_err(dev, "Cannot read first register (%d), abort\n", err);
 		goto err_reg_read;
 	}
 
 
-	ds90_write_shared(ds90, DS90_SR_CSI_PORT_SEL, 1); // enable writes to CSI TX PORT 0
+	ds90_write_shared(priv, DS90_SR_CSI_PORT_SEL, 1); // enable writes to CSI TX PORT 0
 
-	err = ds90_atr_probe(ds90);
+	err = ds90_atr_probe(priv);
 	if (err)
 		goto err_atr_probe;
 
-	err = ds90_parse_dt(ds90);
+	err = ds90_parse_dt(priv);
 	if (err)
 		goto err_parse_dt;
 
 	/* V4L2 */
 
 	for (i = 0; i < DS90_NPORTS; i++)
-		ds90_init_format(&ds90->fmt[i]);
+		ds90_init_format(&priv->fmt[i]);
 
-	v4l2_i2c_subdev_init(&ds90->sd, client, &ds90_subdev_ops);
-	v4l2_ctrl_handler_init(&ds90->ctrl_handler,
+	v4l2_i2c_subdev_init(&priv->sd, client, &ds90_subdev_ops);
+	v4l2_ctrl_handler_init(&priv->ctrl_handler,
 			       ARRAY_SIZE(ds90_tpg_qmenu) - 1);
-	ds90->sd.ctrl_handler = &ds90->ctrl_handler;
+	priv->sd.ctrl_handler = &priv->ctrl_handler;
 
-	v4l2_ctrl_new_std_menu_items(&ds90->ctrl_handler, &ds90_ctrl_ops,
+	v4l2_ctrl_new_std_menu_items(&priv->ctrl_handler, &ds90_ctrl_ops,
 				     V4L2_CID_TEST_PATTERN,
 				     ARRAY_SIZE(ds90_tpg_qmenu) - 1, 0, 0,
 				     ds90_tpg_qmenu);
 
-	if (ds90->ctrl_handler.error) {
-		err = ds90->ctrl_handler.error;
+	if (priv->ctrl_handler.error) {
+		err = priv->ctrl_handler.error;
 		goto err_add_ctrls;
 	}
 
 	/* Let both the I2C client and the subdev point to us */
-	i2c_set_clientdata(client, ds90); /* v4l2_i2c_subdev_init writes it */
-	v4l2_set_subdevdata(&ds90->sd, ds90);
+	i2c_set_clientdata(client, priv); /* v4l2_i2c_subdev_init writes it */
+	v4l2_set_subdevdata(&priv->sd, priv);
 
-	ds90->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	ds90->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
+	priv->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	priv->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
 
 	for (i = 0; i < DS90_NPORTS; i++)
-		ds90->pads[i].flags = (i < DS90_FPD_RX_NPORTS) ?
+		priv->pads[i].flags = (i < DS90_FPD_RX_NPORTS) ?
 			MEDIA_PAD_FL_SINK : MEDIA_PAD_FL_SOURCE;
 
-	err = media_entity_pads_init(&ds90->sd.entity, DS90_NPORTS, ds90->pads);
+	err = media_entity_pads_init(&priv->sd.entity, DS90_NPORTS, priv->pads);
 	if (err)
 		goto err_pads_init;
 
-	err = v4l2_async_register_subdev(&ds90->sd);
+	err = v4l2_async_register_subdev(&priv->sd);
 	if (err) {
 		dev_err(dev, "v4l2_async_register_subdev error %d\n", err);
 		goto err_register_subdev;
 	}
 
-	ds90_v4l2_notifier_register(ds90);
+	ds90_v4l2_notifier_register(priv);
 
 	/* Kick off */
 
@@ -1817,26 +1842,26 @@ static int ds90_probe(struct i2c_client *client)
 		err = devm_request_threaded_irq(dev, client->irq,
 						NULL, ds90_handle_events,
 						IRQF_ONESHOT, client->name,
-						ds90);
+						priv);
 		if (err) {
 			dev_err(dev, "Cannot enable IRQ (%d)\n", err);
 			goto err_irq;
 		}
 
 		/* Disable GPIO3 as input */
-		ds90_update_bits_shared(ds90, DS90_SR_GPIO_INPUT_CTL,
+		ds90_update_bits_shared(priv, DS90_SR_GPIO_INPUT_CTL,
 					BIT(3), 0);
 		/* Enable GPIO3 as output, active low interrupt */
-		ds90_write_shared(ds90, DS90_SR_GPIO_PIN_CTL(3), 0xd1);
+		ds90_write_shared(priv, DS90_SR_GPIO_PIN_CTL(3), 0xd1);
 
-		ds90_write_shared(ds90, DS90_SR_INTERRUPT_CTL,
+		ds90_write_shared(priv, DS90_SR_INTERRUPT_CTL,
 				  DS90_SR_INTERRUPT_CTL_ALL);
 	} else {
 		/* No IRQ, fallback to polling */
 
-		ds90->kthread = kthread_run(ds90_run, ds90, dev_name(dev));
-		if (IS_ERR(ds90->kthread)) {
-			err = PTR_ERR(ds90->kthread);
+		priv->kthread = kthread_run(ds90_run, priv, dev_name(dev));
+		if (IS_ERR(priv->kthread)) {
+			err = PTR_ERR(priv->kthread);
 			dev_err(dev, "Cannot create kthread (%d)\n", err);
 			goto err_kthread;
 		}
@@ -1844,7 +1869,7 @@ static int ds90_probe(struct i2c_client *client)
 	}
 
 	/* By default enable forwarding from both ports */
-	ds90_write_shared(ds90, DS90_SR_FWD_CTL1, 0x00);
+	ds90_write_shared(priv, DS90_SR_FWD_CTL1, 0x00);
 
 	dev_info(dev, "Successfully probed (rev/mask %02x)\n", rev_mask);
 
@@ -1852,38 +1877,40 @@ static int ds90_probe(struct i2c_client *client)
 
 err_kthread:
 err_irq:
-	v4l2_async_unregister_subdev(&ds90->sd);
+	v4l2_async_unregister_subdev(&priv->sd);
 err_register_subdev:
-	media_entity_cleanup(&ds90->sd.entity);
+	media_entity_cleanup(&priv->sd.entity);
 err_pads_init:
 err_add_ctrls:
-	v4l2_ctrl_handler_free(&ds90->ctrl_handler);
-	ds90_remove_ports(ds90);
+	v4l2_ctrl_handler_free(&priv->ctrl_handler);
+	ds90_remove_ports(priv);
 err_parse_dt:
-	ds90_atr_remove(ds90);
+	ds90_atr_remove(priv);
 err_atr_probe:
 err_reg_read:
-	ds90_reset(ds90, true);
-	mutex_destroy(&ds90->alias_table_lock);
+	ds90_reset(priv, true);
+	mutex_destroy(&priv->alias_table_lock);
 	return err;
 }
 
 static int ds90_remove(struct i2c_client *client)
 {
-	struct ds90_data *ds90 = i2c_get_clientdata(client);
+	struct ds90_data *priv = i2c_get_clientdata(client);
 
 	dev_info(&client->dev, "Removing\n");
 
-	if (ds90->kthread)
-		kthread_stop(ds90->kthread);
-	v4l2_async_unregister_subdev(&ds90->sd);
-	ds90_v4l2_notifier_unregister(ds90);
-	media_entity_cleanup(&ds90->sd.entity);
-	v4l2_ctrl_handler_free(&ds90->ctrl_handler);
-	ds90_remove_ports(ds90);
-	ds90_atr_remove(ds90);
-	ds90_reset(ds90, true);
-	mutex_destroy(&ds90->alias_table_lock);
+	if (priv->kthread)
+		kthread_stop(priv->kthread);
+	v4l2_async_unregister_subdev(&priv->sd);
+	ds90_v4l2_notifier_unregister(priv);
+	media_entity_cleanup(&priv->sd.entity);
+	v4l2_ctrl_handler_free(&priv->ctrl_handler);
+	ds90_remove_ports(priv);
+	ds90_atr_remove(priv);
+	ds90_reset(priv, true);
+	mutex_destroy(&priv->alias_table_lock);
+
+	dev_info(&client->dev, "Remove done\n");
 
 	return 0;
 }
@@ -1902,7 +1929,7 @@ static const struct of_device_id ds90_dt_ids[] = {
 MODULE_DEVICE_TABLE(of, ds90_dt_ids);
 #endif
 
-static struct i2c_driver ds90ub954_driver = {
+static struct i2c_driver ds90ub960_driver = {
 	.probe_new	= ds90_probe,
 	.remove		= ds90_remove,
 	.id_table	= ds90_id,
@@ -1913,8 +1940,8 @@ static struct i2c_driver ds90ub954_driver = {
 	},
 };
 
-module_i2c_driver(ds90ub954_driver);
+module_i2c_driver(ds90ub960_driver);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Texas Instruments DS90UB954-Q1 CSI-2 dual deserializer driver");
+MODULE_DESCRIPTION("Texas Instruments DS90UB960-Q1 CSI-2 dual deserializer driver");
 MODULE_AUTHOR("Luca Ceresoli <luca@lucaceresoli.net>");

@@ -16,6 +16,7 @@
 #include <linux/delay.h>
 #include <dt-bindings/media/ds90ub9xx.h>
 #include <linux/regmap.h>
+#include <linux/gpio/driver.h>
 
 #define UB913_NUM_GPIOS			4
 
@@ -31,12 +32,16 @@
 #define UB913_REG_GPIO_CFG_DIR_INPUT(n)	BIT(1 + (n) * 4)
 #define UB913_REG_GPIO_CFG_REMOTE_EN(n)	BIT(2 + (n) * 4)
 #define UB913_REG_GPIO_CFG_OUT_VAL(n)	BIT(3 + (n) * 4)
+#define UB913_REG_GPIO_CFG_MASK(n)	(0xf << ((n) * 4))
 
 struct ub913_data {
 	struct i2c_client *client;
 	struct regmap *regmap;
 
 	u32 gpio_func[UB913_NUM_GPIOS];
+
+	struct gpio_chip        gpio_chip;
+	char                    gpio_chip_name[64];
 };
 
 static int ub913_read(const struct ub913_data *priv, u8 reg, u8 *val)
@@ -67,10 +72,82 @@ static int ub913_write(const struct ub913_data *priv, u8 reg, u8 val)
 	return ret;
 }
 
+/*
+ * GPIO chip
+ */
+static int ub913_gpio_direction_out(struct gpio_chip *gc, unsigned int offset, int value)
+{
+	struct ub913_data *priv = gpiochip_get_data(gc);
+	unsigned int reg_idx;
+	unsigned int field_idx;
+	int ret;
+
+	reg_idx = offset / 2;
+	field_idx = offset % 2;
+
+	ret = regmap_update_bits(priv->regmap, UB913_REG_GPIO_CFG(reg_idx),
+	                   UB913_REG_GPIO_CFG_MASK(field_idx),
+	                   UB913_REG_GPIO_CFG_ENABLE(field_idx) |
+	                   (value ? UB913_REG_GPIO_CFG_OUT_VAL(field_idx) : 0));
+
+	return ret;
+}
+
+static void ub913_gpio_set(struct gpio_chip *gc, unsigned int offset, int value)
+{
+	ub913_gpio_direction_out(gc, offset, value);
+}
+
+static int ub913_gpio_of_xlate(struct gpio_chip *gc,
+			      const struct of_phandle_args *gpiospec,
+			      u32 *flags)
+{
+	if (flags)
+		*flags = gpiospec->args[1];
+
+	return gpiospec->args[0];
+}
+
+static int ub913_gpiochip_probe(struct ub913_data *priv)
+{
+	struct device *dev = &priv->client->dev;
+	struct gpio_chip *gc = &priv->gpio_chip;
+	int err;
+
+	scnprintf(priv->gpio_chip_name, sizeof(priv->gpio_chip_name),
+		  "%s", dev_name(dev));
+
+	gc->label               = priv->gpio_chip_name;
+	gc->parent              = dev;
+	gc->owner               = THIS_MODULE;
+	gc->base                = -1;
+	gc->can_sleep           = 1;
+	gc->ngpio               = 4;
+	gc->direction_output    = ub913_gpio_direction_out;
+	gc->set                 = ub913_gpio_set;
+	gc->of_xlate            = ub913_gpio_of_xlate;
+	gc->of_node             = priv->client->dev.of_node;
+	gc->of_gpio_n_cells     = 2;
+
+	err = gpiochip_add_data(gc, priv);
+	if (err) {
+		dev_err(dev, "Failed to add GPIOs: %d\n", err);
+		return err;
+	}
+
+	return 0;
+}
+
+static void ub913_gpiochip_remove(struct ub913_data *priv)
+{
+	gpiochip_remove(&priv->gpio_chip);
+}
+
+
+// XXX disable for now
+#if 0
 static void ub913_configure_gpios(struct ub913_data *priv)
 {
-	// XXX disable for now
-#if 0
 	struct device *dev = &priv->client->dev;
 	u8 gpio_reg_val[2] = { 0 };
 	int i;
@@ -83,18 +160,18 @@ static void ub913_configure_gpios(struct ub913_data *priv)
 		field_idx = i % 2;
 
 		switch (priv->gpio_func[i]) {
-		case DS90_GPIO_FUNC_UNUSED:
+		case ub913_GPIO_FUNC_UNUSED:
 			break;
-		case DS90_GPIO_FUNC_OUTPUT:
+		case ub913_GPIO_FUNC_OUTPUT:
 			gpio_reg_val[reg_idx] |=
 				UB913_REG_GPIO_CFG_ENABLE(field_idx);
 			break;
-		case DS90_GPIO_FUNC_INPUT:
+		case ub913_GPIO_FUNC_INPUT:
 			gpio_reg_val[reg_idx] |=
 				UB913_REG_GPIO_CFG_ENABLE(field_idx) |
 				UB913_REG_GPIO_CFG_DIR_INPUT(field_idx);
 			break;
-		case DS90_GPIO_FUNC_OUTPUT_REMOTE:
+		case ub913_GPIO_FUNC_OUTPUT_REMOTE:
 			gpio_reg_val[reg_idx] |=
 				UB913_REG_GPIO_CFG_ENABLE(field_idx) |
 				UB913_REG_GPIO_CFG_REMOTE_EN(field_idx);
@@ -109,8 +186,8 @@ static void ub913_configure_gpios(struct ub913_data *priv)
 
 	ub913_write(priv, UB913_REG_GPIO_CFG(0), gpio_reg_val[0]);
 	ub913_write(priv, UB913_REG_GPIO_CFG(1), gpio_reg_val[1]);
-#endif
 }
+#endif
 
 /*
  * Reset via registers (useful from remote).
@@ -193,13 +270,15 @@ static int ub913_probe(struct i2c_client *client)
 		return PTR_ERR(priv->regmap);
 	}
 
-	ub913_soft_reset(priv);
-
 	err = ub913_parse_dt(priv);
 	if (err)
 		goto err_parse_dt;
 
-	ub913_configure_gpios(priv);
+	ub913_soft_reset(priv);
+
+	ub913_gpiochip_probe(priv);
+
+	//ub913_configure_gpios(priv);
 
 	dev_info(dev, "Successfully probed\n");
 
@@ -211,7 +290,12 @@ err_parse_dt:
 
 static int ub913_remove(struct i2c_client *client)
 {
+	struct ub913_data *priv = i2c_get_clientdata(client);
+
 	dev_info(&client->dev, "Removing\n");
+
+	ub913_gpiochip_remove(priv);
+
 	return 0;
 }
 

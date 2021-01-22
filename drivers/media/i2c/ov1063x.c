@@ -1516,6 +1516,8 @@ static int ov1063x_probe(struct i2c_client *client)
 	struct v4l2_subdev *sd;
 	int ret;
 
+	dev_info(&client->dev, "ov1063x_probe\n");
+
 	priv = devm_kzalloc(&client->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;

@@ -461,13 +461,16 @@
 				ds90ub960_fpd3_in0: endpoint {
 					remote-endpoint = <&sensor_0_out>;
 
-					remote-chip {
+					ser0: remote-chip {
 						compatible = "ti,ds90ub913a-q1";
 
 						gpio-functions = <DS90_GPIO_FUNC_OUTPUT
 								  DS90_GPIO_FUNC_OUTPUT
 								  DS90_GPIO_FUNC_UNUSED
 								  DS90_GPIO_FUNC_UNUSED>;
+
+						gpio-controller;
+						#gpio-cells = <2>;
 					};
 				};
 			};
@@ -503,6 +506,8 @@
 
 					/* powerdown-gpios = <GPO0 from ser>; */
 					/* framesync-gpios = <GPO1 from ser>; */
+
+					powerdown-gpios = <&ser0 0 GPIO_ACTIVE_HIGH>;
 
 					/* Note: PCLK must be 96MHz */
 

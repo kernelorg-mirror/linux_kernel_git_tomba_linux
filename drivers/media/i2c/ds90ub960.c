@@ -42,14 +42,14 @@
 /*
  * Register map
  *
- * 0x00-0x32   Shared
- * 0x33-0x3A   CSI-2 TX (per-port paged on DS90UB960, shared on 954)
- * 0x4C        Shared
- * 0x4D-0x7F   FPD-Link RX, per-port paged
- * 0xB0-0xBF   Shared
- * 0xD0-0xDF   FPD-Link RX, per-port paged
- * 0xF0-0xF5   Shared
- * 0xF8-0xFB   Shared
+ * 0x00-0x32   Shared (DS90_SR)
+ * 0x33-0x3A   CSI-2 TX (per-port paged on DS90UB960, shared on 954) (DS90_TR)
+ * 0x4C        Shared (DS90_SR)
+ * 0x4D-0x7F   FPD-Link RX, per-port paged (DS90_RR)
+ * 0xB0-0xBF   Shared (DS90_SR)
+ * 0xD0-0xDF   FPD-Link RX, per-port paged (DS90_RR)
+ * 0xF0-0xF5   Shared (DS90_SR)
+ * 0xF8-0xFB   Shared (DS90_SR)
  * All others  Reserved
  *
  * Register defines prefixes:
@@ -366,7 +366,7 @@ static const char * const ds90_tpg_qmenu[] = {
  * Basic device access
  */
 
-static int ds90_read_shared(const struct ds90_data *priv, u8 reg, u8 *val)
+static int ds90_read(const struct ds90_data *priv, u8 reg, u8 *val)
 {
 	struct device *dev = &priv->client->dev;
 	unsigned int v;
@@ -384,7 +384,7 @@ static int ds90_read_shared(const struct ds90_data *priv, u8 reg, u8 *val)
 	return 0;
 }
 
-static int ds90_write_shared(const struct ds90_data *priv, u8 reg, u8 val)
+static int ds90_write(const struct ds90_data *priv, u8 reg, u8 val)
 {
 	struct device *dev = &priv->client->dev;
 	int ret;
@@ -410,7 +410,7 @@ static int ds90_update_bits_shared(const struct ds90_data *priv, u8 reg, u8 mask
 	return ret;
 }
 
-static int ds90_select_rxport(struct ds90_data *priv, int nport)
+static int ds90_rxport_select(struct ds90_data *priv, int nport)
 {
 	struct device *dev = &priv->client->dev;
 	int ret;
@@ -431,13 +431,13 @@ static int ds90_select_rxport(struct ds90_data *priv, int nport)
 	return 0;
 }
 
-static int ds90_read_rxport(struct ds90_data *priv, int nport, u8 reg, u8 *val)
+static int ds90_rxport_read(struct ds90_data *priv, int nport, u8 reg, u8 *val)
 {
 	struct device *dev = &priv->client->dev;
 	unsigned int v;
 	int ret;
 
-	ds90_select_rxport(priv, nport);
+	ds90_rxport_select(priv, nport);
 
 	ret = regmap_read(priv->regmap, reg, &v);
 	if (ret) {
@@ -451,12 +451,12 @@ static int ds90_read_rxport(struct ds90_data *priv, int nport, u8 reg, u8 *val)
 	return 0;
 }
 
-static int ds90_write_rxport(struct ds90_data *priv, int nport, u8 reg, u8 val)
+static int ds90_rxport_write(struct ds90_data *priv, int nport, u8 reg, u8 val)
 {
 	struct device *dev = &priv->client->dev;
 	int ret;
 
-	ds90_select_rxport(priv, nport);
+	ds90_rxport_select(priv, nport);
 
 	ret = regmap_write(priv->regmap, reg, val);
 	if (ret)
@@ -466,13 +466,13 @@ static int ds90_write_rxport(struct ds90_data *priv, int nport, u8 reg, u8 val)
 	return ret;
 }
 
-static int ds90_update_bits_rxport(struct ds90_data *priv, int nport,
+static int ds90_rxport_update_bits(struct ds90_data *priv, int nport,
 				   u8 reg, u8 mask, u8 val)
 {
 	struct device *dev = &priv->client->dev;
 	int ret;
 
-	ds90_select_rxport(priv, nport);
+	ds90_rxport_select(priv, nport);
 
 	ret = regmap_update_bits(priv->regmap, reg, mask, val);
 
@@ -483,7 +483,7 @@ static int ds90_update_bits_rxport(struct ds90_data *priv, int nport,
 	return ret;
 }
 
-static int ds90_select_csiport(struct ds90_data *priv, int nport)
+static int ds90_csiport_select(struct ds90_data *priv, int nport)
 {
 	struct device *dev = &priv->client->dev;
 	int ret;
@@ -504,13 +504,13 @@ static int ds90_select_csiport(struct ds90_data *priv, int nport)
 	return 0;
 }
 
-static int ds90_read_csiport(struct ds90_data *priv, int nport, u8 reg, u8 *val)
+static int ds90_csiport_read(struct ds90_data *priv, int nport, u8 reg, u8 *val)
 {
 	struct device *dev = &priv->client->dev;
 	unsigned int v;
 	int ret;
 
-	ds90_select_csiport(priv, nport);
+	ds90_csiport_select(priv, nport);
 
 	ret = regmap_read(priv->regmap, reg, &v);
 	if (ret) {
@@ -524,12 +524,12 @@ static int ds90_read_csiport(struct ds90_data *priv, int nport, u8 reg, u8 *val)
 	return 0;
 }
 
-static int ds90_write_csiport(struct ds90_data *priv, int nport, u8 reg, u8 val)
+static int ds90_csiport_write(struct ds90_data *priv, int nport, u8 reg, u8 val)
 {
 	struct device *dev = &priv->client->dev;
 	int ret;
 
-	ds90_select_csiport(priv, nport);
+	ds90_csiport_select(priv, nport);
 
 	ret = regmap_write(priv->regmap, reg, val);
 	if (ret)
@@ -543,9 +543,9 @@ static int ds90_write_ind8(const struct ds90_data *priv, u8 reg, u8 val)
 {
 	int err;
 
-	err = ds90_write_shared(priv, DS90_SR_IND_ACC_ADDR, reg);
+	err = ds90_write(priv, DS90_SR_IND_ACC_ADDR, reg);
 	if (!err)
-		err = ds90_write_shared(priv, DS90_SR_IND_ACC_DATA, val);
+		err = ds90_write(priv, DS90_SR_IND_ACC_DATA, val);
 	return err;
 }
 
@@ -554,11 +554,11 @@ static int ds90_write_ind16(const struct ds90_data *priv, u8 reg, u16 val)
 {
 	int err;
 
-	err = ds90_write_shared(priv, DS90_SR_IND_ACC_ADDR, reg);
+	err = ds90_write(priv, DS90_SR_IND_ACC_ADDR, reg);
 	if (!err)
-		err = ds90_write_shared(priv, DS90_SR_IND_ACC_DATA, val >> 8);
+		err = ds90_write(priv, DS90_SR_IND_ACC_DATA, val >> 8);
 	if (!err)
-		err = ds90_write_shared(priv, DS90_SR_IND_ACC_DATA, val & 0xff);
+		err = ds90_write(priv, DS90_SR_IND_ACC_DATA, val & 0xff);
 	return err;
 }
 
@@ -616,7 +616,7 @@ static int ds90_atr_attach_client(struct i2c_atr *atr, u32 chan_id,
 	for (reg_idx = 0; reg_idx < DS90_NUM_SLAVE_ALIASES; reg_idx++) {
 		u8 regval;
 
-		err = ds90_read_rxport(priv, chan_id,
+		err = ds90_rxport_read(priv, chan_id,
 				       DS90_RR_SLAVE_ALIAS(reg_idx), &regval);
 		if (!err && regval == 0)
 			break;
@@ -630,9 +630,9 @@ static int ds90_atr_attach_client(struct i2c_atr *atr, u32 chan_id,
 
 	/* Map alias to slave */
 
-	ds90_write_rxport(priv, chan_id,
+	ds90_rxport_write(priv, chan_id,
 			  DS90_RR_SLAVE_ID(reg_idx), client->addr << 1);
-	ds90_write_rxport(priv, chan_id,
+	ds90_rxport_write(priv, chan_id,
 			  DS90_RR_SLAVE_ALIAS(reg_idx), alias << 1);
 
 	priv->atr_slave_id[pool_idx] = client->addr;
@@ -679,7 +679,7 @@ static void ds90_atr_detach_client(struct i2c_atr *atr, u32 chan_id,
 		u8 regval;
 		int err;
 
-		err = ds90_read_rxport(priv, chan_id,
+		err = ds90_rxport_read(priv, chan_id,
 				       DS90_RR_SLAVE_ALIAS(reg_idx), &regval);
 		if (!err && regval == (alias << 1))
 			break;
@@ -694,7 +694,7 @@ static void ds90_atr_detach_client(struct i2c_atr *atr, u32 chan_id,
 
 	/* Unmap */
 
-	ds90_write_rxport(priv, chan_id, DS90_RR_SLAVE_ALIAS(reg_idx), 0);
+	ds90_rxport_write(priv, chan_id, DS90_RR_SLAVE_ALIAS(reg_idx), 0);
 	priv->atr_slave_id[pool_idx] = 0;
 
 	dev_info(dev, "rx%d: client 0x%02x unmapped from alias 0x%02x (%s)\n",
@@ -744,7 +744,7 @@ static void ds90_csi_handle_events(struct ds90_data *priv)
 	u8 csi_tx_isr;
 	int err;
 
-	err = ds90_read_csiport(priv, HACK_CSI_PORT, DS90_TR_CSI_TX_ISR, &csi_tx_isr);
+	err = ds90_csiport_read(priv, HACK_CSI_PORT, DS90_TR_CSI_TX_ISR, &csi_tx_isr);
 
 	if (!err) {
 		if (csi_tx_isr & DS90_TR_CSI_TX_ISR_IS_CSI_SYNC_ERROR)
@@ -766,7 +766,7 @@ static int ds90_gpio_direction_out(struct gpio_chip *chip,
 	unsigned int reg_addr = DS90_RR_BC_GPIO_CTL(offset / 2);
 	unsigned int reg_shift = (offset % 2) * 4;
 
-	ds90_update_bits_rxport(rxport->priv, rxport->nport, reg_addr,
+	ds90_rxport_update_bits(rxport->priv, rxport->nport, reg_addr,
 				0xf << reg_shift,
 				(0x8 + !!value) << reg_shift);
 	return 0;
@@ -1046,7 +1046,7 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 		goto err_node_put;
 	}
 
-	ds90_write_shared(priv, DS90_SR_I2C_RX_ID(nport),
+	ds90_write(priv, DS90_SR_I2C_RX_ID(nport),
 			  rxport->reg_client->addr << 1);
 
 	dev_info(dev, "rx%d: at alias 0x%02x\n",
@@ -1055,7 +1055,7 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 
 	// Override FREQ_SELECT from the strap
 	// FREQ_SELECT: 000: 2.5 Mbps (default for DS90UB913A-Q1 / DS90UB933-Q1 compatibility)
-	ds90_update_bits_rxport(priv, nport, DS90_RR_BCC_CONFIG, 0x7, 0);
+	ds90_rxport_update_bits(priv, nport, DS90_RR_BCC_CONFIG, 0x7, 0);
 
 	// Override FPD3_MODE from the strap
 	/*
@@ -1064,16 +1064,16 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 	10: RAW12 High Frequency Mode(DS90UB913A-Q1 / DS90UB933-Q1 compatible)
 	11: RAW10 Mode (DS90UB913A-Q1 / DS90UB933-Q1 compatible)
 	*/
-	ds90_update_bits_rxport(priv, nport, DS90_RR_PORT_CONFIG, 0x3, 0x3);
+	ds90_rxport_update_bits(priv, nport, DS90_RR_PORT_CONFIG, 0x3, 0x3);
 
 	// LV_POLARITY & FV_POLARITY
-	ds90_update_bits_rxport(priv, nport, DS90_RR_PORT_CONFIG2, 0x3, 0x1);
+	ds90_rxport_update_bits(priv, nport, DS90_RR_PORT_CONFIG2, 0x3, 0x1);
 
 	// RAW10_8BIT_CTL = 0b11 : 8-bit processing using lower 8 bits
 	// 0b10 : 8-bit processing using upper 8 bits
-	ds90_update_bits_rxport(priv, nport, DS90_RR_PORT_CONFIG2, 0x3<<6, 0x2<<6);
+	ds90_rxport_update_bits(priv, nport, DS90_RR_PORT_CONFIG2, 0x3<<6, 0x2<<6);
 
-	ds90_write_rxport(priv, nport, DS90_RR_RAW10_ID, 0x1e); // datatype = YUV422 8-bit
+	ds90_rxport_write(priv, nport, DS90_RR_RAW10_ID, 0x1e); // datatype = YUV422 8-bit
 
 
 	/*
@@ -1085,10 +1085,10 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 
 	{
 		u8 v1, v2, v3, v4;
-		ds90_read_rxport(priv, nport, DS90_RR_BCC_STATUS, &v1);
-		ds90_read_rxport(priv, nport, DS90_RR_RX_PORT_STS1, &v2);
-		ds90_read_rxport(priv, nport, DS90_RR_RX_PORT_STS2, &v3);
-		ds90_read_rxport(priv, nport, DS90_RR_CSI_RX_STS, &v4);
+		ds90_rxport_read(priv, nport, DS90_RR_BCC_STATUS, &v1);
+		ds90_rxport_read(priv, nport, DS90_RR_RX_PORT_STS1, &v2);
+		ds90_rxport_read(priv, nport, DS90_RR_RX_PORT_STS2, &v3);
+		ds90_rxport_read(priv, nport, DS90_RR_CSI_RX_STS, &v4);
 	}
 
 
@@ -1096,10 +1096,10 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 	{
 		u8 v1, v2, v3, v4;
 		msleep(10);
-		ds90_read_rxport(priv, nport, DS90_RR_BCC_STATUS, &v1);
-		ds90_read_rxport(priv, nport, DS90_RR_RX_PORT_STS1, &v2);
-		ds90_read_rxport(priv, nport, DS90_RR_RX_PORT_STS2, &v3);
-		ds90_read_rxport(priv, nport, DS90_RR_CSI_RX_STS, &v4);
+		ds90_rxport_read(priv, nport, DS90_RR_BCC_STATUS, &v1);
+		ds90_rxport_read(priv, nport, DS90_RR_RX_PORT_STS1, &v2);
+		ds90_rxport_read(priv, nport, DS90_RR_RX_PORT_STS2, &v3);
+		ds90_rxport_read(priv, nport, DS90_RR_CSI_RX_STS, &v4);
 		printk("%x, %x, %x, %x\n", v1, v2, v3, v4);
 	}
 #endif
@@ -1109,15 +1109,15 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 		goto err_unreg_i2c_dev;
 
 	/* Enable all interrupt sources from this port */
-	ds90_write_rxport(priv, nport, DS90_RR_PORT_ICR_HI, 0x07);
-	ds90_write_rxport(priv, nport, DS90_RR_PORT_ICR_LO, 0x7f);
+	ds90_rxport_write(priv, nport, DS90_RR_PORT_ICR_HI, 0x07);
+	ds90_rxport_write(priv, nport, DS90_RR_PORT_ICR_LO, 0x7f);
 
 	/* Set pass-through, but preserve BC_FREQ_SELECT strapping options */
-	ds90_update_bits_rxport(priv, nport, DS90_RR_BCC_CONFIG,
+	ds90_rxport_update_bits(priv, nport, DS90_RR_BCC_CONFIG,
 				DS90_RR_BCC_CONFIG_I2C_PASS_THROUGH, ~0);
 
 	/* Enable I2C communication to the serializer via the alias addr */
-	ds90_write_rxport(priv, nport,
+	ds90_rxport_write(priv, nport,
 			  DS90_RR_SER_ALIAS_ID, rxport->ser_alias << 1);
 
 	dev_info(dev, "ser%d: at alias 0x%02x\n",
@@ -1203,13 +1203,13 @@ static void ds90_rxport_handle_events(struct ds90_data *priv, int nport)
 
 	/* Read interrupts (also clears most of them) */
 	if (!err)
-		err = ds90_read_rxport(priv, nport, DS90_RR_RX_PORT_STS1, &rx_port_sts1);
+		err = ds90_rxport_read(priv, nport, DS90_RR_RX_PORT_STS1, &rx_port_sts1);
 	if (!err)
-		err = ds90_read_rxport(priv, nport, DS90_RR_RX_PORT_STS2, &rx_port_sts2);
+		err = ds90_rxport_read(priv, nport, DS90_RR_RX_PORT_STS2, &rx_port_sts2);
 	if (!err)
-		err = ds90_read_rxport(priv, nport, DS90_RR_CSI_RX_STS, &csi_rx_sts);
+		err = ds90_rxport_read(priv, nport, DS90_RR_CSI_RX_STS, &csi_rx_sts);
 	if (!err)
-		err = ds90_read_rxport(priv, nport, DS90_RR_BCC_STATUS, &bcc_sts);
+		err = ds90_rxport_read(priv, nport, DS90_RR_BCC_STATUS, &bcc_sts);
 
 	if (err)
 		return;
@@ -1235,8 +1235,8 @@ static void ds90_rxport_handle_events(struct ds90_data *priv, int nport)
 
 		rxport->line_len_chg_count++;
 
-		err = ds90_read_rxport(priv, nport, DS90_RR_LINE_LEN_1, &h);
-		err = ds90_read_rxport(priv, nport, DS90_RR_LINE_LEN_0, &l);
+		err = ds90_rxport_read(priv, nport, DS90_RR_LINE_LEN_1, &h);
+		err = ds90_rxport_read(priv, nport, DS90_RR_LINE_LEN_0, &l);
 
 		printk("PIXELS %u\n", (h << 8) | l);
 	}
@@ -1252,8 +1252,8 @@ static void ds90_rxport_handle_events(struct ds90_data *priv, int nport)
 
 		rxport->line_cnt_chg_count++;
 
-		err = ds90_read_rxport(priv, nport, DS90_RR_LINE_COUNT_HI, &h);
-		err = ds90_read_rxport(priv, nport, DS90_RR_LINE_COUNT_LO, &l);
+		err = ds90_rxport_read(priv, nport, DS90_RR_LINE_COUNT_HI, &h);
+		err = ds90_rxport_read(priv, nport, DS90_RR_LINE_COUNT_LO, &l);
 
 		printk("LINES %u\n", (h << 8) | l);
 	}
@@ -1301,7 +1301,7 @@ static void ds90_set_tpg(struct ds90_data *priv, int tpg_num)
 
 	if (tpg_num == 0) {
 		/* TPG off, enable forwarding from FPD-3 RX ports */
-		ds90_write_shared(priv, DS90_SR_FWD_CTL1, 0x00);
+		ds90_write(priv, DS90_SR_FWD_CTL1, 0x00);
 
 		ds90_write_ind8(priv, DS90_IR_PGEN_CTL, 0x00);
 		return;
@@ -1326,13 +1326,13 @@ static void ds90_set_tpg(struct ds90_data *priv, int tpg_num)
 		u16 line_pd = 100000000 / 60 / tot_lpf;
 
 		/* Disable forwarding from FPD-3 RX ports */
-		ds90_write_shared(priv,
+		ds90_write(priv,
 				  DS90_SR_FWD_CTL1,
 				  DS90_SR_FWD_CTL1_PORT_DIS(0) |
 				  DS90_SR_FWD_CTL1_PORT_DIS(1));
 
 		/* Access Indirect Pattern Gen */
-		ds90_write_shared(priv,
+		ds90_write(priv,
 				  DS90_SR_IND_ACC_CTL,
 				  DS90_SR_IND_ACC_CTL_IA_AUTO_INC | 0);
 
@@ -1409,12 +1409,12 @@ static int ds90_s_stream(struct v4l2_subdev *sd, int enable)
 		if (speed_select == 0)
 			csi_ctl |= DS90_TR_CSI_CTL_CSI_CAL_EN;
 
-		ds90_write_shared(priv, DS90_SR_CSI_PLL_CTL, speed_select);
-		ds90_write_csiport(priv, HACK_CSI_PORT, DS90_TR_CSI_CTL, csi_ctl);
+		ds90_write(priv, DS90_SR_CSI_PLL_CTL, speed_select);
+		ds90_csiport_write(priv, HACK_CSI_PORT, DS90_TR_CSI_CTL, csi_ctl);
 
 		//ds90_set_tpg(priv, TEST_PATTERN_V_COLOR_BARS_8);
 	} else {
-		ds90_write_csiport(priv, HACK_CSI_PORT, DS90_TR_CSI_CTL, 0);
+		ds90_csiport_write(priv, HACK_CSI_PORT, DS90_TR_CSI_CTL, 0);
 
 		/* Stop all cameras. */
 		for (i = 0; i < DS90_FPD_RX_NPORTS; ++i) {
@@ -1544,7 +1544,7 @@ static irqreturn_t ds90_handle_events(int irq, void *arg)
 
 	// XXX needs mutex!
 
-	err = ds90_read_shared(priv, DS90_SR_INTERRUPT_STS, &int_sts);
+	err = ds90_read(priv, DS90_SR_INTERRUPT_STS, &int_sts);
 
 	if (!err && int_sts) {
 		printk("INTERRUPT_STS %x\n", int_sts);
@@ -1909,7 +1909,7 @@ static int ds90_probe(struct i2c_client *client)
 	dev_dbg(dev, "REFCLK %lu", priv->refclk);
 
 	/* Runtime check register accessibility */
-	err = ds90_read_shared(priv, DS90_SR_REV_MASK, &rev_mask);
+	err = ds90_read(priv, DS90_SR_REV_MASK, &rev_mask);
 	if (err) {
 		dev_err(dev, "Cannot read first register (%d), abort\n", err);
 		goto err_reg_read;
@@ -1930,7 +1930,7 @@ static int ds90_probe(struct i2c_client *client)
 		goto err_subdev;
 
 	/* By default enable forwarding from both ports */
-	ds90_write_shared(priv, DS90_SR_FWD_CTL1, 0x00);
+	ds90_write(priv, DS90_SR_FWD_CTL1, 0x00);
 
 	/* Kick off */
 	{
@@ -1946,7 +1946,7 @@ static int ds90_probe(struct i2c_client *client)
 			if (!priv->rxport[i])
 				continue;
 
-			err = ds90_read_rxport(priv, i, DS90_RR_RX_PORT_STS1, &rx_port_sts1);
+			err = ds90_rxport_read(priv, i, DS90_RR_RX_PORT_STS1, &rx_port_sts1);
 			if (rx_port_sts1 & DS90_RR_RX_PORT_STS1_LOCK_STS) {
 				dev_info(dev, "rx%d: INITIAL LOCKED\n", i);
 				ds90_rxport_add_serializer(priv, i);
@@ -1971,9 +1971,9 @@ static int ds90_probe(struct i2c_client *client)
 		ds90_update_bits_shared(priv, DS90_SR_GPIO_INPUT_CTL,
 					BIT(3), 0);
 		/* Enable GPIO3 as output, active low interrupt */
-		ds90_write_shared(priv, DS90_SR_GPIO_PIN_CTL(3), 0xd1);
+		ds90_write(priv, DS90_SR_GPIO_PIN_CTL(3), 0xd1);
 
-		ds90_write_shared(priv, DS90_SR_INTERRUPT_CTL,
+		ds90_write(priv, DS90_SR_INTERRUPT_CTL,
 				  DS90_SR_INTERRUPT_CTL_ALL);
 	} else {
 		/* No IRQ, fallback to polling */

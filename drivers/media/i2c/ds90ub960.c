@@ -927,10 +927,9 @@ static int ds90_rxport_add_serializer(struct ds90_data *priv, int nport)
 {
 	struct ds90_rxport *rxport = priv->rxport[nport];
 	struct device *dev = &priv->client->dev;
-	struct i2c_board_info ser_info = { .type = "ds90ub953-q1",
+	struct i2c_board_info ser_info = { /*.type = "ds90ub953-q1",*/
 					   .of_node = rxport->remote_of_node,
-					   // TODO is this OK?
-					   .platform_data = &priv->refclk };
+					  };
 	int err;
 
 	/*

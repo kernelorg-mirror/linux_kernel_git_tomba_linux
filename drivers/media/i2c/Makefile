@@ -127,8 +127,6 @@ rdacm20-camera_module-objs	:= rdacm20.o max9271.o
 obj-$(CONFIG_VIDEO_RDACM20)	+= rdacm20-camera_module.o
 obj-$(CONFIG_VIDEO_ST_MIPID02) += st-mipid02.o
 
-obj-$(CONFIG_VIDEO_DS90UB954)	+= ds90ub954.o
-obj-$(CONFIG_VIDEO_DS90UB953)	+= ds90ub953.o
 obj-$(CONFIG_VIDEO_DS90UB913)	+= ds90ub913.o
 obj-$(CONFIG_VIDEO_DS90UB960)	+= ds90ub960.o
 

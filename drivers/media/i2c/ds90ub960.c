@@ -264,22 +264,6 @@
 #define DS90_IR_PGEN_VFP		0x0F
 #define DS90_IRT_PGEN_COLOR(n)		(0x10 + (n)) /* n < 15 */
 
-/**
- * struct ds90_rxport_info - Info for instantiating rxports from device tree
- * local_name:       DT name of the RX port
- * remote_name:      DT name of the remote serializer
- * local_def_alias:  Fallback I2C alias for the RX port if not found in DT
- * remote_def_alias: Fallback I2C alias for the remote deserializer if not
- *                   found in DT
- */
-struct ds90_rxport_info {
-	const char *rxport_name;
-	u8 rxport_fallback_i2c_addr;
-
-	const char *serializer_name;
-	u8 serializer_fallback_i2c_addr;
-};
-
 struct ds90_rxport {
 	/* Errors and anomalies counters */
 	u64 bcc_crc_error_count;
@@ -316,7 +300,6 @@ struct ds90_asd {
 	struct ds90_rxport *rxport;
 };
 
-
 static inline struct ds90_asd *to_ds90_asd(struct v4l2_async_subdev *asd)
 {
 	return container_of(asd, struct ds90_asd, base);
@@ -341,6 +324,7 @@ struct ds90_data {
 	struct media_pad            pads[DS90_NPORTS];
 	struct v4l2_mbus_framefmt   fmt[DS90_NPORTS];
 	struct v4l2_ctrl_handler    ctrl_handler;
+	struct v4l2_async_notifier notifier;
 
 	unsigned long               refclk;
 
@@ -350,8 +334,6 @@ struct ds90_data {
 	u16          atr_slave_id[DS90_MAX_POOL_ALIASES]; /* 0 = not in use */
 	struct mutex alias_table_lock;
 
-	struct v4l2_async_notifier notifier;
-
 	u8 current_read_rxport;
 	u8 current_write_rxport_mask;
 
@@ -359,7 +341,10 @@ struct ds90_data {
 	u8 current_write_csiport_mask;
 };
 
-#define sd_to_ds90(_sd) container_of(_sd, struct ds90_data, sd)
+static inline struct ds90_data *sd_to_ds90(struct v4l2_subdev *sd)
+{
+	return container_of(sd, struct ds90_data, sd);
+}
 
 enum {
 	TEST_PATTERN_DISABLED = 0,
@@ -981,20 +966,23 @@ static void ds90_rxport_remove_serializer(struct ds90_data *priv, int nport)
  * Return the local alias for a given remote serializer.
  * Get it from devicetree, if absent fallback to the default.
  */
-static unsigned short
-ds90_rxport_get_remote_alias(struct ds90_data *priv,
-			     const struct ds90_rxport_info *info)
+static int
+ds90_of_get_reg(struct device_node *np, const char *serializer_name)
 {
-	struct device_node *np = priv->client->dev.of_node;
-	u32 alias = info->serializer_fallback_i2c_addr;
-	int i;
+	u32 alias;
+	int ret;
+	int idx;
 
-	if (np) {
-		i = of_property_match_string(np, "reg-names",
-					     info->serializer_name);
-		if (i >= 0)
-			of_property_read_u32_index(np, "reg", i, &alias);
-	}
+	if (!np)
+		return -ENODEV;
+
+	idx = of_property_match_string(np, "reg-names", serializer_name);
+	if (idx < 0)
+		return idx;
+
+	ret = of_property_read_u32_index(np, "reg", idx, &alias);
+	if (ret)
+		return ret;
 
 	return alias;
 }
@@ -1003,17 +991,11 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 				 const struct device_node *np,
 				 unsigned int nport)
 {
+	const char *rxport_names[DS90_FPD_RX_NPORTS] = { "rxport0", "rxport1", "rxport2", "rxport3" };
+	const char *ser_names[DS90_FPD_RX_NPORTS] = { "ser0", "ser1", "ser2", "ser3" };
 	struct device *dev = &priv->client->dev;
-	const struct ds90_rxport_info *info;
 	struct ds90_rxport *rxport;
-	int err;
-
-	static const struct ds90_rxport_info rxport_info[DS90_FPD_RX_NPORTS] = {
-		{ "rxport0", 0x40, "ser0", 0x50 },
-		{ "rxport1", 0x41, "ser1", 0x51 },
-		{ "rxport2", 0x42, "ser2", 0x52 },
-		{ "rxport3", 0x43, "ser3", 0x53 },
-	};
+	int ret;
 
 	if (priv->rxport[nport]) {
 		dev_err(dev, "OF: %s: reg value %d is duplicated\n",
@@ -1027,44 +1009,43 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 
 	priv->rxport[nport] = rxport;
 
-	info = &rxport_info[nport];
-
 	rxport->nport     = nport;
 	rxport->priv      = priv;
-	rxport->ser_alias = ds90_rxport_get_remote_alias(priv, info);
+
+	ret = ds90_of_get_reg(priv->client->dev.of_node, ser_names[nport]);
+	if (ret < 0)
+		goto err_free_rxport;
+
+	rxport->ser_alias = ret;
 
 	rxport->remote_of_node = of_get_child_by_name(np, "remote-chip");
 	if (!rxport->remote_of_node) {
 		dev_err(dev, "OF: %s: missing remote-chip child\n",
 			of_node_full_name(np));
-		err = -EINVAL;
-		goto err_remote_chip;
+		ret = -EINVAL;
+		goto err_free_rxport;
 	}
-
 
 	rxport->fwnode = fwnode_graph_get_remote_endpoint(of_fwnode_handle(np));
 	if (!rxport->fwnode) {
-		//dev_err(dev,
-		//	"Endpoint %pOF has no remote endpoint connection\n",
-		//	ep.local_node);
-		printk("XXX No remote endpoint!\n");
-
-		err = -EINVAL;
-		goto err_remote_chip;
+		dev_err(dev, "No remote endpoint for rxport%d\n", nport);
+		ret = -ENODEV;
+		goto err_node_put;
 	}
-
-
-
 
 
 	/* Initialize access to local registers */
-	rxport->reg_client = i2c_new_ancillary_device(priv->client,
-						      info->rxport_name,
-						      info->rxport_fallback_i2c_addr);
+	ret = ds90_of_get_reg(priv->client->dev.of_node, rxport_names[nport]);
+	if (ret < 0)
+		goto err_node_put;
+
+	rxport->reg_client = i2c_new_dummy_device(priv->client->adapter, ret);
+
 	if (IS_ERR(rxport->reg_client)) {
-		err = PTR_ERR(rxport->reg_client);
-		goto err_new_secondary_device;
+		ret = PTR_ERR(rxport->reg_client);
+		goto err_node_put;
 	}
+
 	ds90_write_shared(priv, DS90_SR_I2C_RX_ID(nport),
 			  rxport->reg_client->addr << 1);
 
@@ -1123,9 +1104,9 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 	}
 #endif
 
-	err = ds90_gpiochip_probe(priv, nport);
-	if (err)
-		goto err_gpiochip_probe;
+	ret = ds90_gpiochip_probe(priv, nport);
+	if (ret)
+		goto err_unreg_i2c_dev;
 
 	/* Enable all interrupt sources from this port */
 	ds90_write_rxport(priv, nport, DS90_RR_PORT_ICR_HI, 0x07);
@@ -1146,32 +1127,32 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 	// I sometimes get an error when accessing the first reg in Ser
 	msleep(10);
 
-	err = sysfs_create_group(&dev->kobj, &ds90_rxport_attr_group[nport]);
-	if (err) {
+	ret = sysfs_create_group(&dev->kobj, &ds90_rxport_attr_group[nport]);
+	if (ret) {
 		dev_err(dev, "rx%d: failed creating sysfs group", nport);
-		goto err_sysfs;
+		goto err_remove_gpiochip;
 	}
 
-	err = i2c_atr_add_adapter(priv->atr, nport);
-	if (err) {
+	ret = i2c_atr_add_adapter(priv->atr, nport);
+	if (ret) {
 		dev_err(dev, "rx%d: cannot add adapter", nport);
-		goto err_add_adapter;
+		goto err_remove_sysfs;
 	}
 
 	return 0;
 
-err_add_adapter:
+err_remove_sysfs:
 	sysfs_remove_group(&dev->kobj, &ds90_rxport_attr_group[nport]);
-err_sysfs:
+err_remove_gpiochip:
 	ds90_gpiochip_remove(priv, nport);
-err_gpiochip_probe:
+err_unreg_i2c_dev:
 	i2c_unregister_device(rxport->reg_client);
-err_new_secondary_device:
+err_node_put:
 	of_node_put(rxport->remote_of_node);
-err_remote_chip:
+err_free_rxport:
 	priv->rxport[nport] = NULL;
 	kfree(rxport);
-	return err;
+	return ret;
 }
 
 static void ds90_rxport_remove_one(struct ds90_data *priv, int nport)

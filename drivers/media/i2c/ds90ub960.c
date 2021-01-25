@@ -26,9 +26,8 @@
 #include <media/v4l2-ctrls.h>
 #include <linux/regmap.h>
 
-/* TODO increase DS90_FPD_RX_NPORTS to 2, test, fix */
-#define DS90_FPD_RX_NPORTS	2  /* Physical FPD-link RX ports */
-#define DS90_CSI_TX_NPORTS	1  /* Physical CSI-2 TX ports */
+#define DS90_FPD_RX_NPORTS	4  /* Physical FPD-link RX ports */
+#define DS90_CSI_TX_NPORTS	2  /* Physical CSI-2 TX ports */
 #define DS90_NPORTS		(DS90_FPD_RX_NPORTS + DS90_CSI_TX_NPORTS)
 
 #define DS90_NUM_GPIOS		7  /* Physical GPIO pins */
@@ -37,6 +36,7 @@
 #define DS90_NUM_SLAVE_ALIASES	8
 #define DS90_MAX_POOL_ALIASES	(DS90_FPD_RX_NPORTS * DS90_NUM_SLAVE_ALIASES)
 
+/* XXX: always use CSI port 0 */
 #define HACK_CSI_PORT		0
 
 /*
@@ -273,10 +273,11 @@
  *                   found in DT
  */
 struct ds90_rxport_info {
-	const char *local_name;
-	const char *remote_name;
-	u8 local_def_alias;
-	u8 remote_def_alias;
+	const char *rxport_name;
+	u8 rxport_fallback_i2c_addr;
+
+	const char *serializer_name;
+	u8 serializer_fallback_i2c_addr;
 };
 
 struct ds90_rxport {
@@ -985,12 +986,12 @@ ds90_rxport_get_remote_alias(struct ds90_data *priv,
 			     const struct ds90_rxport_info *info)
 {
 	struct device_node *np = priv->client->dev.of_node;
-	u32 alias = info->remote_def_alias;
+	u32 alias = info->serializer_fallback_i2c_addr;
 	int i;
 
 	if (np) {
 		i = of_property_match_string(np, "reg-names",
-					     info->remote_name);
+					     info->serializer_name);
 		if (i >= 0)
 			of_property_read_u32_index(np, "reg", i, &alias);
 	}
@@ -1008,8 +1009,10 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 	int err;
 
 	static const struct ds90_rxport_info rxport_info[DS90_FPD_RX_NPORTS] = {
-		{ "rxport0", "ser0", 0x40, 0x50 },
-		{ "rxport1", "ser1", 0x41, 0x51 },
+		{ "rxport0", 0x40, "ser0", 0x50 },
+		{ "rxport1", 0x41, "ser1", 0x51 },
+		{ "rxport2", 0x42, "ser2", 0x52 },
+		{ "rxport3", 0x43, "ser3", 0x53 },
 	};
 
 	if (priv->rxport[nport]) {
@@ -1056,8 +1059,8 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 
 	/* Initialize access to local registers */
 	rxport->reg_client = i2c_new_ancillary_device(priv->client,
-						      info->local_name,
-						      info->local_def_alias);
+						      info->rxport_name,
+						      info->rxport_fallback_i2c_addr);
 	if (IS_ERR(rxport->reg_client)) {
 		err = PTR_ERR(rxport->reg_client);
 		goto err_new_secondary_device;
@@ -1805,6 +1808,73 @@ static void ds90_v4l2_notifier_unregister(struct ds90_data *priv)
 	v4l2_async_notifier_cleanup(&priv->notifier);
 }
 
+static int ds90_create_subdev(struct ds90_data *priv)
+{
+	struct device *dev = &priv->client->dev;
+	int ret;
+	int i;
+
+	for (i = 0; i < DS90_NPORTS; i++)
+		ds90_init_format(&priv->fmt[i]);
+
+	v4l2_i2c_subdev_init(&priv->sd, priv->client, &ds90_subdev_ops);
+	v4l2_ctrl_handler_init(&priv->ctrl_handler,
+			       ARRAY_SIZE(ds90_tpg_qmenu) - 1);
+	priv->sd.ctrl_handler = &priv->ctrl_handler;
+
+	v4l2_ctrl_new_std_menu_items(&priv->ctrl_handler, &ds90_ctrl_ops,
+				     V4L2_CID_TEST_PATTERN,
+				     ARRAY_SIZE(ds90_tpg_qmenu) - 1, 0, 0,
+				     ds90_tpg_qmenu);
+
+	if (priv->ctrl_handler.error) {
+		ret = priv->ctrl_handler.error;
+		goto err_free_ctrl;
+	}
+
+	priv->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	priv->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
+
+	for (i = 0; i < DS90_NPORTS; i++)
+		priv->pads[i].flags = (i < DS90_FPD_RX_NPORTS) ?
+			MEDIA_PAD_FL_SINK : MEDIA_PAD_FL_SOURCE;
+
+	ret = media_entity_pads_init(&priv->sd.entity, DS90_NPORTS, priv->pads);
+	if (ret)
+		goto err_free_ctrl;
+
+	ret = v4l2_async_register_subdev(&priv->sd);
+	if (ret) {
+		dev_err(dev, "v4l2_async_register_subdev error: %d\n", ret);
+		goto err_entity_cleanup;
+	}
+
+	ret = ds90_v4l2_notifier_register(priv);
+	if (ret) {
+		dev_err(dev, "v4l2 subdev notifier register failed: %d\n", ret);
+		goto err_unreg_subdev;
+	}
+
+	return 0;
+
+err_unreg_subdev:
+	v4l2_async_unregister_subdev(&priv->sd);
+err_entity_cleanup:
+	media_entity_cleanup(&priv->sd.entity);
+err_free_ctrl:
+	v4l2_ctrl_handler_free(&priv->ctrl_handler);
+
+	return ret;
+}
+
+static void ds90_destroy_subdev(struct ds90_data *priv)
+{
+	ds90_v4l2_notifier_unregister(priv);
+	v4l2_async_unregister_subdev(&priv->sd);
+	media_entity_cleanup(&priv->sd.entity);
+	v4l2_ctrl_handler_free(&priv->ctrl_handler);
+}
+
 static const struct regmap_config ds90_regmap_config = {
 	.name = "ds90ub960",
 
@@ -1821,7 +1891,6 @@ static int ds90_probe(struct i2c_client *client)
 	struct clk *clk;
 	u8 rev_mask;
 	int err;
-	int i;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
@@ -1875,46 +1944,9 @@ static int ds90_probe(struct i2c_client *client)
 
 	/* V4L2 */
 
-	for (i = 0; i < DS90_NPORTS; i++)
-		ds90_init_format(&priv->fmt[i]);
-
-	v4l2_i2c_subdev_init(&priv->sd, client, &ds90_subdev_ops);
-	v4l2_ctrl_handler_init(&priv->ctrl_handler,
-			       ARRAY_SIZE(ds90_tpg_qmenu) - 1);
-	priv->sd.ctrl_handler = &priv->ctrl_handler;
-
-	v4l2_ctrl_new_std_menu_items(&priv->ctrl_handler, &ds90_ctrl_ops,
-				     V4L2_CID_TEST_PATTERN,
-				     ARRAY_SIZE(ds90_tpg_qmenu) - 1, 0, 0,
-				     ds90_tpg_qmenu);
-
-	if (priv->ctrl_handler.error) {
-		err = priv->ctrl_handler.error;
-		goto err_add_ctrls;
-	}
-
-	/* Let both the I2C client and the subdev point to us */
-	i2c_set_clientdata(client, priv); /* v4l2_i2c_subdev_init writes it */
-	v4l2_set_subdevdata(&priv->sd, priv);
-
-	priv->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	priv->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
-
-	for (i = 0; i < DS90_NPORTS; i++)
-		priv->pads[i].flags = (i < DS90_FPD_RX_NPORTS) ?
-			MEDIA_PAD_FL_SINK : MEDIA_PAD_FL_SOURCE;
-
-	err = media_entity_pads_init(&priv->sd.entity, DS90_NPORTS, priv->pads);
+	err = ds90_create_subdev(priv);
 	if (err)
-		goto err_pads_init;
-
-	err = v4l2_async_register_subdev(&priv->sd);
-	if (err) {
-		dev_err(dev, "v4l2_async_register_subdev error %d\n", err);
-		goto err_register_subdev;
-	}
-
-	ds90_v4l2_notifier_register(priv);
+		goto err_subdev;
 
 	/* By default enable forwarding from both ports */
 	ds90_write_shared(priv, DS90_SR_FWD_CTL1, 0x00);
@@ -1980,12 +2012,8 @@ static int ds90_probe(struct i2c_client *client)
 
 err_kthread:
 err_irq:
-	v4l2_async_unregister_subdev(&priv->sd);
-err_register_subdev:
-	media_entity_cleanup(&priv->sd.entity);
-err_pads_init:
-err_add_ctrls:
-	v4l2_ctrl_handler_free(&priv->ctrl_handler);
+	ds90_destroy_subdev(priv);
+err_subdev:
 	ds90_remove_ports(priv);
 err_parse_dt:
 	ds90_atr_remove(priv);
@@ -1998,16 +2026,14 @@ err_reg_read:
 
 static int ds90_remove(struct i2c_client *client)
 {
-	struct ds90_data *priv = i2c_get_clientdata(client);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct ds90_data *priv = sd_to_ds90(sd);
 
 	dev_info(&client->dev, "Removing\n");
 
 	if (priv->kthread)
 		kthread_stop(priv->kthread);
-	v4l2_async_unregister_subdev(&priv->sd);
-	ds90_v4l2_notifier_unregister(priv);
-	media_entity_cleanup(&priv->sd.entity);
-	v4l2_ctrl_handler_free(&priv->ctrl_handler);
+	ds90_destroy_subdev(priv);
 	ds90_remove_ports(priv);
 	ds90_atr_remove(priv);
 	ds90_reset(priv, true);

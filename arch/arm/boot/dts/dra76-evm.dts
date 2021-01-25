@@ -456,6 +456,7 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 
+			/* FPDLink RX 0 */
 			port@0 {
 				reg = <0>;
 				ds90ub960_fpd3_in0: endpoint {
@@ -476,8 +477,8 @@
 			};
 
 			/* CSI-2 */
-			port@2 {
-				reg = <2>;
+			port@4 {
+				reg = <4>;
 				ds90ub960_mipi_out0: endpoint {
 					clock-lanes = <0>;
 					data-lanes = <1 2 3 4>;

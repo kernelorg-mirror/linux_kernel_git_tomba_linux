@@ -291,7 +291,7 @@ struct ds90_rxport {
 	struct ds90_data *priv;
 	unsigned short nport; /* RX port number, and index in priv->rxport[] */
 
-	struct v4l2_subdev *sd;
+	struct v4l2_subdev *sd;		/* Connected subdev */
 	struct fwnode_handle *fwnode;
 };
 
@@ -1651,39 +1651,47 @@ static int ds90_notify_bound(struct v4l2_async_notifier *notifier,
 				struct v4l2_async_subdev *asd)
 {
 	struct ds90_data *priv = sd_to_ds90(notifier->sd);
-	struct ds90_rxport *source = to_ds90_asd(asd)->rxport;
-	unsigned int index = source->nport;
+	struct ds90_rxport *rxport = to_ds90_asd(asd)->rxport;
+	struct device *dev = &priv->client->dev;
+	unsigned int nport = rxport->nport;
 	unsigned int src_pad;
 	int ret;
+	int i;
 
-	printk("XXX BOUND\n");
+	dev_dbg(dev, "Bind %s\n", subdev->name);
 
 	ret = media_entity_get_fwnode_pad(&subdev->entity,
-					  source->fwnode,
+					  rxport->fwnode,
 					  MEDIA_PAD_FL_SOURCE);
 	if (ret < 0) {
-		dev_err(&priv->client->dev,
-			"Failed to find pad for %s\n", subdev->name);
+		dev_err(dev, "Failed to find pad for %s\n", subdev->name);
 		return ret;
 	}
 
-	//priv->bound_sources |= BIT(index);
-	source->sd = subdev;
+	rxport->sd = subdev;
 	src_pad = ret;
 
-	ret = media_create_pad_link(&source->sd->entity, src_pad,
-				    &priv->sd.entity, index,
+	ret = media_create_pad_link(&rxport->sd->entity, src_pad,
+				    &priv->sd.entity, nport,
 				    MEDIA_LNK_FL_ENABLED |
 				    MEDIA_LNK_FL_IMMUTABLE);
 	if (ret) {
-		dev_err(&priv->client->dev,
-			"Unable to link %s:%u -> %s:%u\n",
-			source->sd->name, src_pad, priv->sd.name, index);
+		dev_err(dev, "Unable to link %s:%u -> %s:%u\n",
+			rxport->sd->name, src_pad, priv->sd.name, nport);
 		return ret;
 	}
 
-	dev_dbg(&priv->client->dev, "Bound %s pad: %u on index %u\n",
-		subdev->name, src_pad, index);
+	dev_dbg(dev, "Bound %s pad: %u on index %u\n", subdev->name, src_pad, nport);
+
+	for (i = 0; i < DS90_FPD_RX_NPORTS; ++i) {
+		if (priv->rxport[i] && !priv->rxport[i]->sd) {
+			dev_dbg(dev, "Waiting for more subdevs to be bound\n");
+			return 0;
+		}
+	}
+
+	dev_dbg(dev, "All subdevs bound\n");
+
 #if 0
 	/*
 	 * We can only register v4l2_async_notifiers, which do not provide a
@@ -1718,14 +1726,13 @@ static void ds90_notify_unbind(struct v4l2_async_notifier *notifier,
 				  struct v4l2_subdev *subdev,
 				  struct v4l2_async_subdev *asd)
 {
-	//struct ds90_data *priv = sd_to_ds90(notifier->sd);
-	struct ds90_rxport *source = to_ds90_asd(asd)->rxport;
-	//unsigned int index = source->nport;
+	struct ds90_data *priv = sd_to_ds90(notifier->sd);
+	struct ds90_rxport *rxport = to_ds90_asd(asd)->rxport;
+	struct device *dev = &priv->client->dev;
 
-	printk("XXX UNBIND\n");
+	dev_dbg(dev, "Unbind %s\n", subdev->name);
 
-	source->sd = NULL;
-	//priv->bound_sources &= ~BIT(index);
+	rxport->sd = NULL;
 }
 
 static const struct v4l2_async_notifier_operations ds90_notify_ops = {
@@ -1748,8 +1755,6 @@ static int ds90_v4l2_notifier_register(struct ds90_data *priv)
 		if (!rxport)
 			continue;
 
-		printk("RXPORT %d notif add\n", i);
-
 		asd = v4l2_async_notifier_add_fwnode_subdev(&priv->notifier,
 							    rxport->fwnode,
 							    sizeof(struct ds90_asd));
@@ -1761,10 +1766,6 @@ static int ds90_v4l2_notifier_register(struct ds90_data *priv)
 		}
 
 		to_ds90_asd(asd)->rxport = rxport;
-
-		printk("SUBDEF NOTIF %d\n", i);
-
-		break;
 	}
 
 	priv->notifier.ops = &ds90_notify_ops;

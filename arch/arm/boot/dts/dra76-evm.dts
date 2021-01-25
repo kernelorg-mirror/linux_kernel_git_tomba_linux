@@ -213,7 +213,15 @@
 		clock-frequency = <48000000>;
 	};
 
-	clk_cam_24M: fixed-clock-24M {
+	clk_cam0_24M: fixed-clock-24M {
+		compatible = "fixed-factor-clock";
+		clocks = <&clk_cam_module_48M_fixed>;
+		#clock-cells = <0>;
+		clock-div = <2>;
+		clock-mult = <1>;
+	};
+
+	clk_cam1_24M: fixed-clock-24M {
 		compatible = "fixed-factor-clock";
 		clocks = <&clk_cam_module_48M_fixed>;
 		#clock-cells = <0>;
@@ -442,8 +450,12 @@
 	deser: deser@3d {
 		compatible = "ti,ds90ub960-q1";
 
-		reg-names = "main", "rxport0", "rxport1", "ser0", "ser1";
-		reg       = <0x3d>,  <0x40>, <0x41>, <0x44>, <0x45>;
+		reg-names = "main",
+			    "rxport0", "rxport1", "rxport2", "rxport3",
+			    "ser0", "ser1", "ser2", "ser3";
+		reg       = <0x3d>,
+			    <0x40>, <0x41>, <0x42>, <0x43>,
+			    <0x44>, <0x45>, <0x46>, <0x47>;
 
 		clocks = <&clk_fusion_25M_fixed>;
 
@@ -463,6 +475,26 @@
 					remote-endpoint = <&sensor_0_out>;
 
 					ser0: remote-chip {
+						compatible = "ti,ds90ub913a-q1";
+
+						gpio-functions = <DS90_GPIO_FUNC_OUTPUT
+								  DS90_GPIO_FUNC_OUTPUT
+								  DS90_GPIO_FUNC_UNUSED
+								  DS90_GPIO_FUNC_UNUSED>;
+
+						gpio-controller;
+						#gpio-cells = <2>;
+					};
+				};
+			};
+
+			/* FPDLink RX 1 */
+			port@1 {
+				reg = <1>;
+				ds90ub960_fpd3_in1: endpoint {
+					remote-endpoint = <&sensor_1_out>;
+
+					ser1: remote-chip {
 						compatible = "ti,ds90ub913a-q1";
 
 						gpio-functions = <DS90_GPIO_FUNC_OUTPUT
@@ -502,7 +534,7 @@
 					compatible = "ovti,ov10635";
 					reg = <0x30>;
 
-					clocks = <&clk_cam_24M>;
+					clocks = <&clk_cam0_24M>;
 					clock-names = "xvclk";
 
 					/* powerdown-gpios = <GPO0 from ser>; */
@@ -519,6 +551,41 @@
 						reg = <0>;
 						sensor_0_out: endpoint {
 							remote-endpoint = <&ds90ub960_fpd3_in0>;
+							hsync-active = <1>;
+							vsync-active = <1>;
+							pclk-sample = <0>;
+							bus-width = <10>;
+						};
+					};
+				};
+			};
+
+			remote_i2c1: i2c@1 {
+				reg = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				sensor_1@30 {
+					compatible = "ovti,ov10635";
+					reg = <0x30>;
+
+					clocks = <&clk_cam1_24M>;
+					clock-names = "xvclk";
+
+					/* powerdown-gpios = <GPO0 from ser>; */
+					/* framesync-gpios = <GPO1 from ser>; */
+
+					powerdown-gpios = <&ser1 0 GPIO_ACTIVE_HIGH>;
+
+					/* Note: PCLK must be 96MHz */
+
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					port@0 {
+						reg = <0>;
+						sensor_1_out: endpoint {
+							remote-endpoint = <&ds90ub960_fpd3_in1>;
 							hsync-active = <1>;
 							vsync-active = <1>;
 							pclk-sample = <0>;

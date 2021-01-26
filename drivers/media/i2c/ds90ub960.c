@@ -847,9 +847,13 @@ static ssize_t status_show(struct device *dev,
 static struct device_attribute dev_attr_locked[] = {
 	__ATTR_RO(locked),
 	__ATTR_RO(locked),
+	__ATTR_RO(locked),
+	__ATTR_RO(locked),
 };
 
 static struct device_attribute dev_attr_status[] = {
+	__ATTR_RO(status),
+	__ATTR_RO(status),
 	__ATTR_RO(status),
 	__ATTR_RO(status),
 };
@@ -866,12 +870,26 @@ static struct attribute *ds90_rxport1_attrs[] = {
 	NULL
 };
 
+static struct attribute *ds90_rxport2_attrs[] = {
+	&dev_attr_locked[2].attr,
+	&dev_attr_status[2].attr,
+	NULL
+};
+
+static struct attribute *ds90_rxport3_attrs[] = {
+	&dev_attr_locked[3].attr,
+	&dev_attr_status[3].attr,
+	NULL
+};
+
 static ssize_t locked_show(struct device *dev,
 			   struct device_attribute *attr,
 			   char *buf)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct ds90_data *priv = sd_to_ds90(sd);
 	int nport = (attr - dev_attr_locked);
-	const struct ds90_data *priv = dev_get_drvdata(dev);
 	const struct ds90_rxport *rxport = priv->rxport[nport];
 
 	return scnprintf(buf, PAGE_SIZE, "%d", rxport->locked);
@@ -881,8 +899,10 @@ static ssize_t status_show(struct device *dev,
 			   struct device_attribute *attr,
 			   char *buf)
 {
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct ds90_data *priv = sd_to_ds90(sd);
 	int nport = (attr - dev_attr_status);
-	const struct ds90_data *priv = dev_get_drvdata(dev);
 	const struct ds90_rxport *rxport = priv->rxport[nport];
 
 	return scnprintf(buf, PAGE_SIZE,
@@ -910,9 +930,11 @@ static ssize_t status_show(struct device *dev,
 			 rxport->csi_rx_sts_ecc1_err_count);
 }
 
-struct attribute_group ds90_rxport_attr_group[] = {
+static struct attribute_group ds90_rxport_attr_group[] = {
 	{ .name = "rx0", .attrs = ds90_rxport0_attrs },
 	{ .name = "rx1", .attrs = ds90_rxport1_attrs },
+	{ .name = "rx2", .attrs = ds90_rxport2_attrs },
+	{ .name = "rx3", .attrs = ds90_rxport3_attrs },
 };
 
 /*
@@ -1213,7 +1235,7 @@ static void ds90_rxport_handle_events(struct ds90_data *priv, int nport)
 	if (err)
 		return;
 
-	printk("Handle RX %d events: STS: %x, %x, %x, BCC %x\n", nport,
+	printk("Handle RX%d events: STS: %x, %x, %x, BCC %x\n", nport,
 	       rx_port_sts1, rx_port_sts2, csi_rx_sts,
 	       bcc_sts);
 
@@ -1237,7 +1259,7 @@ static void ds90_rxport_handle_events(struct ds90_data *priv, int nport)
 		err = ds90_rxport_read(priv, nport, DS90_RR_LINE_LEN_1, &h);
 		err = ds90_rxport_read(priv, nport, DS90_RR_LINE_LEN_0, &l);
 
-		printk("PIXELS %u\n", (h << 8) | l);
+		printk("RX%d: PIXELS %u\n", nport, (h << 8) | l);
 	}
 
 	if (rx_port_sts2 & DS90_RR_RX_PORT_STS2_FPD3_ENCODE_ERROR)
@@ -1254,7 +1276,7 @@ static void ds90_rxport_handle_events(struct ds90_data *priv, int nport)
 		err = ds90_rxport_read(priv, nport, DS90_RR_LINE_COUNT_HI, &h);
 		err = ds90_rxport_read(priv, nport, DS90_RR_LINE_COUNT_LO, &l);
 
-		printk("LINES %u\n", (h << 8) | l);
+		printk("RX%d: LINES %u\n", nport, (h << 8) | l);
 	}
 
 	if (csi_rx_sts & DS90_RR_CSI_RX_STS_LENGTH_ERR)
@@ -1878,7 +1900,6 @@ static int ds90_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	priv->client = client;
-	i2c_set_clientdata(client, priv);
 
 	mutex_init(&priv->alias_table_lock);
 

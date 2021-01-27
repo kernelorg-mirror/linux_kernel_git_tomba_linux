@@ -277,6 +277,8 @@ struct ds90_rxport {
 	u64 csi_rx_sts_cksum_err_count;
 	u64 csi_rx_sts_ecc2_err_count;
 	u64 csi_rx_sts_ecc1_err_count;
+	u32 reported_height;
+	u32 reported_width;
 
 	struct gpio_chip        gpio_chip;
 	char                    gpio_chip_name[64];
@@ -916,7 +918,9 @@ static ssize_t status_show(struct device *dev,
 			 "csi_rx_sts_length_err_count = %llu\n"
 			 "csi_rx_sts_cksum_err_count = %llu\n"
 			 "csi_rx_sts_ecc2_err_count = %llu\n"
-			 "csi_rx_sts_ecc1_err_count = %llu\n",
+			 "csi_rx_sts_ecc1_err_count = %llu\n"
+			 "width = %u\n"
+			 "height = %u\n",
 			 rxport->bcc_crc_error_count,
 			 rxport->bcc_seq_error_count,
 			 rxport->line_len_unstable_count,
@@ -927,7 +931,10 @@ static ssize_t status_show(struct device *dev,
 			 rxport->csi_rx_sts_length_err_count,
 			 rxport->csi_rx_sts_cksum_err_count,
 			 rxport->csi_rx_sts_ecc2_err_count,
-			 rxport->csi_rx_sts_ecc1_err_count);
+			 rxport->csi_rx_sts_ecc1_err_count,
+			 rxport->reported_width,
+			 rxport->reported_height
+			 );
 }
 
 static struct attribute_group ds90_rxport_attr_group[] = {
@@ -1094,7 +1101,8 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 	// 0b10 : 8-bit processing using upper 8 bits
 	ds90_rxport_update_bits(priv, nport, DS90_RR_PORT_CONFIG2, 0x3<<6, 0x2<<6);
 
-	ds90_rxport_write(priv, nport, DS90_RR_RAW10_ID, 0x1e); // datatype = YUV422 8-bit
+	// datatype 0x1e = YUV422 8-bit, VC=nport
+	ds90_rxport_write(priv, nport, DS90_RR_RAW10_ID, 0x1e | (nport << 6));
 
 
 	/*
@@ -1236,8 +1244,7 @@ static void ds90_rxport_handle_events(struct ds90_data *priv, int nport)
 		return;
 
 	printk("Handle RX%d events: STS: %x, %x, %x, BCC %x\n", nport,
-	       rx_port_sts1, rx_port_sts2, csi_rx_sts,
-	       bcc_sts);
+	       rx_port_sts1, rx_port_sts2, csi_rx_sts, bcc_sts);
 
 	if (bcc_sts)
 		dev_err(dev, "BCC error: %#02x\n", bcc_sts);
@@ -1259,6 +1266,8 @@ static void ds90_rxport_handle_events(struct ds90_data *priv, int nport)
 		err = ds90_rxport_read(priv, nport, DS90_RR_LINE_LEN_1, &h);
 		err = ds90_rxport_read(priv, nport, DS90_RR_LINE_LEN_0, &l);
 
+		rxport->reported_width = (h << 8) | l;
+
 		printk("RX%d: PIXELS %u\n", nport, (h << 8) | l);
 	}
 
@@ -1276,6 +1285,7 @@ static void ds90_rxport_handle_events(struct ds90_data *priv, int nport)
 		err = ds90_rxport_read(priv, nport, DS90_RR_LINE_COUNT_HI, &h);
 		err = ds90_rxport_read(priv, nport, DS90_RR_LINE_COUNT_LO, &l);
 
+		rxport->reported_height = (h << 8) | l;
 		printk("RX%d: LINES %u\n", nport, (h << 8) | l);
 	}
 
@@ -1568,7 +1578,13 @@ static irqreturn_t ds90_handle_events(int irq, void *arg)
 	err = ds90_read(priv, DS90_SR_INTERRUPT_STS, &int_sts);
 
 	if (!err && int_sts) {
+		u8 fwd_sts;
+
 		printk("INTERRUPT_STS %x\n", int_sts);
+
+		ds90_read(priv, DS90_SR_FWD_STS, &fwd_sts);
+
+		printk("FWD_STS %#x\n", fwd_sts);
 
 		if (int_sts & DS90_SR_INTERRUPT_STS_IS_CSI_TX0)
 			ds90_csi_handle_events(priv);
@@ -1950,8 +1966,14 @@ static int ds90_probe(struct i2c_client *client)
 	if (err)
 		goto err_subdev;
 
-	/* By default enable forwarding from both ports */
-	ds90_write(priv, DS90_SR_FWD_CTL1, 0x00);
+	/* By default enable forwarding from all ports */
+	{
+		/* Enable forwarding to CSI-2 from RX ports 0, 1, 2, 3 */
+		const u8 port_enable_mask = BIT(0) | BIT(1) | BIT(2) | BIT(3);
+		/* Forward all RX ports to CSI port 0 */
+		const u8 port_map_mask = 0;
+		ds90_write(priv, DS90_SR_FWD_CTL1, port_map_mask | ((~port_enable_mask) & 0xf) << 4);
+	}
 
 	/* Kick off */
 	{

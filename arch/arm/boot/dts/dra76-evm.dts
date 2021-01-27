@@ -207,23 +207,29 @@
 		clock-frequency = <25000000>;
 	};
 
-	clk_cam_module_48M_fixed: fixed-clock-48M {
+	clk_cam0_module_48M_fixed: fixed-clock-0-48M {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency = <48000000>;
 	};
 
-	clk_cam0_24M: fixed-clock-24M {
+	clk_cam0_24M: fixed-clock-0-24M {
 		compatible = "fixed-factor-clock";
-		clocks = <&clk_cam_module_48M_fixed>;
+		clocks = <&clk_cam0_module_48M_fixed>;
 		#clock-cells = <0>;
 		clock-div = <2>;
 		clock-mult = <1>;
 	};
 
-	clk_cam1_24M: fixed-clock-24M {
+	clk_cam1_module_48M_fixed: fixed-clock-1-48M {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <48000000>;
+	};
+
+	clk_cam1_24M: fixed-clock-1-24M {
 		compatible = "fixed-factor-clock";
-		clocks = <&clk_cam_module_48M_fixed>;
+		clocks = <&clk_cam1_module_48M_fixed>;
 		#clock-cells = <0>;
 		clock-div = <2>;
 		clock-mult = <1>;

@@ -264,6 +264,13 @@
 #define DS90_IR_PGEN_VFP		0x0F
 #define DS90_IRT_PGEN_COLOR(n)		(0x10 + (n)) /* n < 15 */
 
+enum ds90_rxport_mode {
+	RXPORT_MODE_RAW10,
+	RXPORT_MODE_RAW12_HF,
+	RXPORT_MODE_RAW12_LF,
+	RXPORT_MODE_CSI2,
+};
+
 struct ds90_rxport {
 	/* Errors and anomalies counters */
 	u64 bcc_crc_error_count;
@@ -295,6 +302,8 @@ struct ds90_rxport {
 
 	struct v4l2_subdev *sd;		/* Connected subdev */
 	struct fwnode_handle *fwnode;
+
+	enum ds90_rxport_mode mode;
 };
 
 struct ds90_asd {
@@ -1037,8 +1046,9 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 
 	priv->rxport[nport] = rxport;
 
-	rxport->nport     = nport;
-	rxport->priv      = priv;
+	rxport->nport = nport;
+	rxport->priv = priv;
+	rxport->mode = RXPORT_MODE_RAW10;
 
 	ret = ds90_of_get_reg(priv->client->dev.of_node, ser_names[nport]);
 	if (ret < 0)
@@ -1085,31 +1095,33 @@ static int ds90_rxport_probe_one(struct ds90_data *priv,
 	// FREQ_SELECT: 000: 2.5 Mbps (default for DS90UB913A-Q1 / DS90UB933-Q1 compatibility)
 	ds90_rxport_update_bits(priv, nport, DS90_RR_BCC_CONFIG, 0x7, 0);
 
-	// Override FPD3_MODE from the strap
-	/*
-	00: CSI-2 Mode (DS90UB953-Q1 compatible)
-	01: RAW12 Low Frequency Mode (DS90UB913A-Q1 / DS90UB933-Q1 compatible)
-	10: RAW12 High Frequency Mode(DS90UB913A-Q1 / DS90UB933-Q1 compatible)
-	11: RAW10 Mode (DS90UB913A-Q1 / DS90UB933-Q1 compatible)
-	*/
-	ds90_rxport_update_bits(priv, nport, DS90_RR_PORT_CONFIG, 0x3, 0x3);
+	switch (rxport->mode) {
+	case RXPORT_MODE_RAW10:
+		/* FPD3_MODE = RAW10 Mode (DS90UB913A-Q1 / DS90UB933-Q1 compatible) */
+		ds90_rxport_update_bits(priv, nport, DS90_RR_PORT_CONFIG, 0x3, 0x3);
+
+		// RAW10_8BIT_CTL = 0b11 : 8-bit processing using lower 8 bits
+		// 0b10 : 8-bit processing using upper 8 bits
+		ds90_rxport_update_bits(priv, nport, DS90_RR_PORT_CONFIG2, 0x3<<6, 0x2<<6);
+
+		// datatype 0x1e = YUV422 8-bit, VC=nport
+		ds90_rxport_write(priv, nport, DS90_RR_RAW10_ID, 0x1e | (nport << 6));
+
+		break;
+
+	default:
+		BUG();
+	}
 
 	// LV_POLARITY & FV_POLARITY
 	ds90_rxport_update_bits(priv, nport, DS90_RR_PORT_CONFIG2, 0x3, 0x1);
 
-	// RAW10_8BIT_CTL = 0b11 : 8-bit processing using lower 8 bits
-	// 0b10 : 8-bit processing using upper 8 bits
-	ds90_rxport_update_bits(priv, nport, DS90_RR_PORT_CONFIG2, 0x3<<6, 0x2<<6);
-
-	// datatype 0x1e = YUV422 8-bit, VC=nport
-	ds90_rxport_write(priv, nport, DS90_RR_RAW10_ID, 0x1e | (nport << 6));
-
-
+#if 0
 	/*
 	 * Changing FREQ_SELECT will result in some errors on the back channel
 	 * for a short period of time. Clear the status bits to ignore the errors.
 	 */
-#if 0
+
 	msleep(10);
 
 	{

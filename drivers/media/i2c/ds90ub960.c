@@ -1562,11 +1562,50 @@ static int ds90_set_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
+#define UB960_CSI2_ROUTES_MAX 4
+
+static int ds90_get_routing(struct v4l2_subdev *sd,
+		   struct v4l2_subdev_krouting *routing)
+{
+	struct ds90_data *priv = sd_to_ds90(sd);
+	struct v4l2_subdev_route *route = routing->routes;
+	unsigned int i;
+
+	printk("ds90_get_routing\n");
+
+	if (routing->num_routes < UB960_CSI2_ROUTES_MAX) {
+		routing->num_routes = UB960_CSI2_ROUTES_MAX;
+		return -ENOSPC;
+	}
+
+	routing->num_routes = UB960_CSI2_ROUTES_MAX;
+
+	for (i = 0; i < UB960_CSI2_ROUTES_MAX; i++) {
+		struct ds90_rxport *rxport = priv->rxport[i];
+
+		route->sink_pad = i; // XXX one for each RX port
+		route->sink_stream = 0;
+		route->source_pad = 4; // XXX first csi port
+		route->source_stream = i;
+		route->flags = rxport ? V4L2_SUBDEV_ROUTE_FL_ACTIVE : 0;
+		route++;
+	}
+
+	return 0;
+}
+
+static int ds90_set_routing(struct v4l2_subdev *sd,
+		   struct v4l2_subdev_krouting *route)
+{
+	return 0;
+}
 
 static const struct v4l2_subdev_pad_ops ds90_pad_ops = {
 	.enum_mbus_code = ds90_enum_mbus_code,
 	.get_fmt	= ds90_get_fmt,
 	.set_fmt	= ds90_set_fmt,
+	.get_routing	= ds90_get_routing,
+	.set_routing	= ds90_set_routing,
 };
 
 static const struct v4l2_subdev_ops ds90_subdev_ops = {

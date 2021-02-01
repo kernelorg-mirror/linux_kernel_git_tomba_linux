@@ -220,6 +220,7 @@ struct cal_ctx {
 	unsigned int		sequence;
 	struct vb2_queue	vb_vidq;
 	unsigned int		index;
+	unsigned int		ppi_ctx;
 	unsigned int		cport;
 };
 

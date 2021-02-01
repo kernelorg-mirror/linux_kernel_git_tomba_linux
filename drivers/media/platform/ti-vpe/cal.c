@@ -840,7 +840,7 @@ static void cal_media_cleanup(struct cal_dev *cal)
  * ------------------------------------------------------------------
  */
 
-static struct cal_ctx *cal_ctx_create(struct cal_dev *cal, int inst)
+static struct cal_ctx *cal_ctx_create(struct cal_dev *cal, int inst, int phy_idx)
 {
 	struct cal_ctx *ctx;
 	int ret;
@@ -850,7 +850,7 @@ static struct cal_ctx *cal_ctx_create(struct cal_dev *cal, int inst)
 		return NULL;
 
 	ctx->cal = cal;
-	ctx->phy = cal->phy[inst];
+	ctx->phy = cal->phy[phy_idx];
 	ctx->index = inst;
 	ctx->ppi_ctx = inst;
 	ctx->cport = inst;
@@ -1057,11 +1057,15 @@ static int cal_probe(struct platform_device *pdev)
 	}
 
 	/* Create contexts. */
-	for (i = 0; i < cal->data->num_csi2_phy; ++i) {
-		if (!cal->phy[i]->sensor_node)
+	for (i = 0; i < CAL_NUM_CONTEXT; ++i) {
+		// XXX always use PHY 0
+		// How to figure out which CTX & PHY to pair? Dynamic CTX management?
+		u32 phy_idx = 0;
+
+		if (!cal->phy[phy_idx]->sensor_node)
 			continue;
 
-		cal->ctx[i] = cal_ctx_create(cal, i);
+		cal->ctx[i] = cal_ctx_create(cal, i, phy_idx);
 		if (!cal->ctx[i]) {
 			cal_err(cal, "Failed to create context %u\n", i);
 			ret = -ENODEV;

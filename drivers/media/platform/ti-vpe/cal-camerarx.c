@@ -277,6 +277,10 @@ static int cal_camerarx_start(struct cal_camerarx *phy)
 	u32 val;
 	int ret;
 
+	phy->enable_count++;
+	if (phy->enable_count > 1)
+		return 0;
+
 	external_rate = cal_camerarx_get_external_rate(phy);
 	if (external_rate < 0)
 		return external_rate;
@@ -408,6 +412,10 @@ static void cal_camerarx_stop(struct cal_camerarx *phy)
 {
 	unsigned int i;
 	int ret;
+
+	phy->enable_count--;
+	if (phy->enable_count > 0)
+		return;
 
 	cal_camerarx_ppi_disable(phy);
 

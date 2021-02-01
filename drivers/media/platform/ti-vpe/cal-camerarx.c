@@ -47,7 +47,7 @@ static inline void camerarx_write(struct cal_camerarx *phy, u32 offset, u32 val)
 
 static s64 cal_camerarx_get_external_rate(struct cal_camerarx *phy)
 {
-	struct v4l2_ctrl *ctrl;
+	//struct v4l2_ctrl *ctrl;
 	s64 rate;
 /*
 	ctrl = v4l2_ctrl_find(phy->sensor->ctrl_handler, V4L2_CID_PIXEL_RATE);

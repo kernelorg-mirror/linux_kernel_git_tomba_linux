@@ -636,13 +636,13 @@ static int cal_async_notifier_bound(struct v4l2_async_notifier *notifier,
 	}
 
 	phy->sensor = subdev;
-	phy_dbg(1, phy, "Using sensor %s for capture\n", subdev->name);
+	phy_dbg(1, phy, "Using source %s for capture\n", subdev->name);
 
 	pad = media_entity_get_fwnode_pad(&subdev->entity,
 					  of_fwnode_handle(phy->sensor_ep_node),
 					  MEDIA_PAD_FL_SOURCE);
 	if (pad < 0) {
-		phy_err(phy, "Sensor %s has no connected source pad\n",
+		phy_err(phy, "Source %s has no connected source pad\n",
 			subdev->name);
 		return pad;
 	}
@@ -652,7 +652,7 @@ static int cal_async_notifier_bound(struct v4l2_async_notifier *notifier,
 				    MEDIA_LNK_FL_IMMUTABLE |
 				    MEDIA_LNK_FL_ENABLED);
 	if (ret) {
-		phy_err(phy, "Failed to create media link for sensor %s\n",
+		phy_err(phy, "Failed to create media link for source %s\n",
 			subdev->name);
 		return ret;
 	}

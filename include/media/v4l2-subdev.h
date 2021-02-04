@@ -356,7 +356,7 @@ struct v4l2_mbus_frame_desc_entry {
 	} bus;
 };
 
-#define V4L2_FRAME_DESC_ENTRY_MAX	4
+#define V4L2_FRAME_DESC_ENTRY_MAX	8
 
 enum v4l2_mbus_frame_desc_type {
 	V4L2_MBUS_FRAME_DESC_TYPE_PLATFORM,

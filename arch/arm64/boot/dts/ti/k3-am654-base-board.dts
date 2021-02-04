@@ -8,6 +8,7 @@
 #include "k3-am654.dtsi"
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/net/ti-dp83867.h>
+#include <dt-bindings/media/ds90ub9xx.h>
 
 / {
 	compatible =  "ti,am654-evm", "ti,am654";
@@ -84,6 +85,40 @@
 			linux,code = <BTN_1>;
 			gpios = <&wkup_gpio0 27 GPIO_ACTIVE_LOW>;
 		};
+	};
+
+	clk_ub960_evm_25M_fixed: clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <25000000>;
+	};
+
+	clk_cam0_module_48M_fixed: fixed-clock-0-48M {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <48000000>;
+	};
+
+	clk_cam0_24M: fixed-clock-0-24M {
+		compatible = "fixed-factor-clock";
+		clocks = <&clk_cam0_module_48M_fixed>;
+		#clock-cells = <0>;
+		clock-div = <2>;
+		clock-mult = <1>;
+	};
+
+	clk_cam1_module_48M_fixed: fixed-clock-1-48M {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <48000000>;
+	};
+
+	clk_cam1_24M: fixed-clock-1-24M {
+		compatible = "fixed-factor-clock";
+		clocks = <&clk_cam1_module_48M_fixed>;
+		#clock-cells = <0>;
+		clock-div = <2>;
+		clock-mult = <1>;
 	};
 };
 
@@ -282,6 +317,159 @@
 	pinctrl-0 = <&main_i2c1_pins_default>;
 	clock-frequency = <400000>;
 
+	deser: deser@3d {
+		compatible = "ti,ds90ub960-q1";
+
+		reg-names = "main",
+			    "rxport0", "rxport1", "rxport2", "rxport3",
+			    "ser0", "ser1", "ser2", "ser3";
+		reg       = <0x3d>,
+			    <0x40>, <0x41>, <0x42>, <0x43>,
+			    <0x44>, <0x45>, <0x46>, <0x47>;
+
+		clocks = <&clk_ub960_evm_25M_fixed>;
+
+		/* GPIO_CSI_RESETn */
+		reset-gpios = <&pca9555 7 GPIO_ACTIVE_LOW>;
+
+		i2c-alias-pool = /bits/ 16 <0x4a 0x4b 0x4c 0x4d 0x4e 0x4f>;
+
+		gpio-controller;
+		#gpio-cells = <3>; /* rxport, remote gpio num, flags */
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/* FPDLink RX 0 */
+			port@0 {
+				reg = <0>;
+				ds90ub960_fpd3_in0: endpoint {
+					remote-endpoint = <&sensor_0_out>;
+
+					ser0: remote-chip {
+						compatible = "ti,ds90ub913a-q1";
+
+						gpio-functions = <DS90_GPIO_FUNC_OUTPUT
+								  DS90_GPIO_FUNC_OUTPUT
+								  DS90_GPIO_FUNC_UNUSED
+								  DS90_GPIO_FUNC_UNUSED>;
+
+						gpio-controller;
+						#gpio-cells = <2>;
+					};
+				};
+			};
+#if 1
+			/* FPDLink RX 1 */
+			port@1 {
+				reg = <1>;
+				ds90ub960_fpd3_in1: endpoint {
+					remote-endpoint = <&sensor_1_out>;
+
+					ser1: remote-chip {
+						compatible = "ti,ds90ub913a-q1";
+
+						gpio-functions = <DS90_GPIO_FUNC_OUTPUT
+								  DS90_GPIO_FUNC_OUTPUT
+								  DS90_GPIO_FUNC_UNUSED
+								  DS90_GPIO_FUNC_UNUSED>;
+
+						gpio-controller;
+						#gpio-cells = <2>;
+					};
+				};
+			};
+#endif
+			/* CSI-2 */
+			port@4 {
+				reg = <4>;
+				ds90ub960_mipi_out0: endpoint {
+					clock-lanes = <0>;
+					data-lanes = <1 2 3 4>;
+					/* Actually a REFCLK multiplier */
+					data-rate = <1600000000>;
+					remote-endpoint = <&csi2_phy0>;
+				};
+			};
+		};
+
+		i2c-atr {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			remote_i2c0: i2c@0 {
+				reg = <0>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				sensor_0@30 {
+					compatible = "ovti,ov10635";
+					reg = <0x30>;
+
+					clocks = <&clk_cam0_24M>;
+					clock-names = "xvclk";
+
+					/* powerdown-gpios = <GPO0 from ser>; */
+					/* framesync-gpios = <GPO1 from ser>; */
+
+					powerdown-gpios = <&ser0 0 GPIO_ACTIVE_HIGH>;
+
+					/* Note: PCLK must be 96MHz */
+
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					port@0 {
+						reg = <0>;
+						sensor_0_out: endpoint {
+							remote-endpoint = <&ds90ub960_fpd3_in0>;
+							hsync-active = <1>;
+							vsync-active = <1>;
+							pclk-sample = <0>;
+							bus-width = <10>;
+						};
+					};
+				};
+			};
+#if 1
+			remote_i2c1: i2c@1 {
+				reg = <1>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				sensor_1@30 {
+					compatible = "ovti,ov10635";
+					reg = <0x30>;
+
+					clocks = <&clk_cam1_24M>;
+					clock-names = "xvclk";
+
+					/* powerdown-gpios = <GPO0 from ser>; */
+					/* framesync-gpios = <GPO1 from ser>; */
+
+					powerdown-gpios = <&ser1 0 GPIO_ACTIVE_HIGH>;
+
+					/* Note: PCLK must be 96MHz */
+
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					port@0 {
+						reg = <0>;
+						sensor_1_out: endpoint {
+							remote-endpoint = <&ds90ub960_fpd3_in1>;
+							hsync-active = <1>;
+							vsync-active = <1>;
+							pclk-sample = <0>;
+							bus-width = <10>;
+						};
+					};
+				};
+			};
+#endif
+		};
+	};
 };
 
 &main_i2c2 {
@@ -475,6 +663,11 @@
 };
 
 &csi2_0 {
+	csi2_phy0: endpoint {
+		remote-endpoint = <&ds90ub960_mipi_out0>;
+		clock-lanes = <0>;
+		data-lanes = <1 2 3 4>;
+	};
 };
 
 &mcu_cpsw {

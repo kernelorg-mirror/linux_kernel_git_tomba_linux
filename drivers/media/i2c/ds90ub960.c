@@ -319,7 +319,8 @@ static inline struct ds90_asd *to_ds90_asd(struct v4l2_async_subdev *asd)
 
 
 struct ds90_csitxport {
-	u32                     data_rate; /* Nominal data rate (Gb/s) */
+	u32 data_rate;		/* Nominal data rate (Gb/s) */
+	u32 num_data_lanes;
 };
 
 struct ds90_data {
@@ -729,6 +730,7 @@ static int ds90_csiport_probe_one(struct ds90_data *priv,
 {
 	struct device *dev = &priv->client->dev;
 	struct ds90_csitxport *csitxport = &priv->csitxport;
+	int ret;
 
 	if (of_property_read_u32(np, "data-rate", &csitxport->data_rate) != 0) {
 		dev_err(dev, "OF: %s: missing \"data-rate\" node\n",
@@ -745,6 +747,16 @@ static int ds90_csiport_probe_one(struct ds90_data *priv,
 	}
 
 	dev_dbg(dev, "Nominal data rate: %u", csitxport->data_rate);
+
+	ret = of_property_count_u32_elems(np, "data-lanes");
+
+	if (ret <= 0) {
+		dev_err(dev, "OF: %s: failed to parse data-lanes: %d\n",
+		        of_node_full_name(np), ret);
+		return ret;
+	}
+
+	csitxport->num_data_lanes = ret;
 
 	return 0;
 }
@@ -1844,6 +1856,7 @@ static int ds90_create_subdev(struct ds90_data *priv)
 	struct device *dev = &priv->client->dev;
 	int ret;
 	int i;
+	s64 pix_rate;
 
 	for (i = 0; i < DS90_NPORTS; i++)
 		ds90_init_format(&priv->fmt[i]);
@@ -1857,6 +1870,11 @@ static int ds90_create_subdev(struct ds90_data *priv)
 				     V4L2_CID_TEST_PATTERN,
 				     ARRAY_SIZE(ds90_tpg_qmenu) - 1, 0, 0,
 				     ds90_tpg_qmenu);
+
+	pix_rate = div_s64((s64)priv->csitxport.data_rate * priv->csitxport.num_data_lanes, 16);
+
+	v4l2_ctrl_new_std(&priv->ctrl_handler, NULL, V4L2_CID_PIXEL_RATE,
+	                  pix_rate, pix_rate, 1, pix_rate);
 
 	if (priv->ctrl_handler.error) {
 		ret = priv->ctrl_handler.error;

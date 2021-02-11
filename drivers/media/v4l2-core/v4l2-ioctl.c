@@ -3117,8 +3117,8 @@ static int check_array_args(unsigned int cmd, void *parg, size_t *array_size,
 		if (route->num_routes > 256)
 			return -EINVAL;
 
-		*user_ptr = (void __user *)route->routes;
-		*kernel_ptr = (void *)&route->routes;
+		*user_ptr = u64_to_user_ptr(route->routes);
+		*kernel_ptr = (void **)&route->routes;
 		*array_size = sizeof(struct v4l2_subdev_route)
 			    * route->num_routes;
 		ret = 1;

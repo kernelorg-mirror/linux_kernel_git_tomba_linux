@@ -685,7 +685,7 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 		struct v4l2_subdev_routing *routing = arg;
 		struct v4l2_subdev_krouting krouting = {
 			.num_routes = routing->num_routes,
-			.routes = (struct v4l2_subdev_route *)routing->routes,
+			.routes = (struct v4l2_subdev_route *)(uintptr_t)routing->routes,
 		};
 		int ret;
 
@@ -700,7 +700,7 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 
 	case VIDIOC_SUBDEV_S_ROUTING: {
 		struct v4l2_subdev_routing *routing = arg;
-		struct v4l2_subdev_route *route = (struct v4l2_subdev_route *)
+		struct v4l2_subdev_route *route = (struct v4l2_subdev_route *)(uintptr_t)
 						  routing->routes;
 		struct v4l2_subdev_krouting krouting = {};
 		unsigned int i;

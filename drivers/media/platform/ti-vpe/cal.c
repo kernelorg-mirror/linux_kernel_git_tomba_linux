@@ -284,6 +284,27 @@ void cal_quickdump_regs(struct cal_dev *cal)
  * ------------------------------------------------------------------
  */
 
+#define CAL_MAX_PIX_PROC 4
+
+static int cal_reserve_pix_proc(struct cal_dev *cal)
+{
+	unsigned long ret;
+
+	ret = find_first_zero_bit(&cal->reserve_pix_proc_mask, CAL_MAX_PIX_PROC);
+
+	if (ret == CAL_MAX_PIX_PROC)
+		return -ENOSPC;
+
+	cal->reserve_pix_proc_mask |= BIT(ret);
+
+	return ret;
+}
+
+static void cal_release_pix_proc(struct cal_dev *cal, unsigned int pix_proc_num)
+{
+	cal->reserve_pix_proc_mask &= ~BIT(pix_proc_num);
+}
+
 static void cal_ctx_csi2_config(struct cal_ctx *ctx)
 {
 	u32 val;
@@ -427,12 +448,22 @@ static bool cal_ctx_wr_dma_stopped(struct cal_ctx *ctx)
 
 int cal_ctx_prepare(struct cal_ctx *ctx)
 {
+	int ret;
+
+	ret = cal_reserve_pix_proc(ctx->cal);
+	if (ret < 0) {
+		ctx_err(ctx, "Failed to reserve pix proc: %d\n", ret);
+		return ret;
+	}
+
+	ctx->pix_proc = ret;
+
 	return 0;
 }
 
 void cal_ctx_unprepare(struct cal_ctx *ctx)
 {
-
+	cal_release_pix_proc(ctx->cal, ctx->pix_proc);
 }
 
 void cal_ctx_start(struct cal_ctx *ctx)
@@ -868,7 +899,6 @@ static struct cal_ctx *cal_ctx_create(struct cal_dev *cal, int inst)
 	ctx->dma_ctx = inst;
 	ctx->ppi_ctx = inst;
 	ctx->cport = inst;
-	ctx->pix_proc = inst;
 
 	ret = cal_ctx_v4l2_init(ctx);
 	if (ret)

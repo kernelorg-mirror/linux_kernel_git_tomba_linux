@@ -323,10 +323,19 @@ static void cal_ctx_csi2_config(struct cal_ctx *ctx)
 	 */
 	cal_set_field(&val, ctx->datatype, CAL_CSI2_CTX_DT_MASK);
 	cal_set_field(&val, ctx->vc, CAL_CSI2_CTX_VC_MASK);
-	cal_set_field(&val, ctx->v_fmt.fmt.pix.height, CAL_CSI2_CTX_LINES_MASK);
-	cal_set_field(&val, CAL_CSI2_CTX_ATT_PIX, CAL_CSI2_CTX_ATT_MASK);
-	cal_set_field(&val, CAL_CSI2_CTX_PACK_MODE_LINE,
-		      CAL_CSI2_CTX_PACK_MODE_MASK);
+
+	if (ctx->is_embedded_data) {
+		cal_set_field(&val, 1, CAL_CSI2_CTX_LINES_MASK);
+		cal_set_field(&val, CAL_CSI2_CTX_ATT, CAL_CSI2_CTX_ATT_MASK);
+		cal_set_field(&val, CAL_CSI2_CTX_PACK_MODE_LINE,
+			      CAL_CSI2_CTX_PACK_MODE_MASK);
+	} else {
+		cal_set_field(&val, ctx->v_fmt.fmt.pix.height, CAL_CSI2_CTX_LINES_MASK);
+		cal_set_field(&val, CAL_CSI2_CTX_ATT_PIX, CAL_CSI2_CTX_ATT_MASK);
+		cal_set_field(&val, CAL_CSI2_CTX_PACK_MODE_LINE,
+			      CAL_CSI2_CTX_PACK_MODE_MASK);
+	}
+
 	cal_write(ctx->cal, CAL_CSI2_CTX(ctx->phy->instance, ctx->ppi_ctx), val);
 	ctx_dbg(3, ctx, "CAL_CSI2_CTX%d(%d) = 0x%08x\n",
 	        ctx->phy->instance, ctx->ppi_ctx,
@@ -391,10 +400,17 @@ static void cal_ctx_wr_dma_config(struct cal_ctx *ctx)
 
 	val = cal_read(ctx->cal, CAL_WR_DMA_CTRL(ctx->dma_ctx));
 	cal_set_field(&val, ctx->cport, CAL_WR_DMA_CTRL_CPORT_MASK);
-	cal_set_field(&val, ctx->v_fmt.fmt.pix.height,
-		      CAL_WR_DMA_CTRL_YSIZE_MASK);
-	cal_set_field(&val, CAL_WR_DMA_CTRL_DTAG_PIX_DAT,
-		      CAL_WR_DMA_CTRL_DTAG_MASK);
+	if (ctx->is_embedded_data) {
+		cal_set_field(&val, 1, CAL_WR_DMA_CTRL_YSIZE_MASK);
+		cal_set_field(&val, CAL_WR_DMA_CTRL_DTAG_ATT_DAT,
+			      CAL_WR_DMA_CTRL_DTAG_MASK);
+	} else {
+		cal_set_field(&val, ctx->v_fmt.fmt.pix.height,
+			      CAL_WR_DMA_CTRL_YSIZE_MASK);
+		cal_set_field(&val, CAL_WR_DMA_CTRL_DTAG_PIX_DAT,
+			      CAL_WR_DMA_CTRL_DTAG_MASK);
+	}
+
 	cal_set_field(&val, CAL_WR_DMA_CTRL_PATTERN_LINEAR,
 		      CAL_WR_DMA_CTRL_PATTERN_MASK);
 	cal_set_field(&val, 1, CAL_WR_DMA_CTRL_STALL_RD_MASK);
@@ -402,20 +418,29 @@ static void cal_ctx_wr_dma_config(struct cal_ctx *ctx)
 	ctx_dbg(3, ctx, "CAL_WR_DMA_CTRL(%d) = 0x%08x\n", ctx->dma_ctx,
 		cal_read(ctx->cal, CAL_WR_DMA_CTRL(ctx->dma_ctx)));
 
-	cal_write_field(ctx->cal, CAL_WR_DMA_OFST(ctx->dma_ctx),
-			stride / 16, CAL_WR_DMA_OFST_MASK);
+	if (ctx->is_embedded_data) {
+		cal_write_field(ctx->cal, CAL_WR_DMA_OFST(ctx->dma_ctx),
+				0, CAL_WR_DMA_OFST_MASK);
+	} else {
+		cal_write_field(ctx->cal, CAL_WR_DMA_OFST(ctx->dma_ctx),
+				stride / 16, CAL_WR_DMA_OFST_MASK);
+	}
 	ctx_dbg(3, ctx, "CAL_WR_DMA_OFST(%d) = 0x%08x\n", ctx->dma_ctx,
 		cal_read(ctx->cal, CAL_WR_DMA_OFST(ctx->dma_ctx)));
 
 	val = cal_read(ctx->cal, CAL_WR_DMA_XSIZE(ctx->dma_ctx));
-	/* 64 bit word means no skipping */
-	cal_set_field(&val, 0, CAL_WR_DMA_XSIZE_XSKIP_MASK);
-	/*
-	 * The XSIZE field is expressed in 64-bit units and prevents overflows
-	 * in case of synchronization issues by limiting the number of bytes
-	 * written per line.
-	 */
-	cal_set_field(&val, stride / 8, CAL_WR_DMA_XSIZE_MASK);
+	if (ctx->is_embedded_data) {
+		val = 0;
+	} else {
+		/* 64 bit word means no skipping */
+		cal_set_field(&val, 0, CAL_WR_DMA_XSIZE_XSKIP_MASK);
+		/*
+		 * The XSIZE field is expressed in 64-bit units and prevents overflows
+		 * in case of synchronization issues by limiting the number of bytes
+		 * written per line.
+		 */
+		cal_set_field(&val, stride / 8, CAL_WR_DMA_XSIZE_MASK);
+	}
 	cal_write(ctx->cal, CAL_WR_DMA_XSIZE(ctx->dma_ctx), val);
 	ctx_dbg(3, ctx, "CAL_WR_DMA_XSIZE(%d) = 0x%08x\n", ctx->dma_ctx,
 		cal_read(ctx->cal, CAL_WR_DMA_XSIZE(ctx->dma_ctx)));
@@ -481,16 +506,55 @@ static int cal_get_remote_frame_desc(struct cal_camerarx *phy, struct v4l2_mbus_
 
 int cal_ctx_prepare(struct cal_ctx *ctx)
 {
+	struct v4l2_mbus_frame_desc fd;
 	int ret;
+	int i;
+	bool ok;
 
-	ret = cal_reserve_pix_proc(ctx->cal);
-	if (ret < 0) {
-		ctx_err(ctx, "Failed to reserve pix proc: %d\n", ret);
+	ret = cal_get_remote_frame_desc(ctx->phy, &fd);
+	if (ret) {
+		ctx_err(ctx, "Failed to get remote frame desc: %d\n", ret);
 		return ret;
 	}
 
-	ctx->pix_proc = ret;
-	ctx->use_pix_proc = true;
+	ok = false;
+
+	for (i = 0; i < fd.num_entries; i++) {
+		if (ctx->stream != fd.entry[i].stream)
+			continue;
+
+		ctx_dbg(2, ctx, "Framedesc %u: stream %u, vc %u, dt %#x\n", i,
+		       fd.entry[i].stream,
+		       fd.entry[i].bus.csi2.channel,
+		       fd.entry[i].bus.csi2.data_type);
+
+		ctx->vc = fd.entry[i].bus.csi2.channel;
+		ctx->datatype = fd.entry[i].bus.csi2.data_type;
+
+		ctx->is_embedded_data = ctx->datatype == 0x12;
+
+		ok = true;
+
+		break;
+	}
+
+	if (!ok) {
+		ctx_err(ctx, "Failed to find stream from remote frame desc\n");
+		return -ENODEV;
+	}
+
+	if (!ctx->is_embedded_data) {
+		ret = cal_reserve_pix_proc(ctx->cal);
+		if (ret < 0) {
+			ctx_err(ctx, "Failed to reserve pix proc: %d\n", ret);
+			return ret;
+		}
+
+		ctx->pix_proc = ret;
+		ctx->use_pix_proc = true;
+	} else {
+		ctx->use_pix_proc = false;
+	}
 
 	return 0;
 }
@@ -691,13 +755,36 @@ to_cal_asd(struct v4l2_async_subdev *asd)
 	return container_of(asd, struct cal_v4l2_async_subdev, asd);
 }
 
+
+static int cal_get_remote_routing(struct cal_camerarx *phy, struct v4l2_subdev_krouting *routing)
+{
+	struct media_pad *pad;
+	int ret;
+
+	if (!phy->source)
+		return -ENODEV;
+
+	pad = media_entity_remote_pad(&phy->pads[CAL_CAMERARX_PAD_SINK]);
+	if (!pad)
+		return -ENODEV;
+
+	ret = v4l2_subdev_call(phy->source, pad, get_routing, routing);
+	if (ret)
+		return -ENODEV;
+
+	return 0;
+}
+
+
 static int cal_async_notifier_bound(struct v4l2_async_notifier *notifier,
 				    struct v4l2_subdev *subdev,
 				    struct v4l2_async_subdev *asd)
 {
 	struct cal_camerarx *phy = to_cal_asd(asd)->phy;
+	struct cal_dev *cal = phy->cal;
 	int pad;
 	int ret;
+	int i;
 
 	if (phy->source) {
 		phy_info(phy, "Rejecting subdev %s (Already set!!)",
@@ -725,6 +812,53 @@ static int cal_async_notifier_bound(struct v4l2_async_notifier *notifier,
 		phy_err(phy, "Failed to create media link for source %s\n",
 			subdev->name);
 		return ret;
+	}
+
+	{
+		struct media_pad *pad;
+		struct v4l2_subdev_route routes[8];
+		struct v4l2_subdev_krouting routing = {
+			.num_routes = ARRAY_SIZE(routes),
+			.routes = routes,
+		};
+
+		ret = cal_get_remote_routing(phy, &routing);
+		if (ret) {
+			phy_err(phy, "Failed to get routing\n");
+			return ret;
+		}
+
+		pad = media_entity_remote_pad(&phy->pads[CAL_CAMERARX_PAD_SINK]);
+		if (!pad)
+			return -ENODEV;
+
+		for (i = 0; i < routing.num_routes; ++i) {
+			struct v4l2_subdev_route *route = &routing.routes[i];
+			struct cal_ctx *ctx;
+
+			dev_dbg(cal->dev, "Route %d: %d/%d -> %d/%d\n", i,
+			       route->sink_pad, route->sink_stream,
+			       route->source_pad, route->source_stream);
+
+			if (route->source_pad != pad->index) {
+				dev_dbg(cal->dev, "Route for someone else's pad\n");
+				continue;
+			}
+
+			dev_dbg(cal->dev, "Creating CONTEXT %d\n", cal->num_contexts);
+
+			ctx = cal_ctx_create(cal, phy, cal->num_contexts);
+			if (!ctx) {
+				cal_err(cal, "Failed to create context %u\n", cal->num_contexts);
+				ret = -ENODEV;
+				return ret;
+				//goto error_context;
+			}
+
+			ctx->stream = route->source_stream;
+
+			cal->ctx[cal->num_contexts++] = ctx;
+		}
 	}
 
 	return 0;
@@ -917,8 +1051,6 @@ static struct cal_ctx *cal_ctx_create(struct cal_dev *cal, struct cal_camerarx *
 	ctx->dma_ctx = inst;
 	ctx->ppi_ctx = inst;
 	ctx->cport = inst;
-	ctx->vc = 0;
-	ctx->datatype = 1;	/* datatype filter disabled */
 
 	ret = cal_ctx_v4l2_init(ctx);
 	if (ret)
@@ -1115,21 +1247,6 @@ static int cal_probe(struct platform_device *pdev)
 		cal_err(cal, "Neither port is configured, no point in staying up\n");
 		ret = -ENODEV;
 		goto error_camerarx;
-	}
-
-	/* Create contexts. */
-	for (i = 0; i < cal->data->num_csi2_phy; ++i) {
-		if (!cal->phy[i]->source_node)
-			continue;
-
-		cal->ctx[cal->num_contexts] = cal_ctx_create(cal, cal->phy[i], i);
-		if (!cal->ctx[cal->num_contexts]) {
-			cal_err(cal, "Failed to create context %u\n", cal->num_contexts);
-			ret = -ENODEV;
-			goto error_context;
-		}
-
-		cal->num_contexts++;
 	}
 
 	/* Register the media device. */

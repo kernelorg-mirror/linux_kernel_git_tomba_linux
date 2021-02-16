@@ -233,6 +233,9 @@ struct cal_ctx {
 	u32			datatype;
 
 	bool use_pix_proc;
+
+	u32 stream;
+	bool is_embedded_data;
 };
 
 extern unsigned int cal_debug;

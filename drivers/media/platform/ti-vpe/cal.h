@@ -231,6 +231,8 @@ struct cal_ctx {
 	unsigned int		pix_proc;
 	unsigned int		vc;
 	u32			datatype;
+
+	bool use_pix_proc;
 };
 
 extern unsigned int cal_debug;

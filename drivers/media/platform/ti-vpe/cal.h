@@ -62,6 +62,7 @@ enum cal_camerarx_field {
 };
 
 enum cal_dma_state {
+	CAL_DMA_STARTING,
 	CAL_DMA_RUNNING,
 	CAL_DMA_STOP_REQUESTED,
 	CAL_DMA_STOP_PENDING,

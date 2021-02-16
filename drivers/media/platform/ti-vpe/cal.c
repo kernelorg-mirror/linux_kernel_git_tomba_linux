@@ -494,7 +494,7 @@ void cal_ctx_unprepare(struct cal_ctx *ctx)
 void cal_ctx_start(struct cal_ctx *ctx)
 {
 	ctx->sequence = 0;
-	ctx->dma.state = CAL_DMA_RUNNING;
+	ctx->dma.state = CAL_DMA_STARTING;
 
 	/* Configure the CSI-2, pixel processing and write DMA contexts. */
 	cal_ctx_csi2_config(ctx);
@@ -551,64 +551,67 @@ void cal_ctx_stop(struct cal_ctx *ctx)
  * ------------------------------------------------------------------
  */
 
-static inline void cal_irq_wdma_start(struct cal_ctx *ctx)
+static void cal_irq_handle_wdma(struct cal_ctx *ctx, bool start, bool end)
 {
+	struct cal_buffer *old_buf = NULL;
+
 	spin_lock(&ctx->dma.lock);
 
-	if (ctx->dma.state == CAL_DMA_STOP_REQUESTED) {
-		/*
-		 * If a stop is requested, disable the write DMA context
-		 * immediately. The CAL_WR_DMA_CTRL_j.MODE field is shadowed,
-		 * the current frame will complete and the DMA will then stop.
-		 */
-		cal_ctx_wr_dma_disable(ctx);
-		ctx->dma.state = CAL_DMA_STOP_PENDING;
-	} else if (!list_empty(&ctx->dma.queue) && !ctx->dma.pending) {
-		/*
-		 * Otherwise, if a new buffer is available, queue it to the
-		 * hardware.
-		 */
-		struct cal_buffer *buf;
-		dma_addr_t addr;
+	if (start) {
+		/* If a new buffer was queued, complete the current buffer. */
+		if (ctx->dma.pending) {
+			old_buf = ctx->dma.active;
+			ctx->dma.active = ctx->dma.pending;
+			ctx->dma.pending = NULL;
+		}
 
-		buf = list_first_entry(&ctx->dma.queue, struct cal_buffer,
-				       list);
-		addr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
-		cal_ctx_set_dma_addr(ctx, addr);
+		if (!list_empty(&ctx->dma.queue) && !ctx->dma.pending) {
+			/*
+			 * Otherwise, if a new buffer is available, queue it to the
+			 * hardware.
+			 */
+			struct cal_buffer *buf;
+			dma_addr_t addr;
 
-		ctx->dma.pending = buf;
-		list_del(&buf->list);
+			buf = list_first_entry(&ctx->dma.queue, struct cal_buffer,
+					       list);
+			addr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
+			cal_ctx_set_dma_addr(ctx, addr);
+
+			ctx->dma.pending = buf;
+			list_del(&buf->list);
+		}
 	}
 
-	spin_unlock(&ctx->dma.lock);
-}
+	if (ctx->dma.state == CAL_DMA_STOP_REQUESTED)
+		ctx_dbg(3, ctx, "STOP REQ, start %d, end %d\n", start, end);
+	if (ctx->dma.state == CAL_DMA_STOP_PENDING)
+		ctx_dbg(3, ctx, "STOP PEND, start %d, end %d\n", start, end);
 
-static inline void cal_irq_wdma_end(struct cal_ctx *ctx)
-{
-	struct cal_buffer *buf = NULL;
+	if (start && ctx->dma.state == CAL_DMA_STOP_REQUESTED) {
+		cal_ctx_wr_dma_disable(ctx);
+		ctx->dma.state = CAL_DMA_STOP_PENDING;
 
-	spin_lock(&ctx->dma.lock);
-
-	/* If the DMA context was stopping, it is now stopped. */
-	if (ctx->dma.state == CAL_DMA_STOP_PENDING) {
+		/*
+		 * If we also have the WDMA_END set, we must presume that the current DMA has ended,
+		 * and we are not going to get another WDMA_END irq.
+		 */
+		if (end) {
+			ctx->dma.state = CAL_DMA_STOPPED;
+			wake_up(&ctx->dma.wait);
+		}
+	} else if (end && ctx->dma.state == CAL_DMA_STOP_PENDING) {
 		ctx->dma.state = CAL_DMA_STOPPED;
 		wake_up(&ctx->dma.wait);
 	}
 
-	/* If a new buffer was queued, complete the current buffer. */
-	if (ctx->dma.pending) {
-		buf = ctx->dma.active;
-		ctx->dma.active = ctx->dma.pending;
-		ctx->dma.pending = NULL;
-	}
-
 	spin_unlock(&ctx->dma.lock);
 
-	if (buf) {
-		buf->vb.vb2_buf.timestamp = ktime_get_ns();
-		buf->vb.field = ctx->v_fmt.fmt.pix.field;
-		buf->vb.sequence = ctx->sequence++;
-		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
+	if (old_buf) {
+		old_buf->vb.vb2_buf.timestamp = ktime_get_ns();
+		old_buf->vb.field = ctx->v_fmt.fmt.pix.field;
+		old_buf->vb.sequence = ctx->sequence++;
+		vb2_buffer_done(&old_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 	}
 }
 
@@ -651,24 +654,12 @@ static irqreturn_t cal_irq(int irq_cal, void *data)
 		}
 	}
 
-	/* Check which DMA just finished */
-	if (status[1]) {
-		unsigned int i;
+	for (i = 0; i < cal->num_contexts; ++i) {
+		bool end = !!(status[1] & CAL_HL_IRQ_WDMA_END_MASK(i));
+		bool start = !!(status[2] & CAL_HL_IRQ_WDMA_START_MASK(i));
 
-		for (i = 0; i < cal->num_contexts; ++i) {
-			if (status[1] & CAL_HL_IRQ_WDMA_END_MASK(i))
-				cal_irq_wdma_end(cal->ctx[i]);
-		}
-	}
-
-	/* Check which DMA just started */
-	if (status[2]) {
-		unsigned int i;
-
-		for (i = 0; i < cal->num_contexts; ++i) {
-			if (status[2] & CAL_HL_IRQ_WDMA_START_MASK(i))
-				cal_irq_wdma_start(cal->ctx[i]);
-		}
+		if (start || end)
+			cal_irq_handle_wdma(cal->ctx[i], start, end);
 	}
 
 	return IRQ_HANDLED;

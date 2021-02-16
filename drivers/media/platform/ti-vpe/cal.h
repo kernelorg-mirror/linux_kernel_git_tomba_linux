@@ -166,6 +166,8 @@ struct cal_camerarx {
 	struct v4l2_mbus_framefmt	formats[2];
 
 	struct mutex		mutex;
+
+	unsigned int enable_count;
 };
 
 struct cal_dev {

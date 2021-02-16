@@ -47,6 +47,8 @@ bool cal_mc_api;
 module_param_named(mc_api, cal_mc_api, bool, 0444);
 MODULE_PARM_DESC(mc_api, "activates the MC API");
 
+static struct cal_ctx *cal_ctx_create(struct cal_dev *cal, struct cal_camerarx *phy, int inst);
+
 /* ------------------------------------------------------------------
  *	Format Handling
  * ------------------------------------------------------------------
@@ -873,7 +875,7 @@ static void cal_media_cleanup(struct cal_dev *cal)
  * ------------------------------------------------------------------
  */
 
-static struct cal_ctx *cal_ctx_create(struct cal_dev *cal, int inst)
+static struct cal_ctx *cal_ctx_create(struct cal_dev *cal, struct cal_camerarx *phy, int inst)
 {
 	struct cal_ctx *ctx;
 	int ret;
@@ -883,7 +885,7 @@ static struct cal_ctx *cal_ctx_create(struct cal_dev *cal, int inst)
 		return NULL;
 
 	ctx->cal = cal;
-	ctx->phy = cal->phy[inst];
+	ctx->phy = phy;
 	ctx->dma_ctx = inst;
 	ctx->ppi_ctx = inst;
 	ctx->cport = inst;
@@ -1092,7 +1094,7 @@ static int cal_probe(struct platform_device *pdev)
 		if (!cal->phy[i]->source_node)
 			continue;
 
-		cal->ctx[cal->num_contexts] = cal_ctx_create(cal, i);
+		cal->ctx[cal->num_contexts] = cal_ctx_create(cal, cal->phy[i], i);
 		if (!cal->ctx[cal->num_contexts]) {
 			cal_err(cal, "Failed to create context %u\n", cal->num_contexts);
 			ret = -ENODEV;

@@ -239,6 +239,20 @@ config VIDEO_IMX412
 	  To compile this driver as a module, choose M here: the
 	  module will be called imx412.
 
+config VIDEO_MARS
+	tristate "ON Semiconductor MARS camera support"
+	depends on I2C
+	select V4L2_FWNODE
+	select VIDEO_V4L2_SUBDEV_API
+	select MEDIA_CONTROLLER
+	select VIDEO_MAX96705_LIB
+	help
+	  This driver supports the ON Semiconductor MARS GMSL camera module, used in
+	  ADAS systems.
+
+	  This camera module should be used in conjunction with a GMSL
+	  deserialiser such as the MAX9286.
+
 config VIDEO_MAX9271_LIB
 	tristate
 

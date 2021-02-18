@@ -242,6 +242,9 @@ config VIDEO_IMX412
 config VIDEO_MAX9271_LIB
 	tristate
 
+config VIDEO_MAX96705_LIB
+	tristate
+
 config VIDEO_MT9M001
 	tristate "mt9m001 support"
 	depends on I2C && VIDEO_DEV

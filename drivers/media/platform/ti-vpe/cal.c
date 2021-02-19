@@ -345,8 +345,15 @@ static void cal_ctx_csi2_config(struct cal_ctx *ctx)
 static void cal_ctx_pix_proc_config(struct cal_ctx *ctx)
 {
 	u32 val, extract, pack;
+	u32 bitspp;
 
-	switch (ctx->fmtinfo->bpp) {
+	// XXX
+	if (ctx->datatype == 0x1e)
+		bitspp = 16;
+	else
+		BUG_ON(1);
+
+	switch (bitspp) {
 	case 8:
 		extract = CAL_PIX_PROC_EXTRACT_B8;
 		pack = CAL_PIX_PROC_PACK_B8;
@@ -375,7 +382,7 @@ static void cal_ctx_pix_proc_config(struct cal_ctx *ctx)
 		 */
 		dev_warn_once(ctx->cal->dev,
 			      "%s:%d:%s: bpp:%d unsupported! Overwritten with 8.\n",
-			      __FILE__, __LINE__, __func__, ctx->fmtinfo->bpp);
+			      __FILE__, __LINE__, __func__, bitspp);
 		extract = CAL_PIX_PROC_EXTRACT_B8;
 		pack = CAL_PIX_PROC_PACK_B8;
 		break;
@@ -507,9 +514,9 @@ static int cal_get_remote_frame_desc(struct cal_camerarx *phy, struct v4l2_mbus_
 int cal_ctx_prepare(struct cal_ctx *ctx)
 {
 	struct v4l2_mbus_frame_desc fd;
+	struct v4l2_mbus_frame_desc_entry *entry;
 	int ret;
 	int i;
-	bool ok;
 
 	ret = cal_get_remote_frame_desc(ctx->phy, &fd);
 	if (ret) {
@@ -517,31 +524,30 @@ int cal_ctx_prepare(struct cal_ctx *ctx)
 		return ret;
 	}
 
-	ok = false;
+	entry = NULL;
 
 	for (i = 0; i < fd.num_entries; i++) {
-		if (ctx->stream != fd.entry[i].stream)
-			continue;
-
-		ctx_dbg(2, ctx, "Framedesc %u: stream %u, vc %u, dt %#x\n", i,
-		       fd.entry[i].stream,
-		       fd.entry[i].bus.csi2.channel,
-		       fd.entry[i].bus.csi2.data_type);
-
-		ctx->vc = fd.entry[i].bus.csi2.channel;
-		ctx->datatype = fd.entry[i].bus.csi2.data_type;
-
-		ctx->is_embedded_data = ctx->datatype == 0x12;
-
-		ok = true;
-
-		break;
+		if (ctx->stream == fd.entry[i].stream) {
+			entry = &fd.entry[i];
+			break;
+		}
 	}
 
-	if (!ok) {
+	if (!entry) {
 		ctx_err(ctx, "Failed to find stream from remote frame desc\n");
 		return -ENODEV;
 	}
+
+	ctx_dbg(2, ctx, "Framedesc %u: stream %u, len %u, vc %u, dt %#x\n", i,
+	       entry->stream,
+	       entry->length,
+	       entry->bus.csi2.channel,
+	       entry->bus.csi2.data_type);
+
+	ctx->vc = entry->bus.csi2.channel;
+	ctx->datatype = entry->bus.csi2.data_type;
+
+	ctx->is_embedded_data = ctx->datatype == 0x12;
 
 	if (!ctx->is_embedded_data) {
 		ret = cal_reserve_pix_proc(ctx->cal);
@@ -814,6 +820,7 @@ static int cal_async_notifier_bound(struct v4l2_async_notifier *notifier,
 		return ret;
 	}
 
+	if (0)
 	{
 		struct media_pad *pad;
 		struct v4l2_subdev_route routes[8];
@@ -869,6 +876,24 @@ static int cal_async_notifier_complete(struct v4l2_async_notifier *notifier)
 	struct cal_dev *cal = container_of(notifier, struct cal_dev, notifier);
 	unsigned int i;
 	int ret = 0;
+
+	for (i = 0; i < CAL_MAX_NUM_CONTEXT; ++i) {
+		struct cal_camerarx *phy = cal->phy[0]; // XXX always connect to phy0
+		struct cal_ctx *ctx;
+
+		dev_dbg(cal->dev, "Creating CONTEXT %d\n", cal->num_contexts);
+
+		ctx = cal_ctx_create(cal, phy, cal->num_contexts);
+		if (!ctx) {
+			cal_err(cal, "Failed to create context %u\n", cal->num_contexts);
+			ret = -ENODEV;
+			return ret;
+		}
+
+		ctx->stream = cal->num_contexts; // XXX this should match the pad number
+
+		cal->ctx[cal->num_contexts++] = ctx;
+	}
 
 	for (i = 0; i < cal->num_contexts; ++i)
 		cal_ctx_v4l2_register(cal->ctx[i]);

@@ -29,7 +29,7 @@
 #include <media/videobuf2-v4l2.h>
 
 #define CAL_MODULE_NAME			"cal"
-#define CAL_MAX_NUM_CONTEXT		8
+#define CAL_MAX_NUM_CONTEXT		4 // XXX should be 8
 #define CAL_NUM_CSI2_PORTS		2
 
 /*
@@ -44,7 +44,15 @@
 #define CAL_MAX_HEIGHT_LINES		16383
 
 #define CAL_CAMERARX_PAD_SINK		0
-#define CAL_CAMERARX_PAD_SOURCE		1
+#define CAL_CAMERARX_NUM_SOURCE_PADS	4 // XXX should be 8
+#define CAL_CAMERARX_NUM_PADS		(1 + CAL_CAMERARX_NUM_SOURCE_PADS)
+#define CAL_CAMERARX_PAD_SOURCE_XXX 1
+
+static inline bool cal_pad_is_source(uint32_t pad)
+{
+	/* Camera RX has 1 sink pad, and N source pads */
+	return pad >=1 && pad <= CAL_CAMERARX_NUM_SOURCE_PADS;
+}
 
 struct device;
 struct device_node;
@@ -164,8 +172,8 @@ struct cal_camerarx {
 	struct media_pipeline	pipe;
 
 	struct v4l2_subdev	subdev;
-	struct media_pad	pads[2];
-	struct v4l2_mbus_framefmt	formats[2];
+	struct media_pad	pads[CAL_CAMERARX_NUM_PADS];
+	struct v4l2_mbus_framefmt	formats[CAL_CAMERARX_NUM_PADS];
 	const struct cal_format_info	*fmtinfo;
 
 	int enable_count;

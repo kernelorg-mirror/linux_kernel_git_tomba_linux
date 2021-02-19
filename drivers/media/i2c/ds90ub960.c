@@ -46,12 +46,10 @@ static bool ds90_is_rx_port(unsigned int idx)
 	return idx < DS90_FPD_RX_NPORTS;
 }
 
-#if 0
 static bool ds90_is_tx_port(unsigned int idx)
 {
 	return !ds90_is_rx_port(idx) && idx < DS90_NPORTS;
 }
-#endif
 
 /*
  * Register map
@@ -1677,7 +1675,7 @@ static int ds90_get_routing(struct v4l2_subdev *sd,
 
 	stream_idx = 0;
 
-	// Setup a hardcoded stream setup. 2 streams from each camera (pixel & embedded data).
+	// Setup a hardcoded stream setup. 1 or 2 streams from each camera (pixel & embedded data).
 
 	for (i = 0; i < DS90_FPD_RX_NPORTS; ++i) {
 		struct ds90_rxport *rxport = priv->rxport[i];
@@ -1750,12 +1748,20 @@ static int ds90_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 			return -EINVAL;
 
 		fd->entry[fd->num_entries].stream = stream_idx++;
+
+		fd->entry[fd->num_entries].flags = V4L2_MBUS_FRAME_DESC_FL_LEN_MAX;
+		fd->entry[fd->num_entries].length = fmt->width * fmt->height * ds90_fmt->bpp / 8;
+
 		fd->entry[fd->num_entries].bus.csi2.channel = i;
 		fd->entry[fd->num_entries].bus.csi2.data_type = ds90_fmt->datatype;
 		fd->num_entries++;
 
 		if (rxport->embed_mode) {
 			fd->entry[fd->num_entries].stream = stream_idx++;
+
+			fd->entry[fd->num_entries].flags = V4L2_MBUS_FRAME_DESC_FL_LEN_MAX;
+			fd->entry[fd->num_entries].length = fmt->width * rxport->embed_mode * ds90_fmt->bpp / 8;
+
 			fd->entry[fd->num_entries].bus.csi2.channel = i;
 			fd->entry[fd->num_entries].bus.csi2.data_type = rxport->embed_datatype;
 			fd->num_entries++;
@@ -1777,6 +1783,20 @@ static const struct v4l2_subdev_pad_ops ds90_pad_ops = {
 static const struct v4l2_subdev_ops ds90_subdev_ops = {
 	.video		= &ds90_video_ops,
 	.pad		= &ds90_pad_ops,
+};
+
+static bool ds90_has_route(struct media_entity *entity,
+                           unsigned int pad0, unsigned int pad1)
+{
+	//struct v4l2_subdev *sd = media_entity_to_v4l2_subdev(entity);
+	//struct ds90_data *priv = sd_to_ds90(sd);
+
+	return ds90_is_rx_port(pad0) && ds90_is_tx_port(pad1);
+}
+
+static const struct media_entity_operations ds90_entity_ops = {
+	//.link_validate = v4l2_subdev_link_validate,
+	.has_route = ds90_has_route
 };
 
 /* -----------------------------------------------------------------------------
@@ -2074,6 +2094,7 @@ static int ds90_create_subdev(struct ds90_data *priv)
 
 	priv->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	priv->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
+	priv->sd.entity.ops = &ds90_entity_ops;
 
 	for (i = 0; i < DS90_NPORTS; i++)
 		priv->pads[i].flags = (i < DS90_FPD_RX_NPORTS) ?

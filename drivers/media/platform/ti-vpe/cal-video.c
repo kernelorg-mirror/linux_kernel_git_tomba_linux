@@ -654,7 +654,7 @@ static void cal_release_buffers(struct cal_ctx *ctx,
 static int cal_video_check_format(struct cal_ctx *ctx)
 {
 	const struct v4l2_mbus_framefmt *format;
-
+#if 0
 	format = &ctx->phy->formats[CAL_CAMERARX_PAD_SOURCE];
 
 	if (ctx->fmtinfo->code != format->code ||
@@ -662,7 +662,7 @@ static int cal_video_check_format(struct cal_ctx *ctx)
 	    ctx->v_fmt.fmt.pix.width != format->width ||
 	    ctx->v_fmt.fmt.pix.field != format->field)
 		return -EPIPE;
-
+#endif
 	return 0;
 }
 
@@ -672,6 +672,8 @@ static int cal_start_streaming(struct vb2_queue *vq, unsigned int count)
 	struct cal_buffer *buf;
 	dma_addr_t addr;
 	int ret;
+
+	printk("cal_start_streaming\n");
 
 	ret = media_pipeline_start(ctx->vdev.entity.pads, &ctx->phy->pipe);
 	if (ret < 0) {
@@ -683,13 +685,14 @@ static int cal_start_streaming(struct vb2_queue *vq, unsigned int count)
 	 * Verify that the currently configured format matches the output of
 	 * the connected CAMERARX.
 	 */
+	/*
 	ret = cal_video_check_format(ctx);
 	if (ret < 0) {
 		ctx_dbg(3, ctx,
 			"Format mismatch between CAMERARX and video node\n");
 		goto error_pipeline;
 	}
-
+*/
 	ret = cal_ctx_prepare(ctx);
 	if (ret) {
 		ctx_err(ctx, "Failed to prepare context\n");
@@ -709,12 +712,18 @@ static int cal_start_streaming(struct vb2_queue *vq, unsigned int count)
 	cal_ctx_set_dma_addr(ctx, addr);
 	cal_ctx_start(ctx);
 
+printk("XXX %x\n", (u32)&ctx->phy->subdev);
+
 	ret = v4l2_subdev_call(&ctx->phy->subdev, video, s_stream, 1);
-	if (ret)
+	if (ret) {
+		printk("XXX s_stream faileð\n");
 		goto error_stop;
+	}
 
 	if (cal_debug >= 4)
 		cal_quickdump_regs(ctx->cal);
+
+	printk("cal_start_streaming OK\n");
 
 	return 0;
 
@@ -851,6 +860,7 @@ int cal_ctx_v4l2_register(struct cal_ctx *ctx)
 {
 	struct video_device *vfd = &ctx->vdev;
 	int ret;
+	u16 rx_pad;
 
 	ret = cal_ctx_v4l2_init_formats(ctx);
 	if (ret)
@@ -873,16 +883,19 @@ int cal_ctx_v4l2_register(struct cal_ctx *ctx)
 		return ret;
 	}
 
-	ret = media_create_pad_link(&ctx->phy->subdev.entity,
-				    CAL_CAMERARX_PAD_SOURCE,
-				    &vfd->entity, 0,
-				    MEDIA_LNK_FL_IMMUTABLE |
-				    MEDIA_LNK_FL_ENABLED);
-	if (ret) {
-		ctx_err(ctx, "Failed to create media link for context %u\n",
-			ctx->dma_ctx);
-		video_unregister_device(vfd);
-		return ret;
+	rx_pad = 1 + ctx->dma_ctx; // XXX
+	if (rx_pad < CAL_CAMERARX_NUM_PADS) {
+		ret = media_create_pad_link(&ctx->phy->subdev.entity,
+		                            rx_pad,
+					    &vfd->entity, 0,
+					    MEDIA_LNK_FL_IMMUTABLE |
+					    MEDIA_LNK_FL_ENABLED);
+		if (ret) {
+			ctx_err(ctx, "Failed to create media link for context %u\n",
+				ctx->dma_ctx);
+			video_unregister_device(vfd);
+			return ret;
+		}
 	}
 
 	ctx_info(ctx, "V4L2 device registered as %s\n",

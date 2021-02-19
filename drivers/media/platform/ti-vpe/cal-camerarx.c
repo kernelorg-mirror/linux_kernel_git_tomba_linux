@@ -49,8 +49,13 @@ static s64 cal_camerarx_get_ext_link_freq(struct cal_camerarx *phy)
 {
 	struct v4l2_fwnode_bus_mipi_csi2 *mipi_csi2 = &phy->endpoint.bus.mipi_csi2;
 	u32 num_lanes = mipi_csi2->num_data_lanes;
-	u32 bpp = phy->fmtinfo->bpp;
+	u32 bpp;
 	s64 freq;
+
+	if (phy->fmtinfo)
+		bpp = phy->fmtinfo->bpp;
+	else
+		bpp = 0;
 
 	freq = v4l2_get_link_freq(phy->source->ctrl_handler, bpp, 2 * num_lanes);
 	if (freq < 0) {
@@ -614,8 +619,10 @@ static int cal_camerarx_sd_enum_mbus_code(struct v4l2_subdev *sd,
 {
 	struct cal_camerarx *phy = to_cal_camerarx(sd);
 
+	printk("XXXX %s pad %d\n", __func__, code->pad);
+
 	/* No transcoding, source and sink codes must match. */
-	if (code->pad == CAL_CAMERARX_PAD_SOURCE) {
+	if (cal_pad_is_source(code->pad)) {
 		struct v4l2_mbus_framefmt *fmt;
 
 		if (code->index > 0)
@@ -643,11 +650,13 @@ static int cal_camerarx_sd_enum_frame_size(struct v4l2_subdev *sd,
 	struct cal_camerarx *phy = to_cal_camerarx(sd);
 	const struct cal_format_info *fmtinfo;
 
+	printk("XXXX %s pad %d\n", __func__, fse->pad);
+
 	if (fse->index > 0)
 		return -EINVAL;
 
 	/* No transcoding, source and sink formats must match. */
-	if (fse->pad == CAL_CAMERARX_PAD_SOURCE) {
+	if (cal_pad_is_source(fse->pad)) {
 		struct v4l2_mbus_framefmt *fmt;
 
 		fmt = cal_camerarx_get_pad_format(phy, cfg,
@@ -683,6 +692,10 @@ static int cal_camerarx_sd_get_fmt(struct v4l2_subdev *sd,
 	struct cal_camerarx *phy = to_cal_camerarx(sd);
 	struct v4l2_mbus_framefmt *fmt;
 
+	printk("XXXX %s pad %d\n", __func__, format->pad);
+
+	return -EINVAL;
+
 	fmt = cal_camerarx_get_pad_format(phy, cfg, format->pad, format->which);
 	format->format = *fmt;
 
@@ -698,8 +711,12 @@ static int cal_camerarx_sd_set_fmt(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *fmt;
 	unsigned int bpp;
 
+	return -EINVAL;
+
+	printk("XXXX %s pad %d\n", __func__, format->pad);
+
 	/* No transcoding, source and sink formats must match. */
-	if (format->pad == CAL_CAMERARX_PAD_SOURCE)
+	if (cal_pad_is_source(format->pad))
 		return cal_camerarx_sd_get_fmt(sd, cfg, format);
 
 	/*
@@ -729,7 +746,7 @@ static int cal_camerarx_sd_set_fmt(struct v4l2_subdev *sd,
 					  format->which);
 	*fmt = format->format;
 
-	fmt = cal_camerarx_get_pad_format(phy, cfg, CAL_CAMERARX_PAD_SOURCE,
+	fmt = cal_camerarx_get_pad_format(phy, cfg, CAL_CAMERARX_PAD_SOURCE_XXX,
 					  format->which);
 	*fmt = format->format;
 
@@ -758,7 +775,44 @@ static int cal_camerarx_sd_init_cfg(struct v4l2_subdev *sd,
 		},
 	};
 
+	printk("XXXX %s pad %d\n", __func__, CAL_CAMERARX_PAD_SINK);
+
+	return 0;
+
 	return cal_camerarx_sd_set_fmt(sd, cfg, &format);
+}
+
+static int cal_get_routing(struct v4l2_subdev *sd,
+		   struct v4l2_subdev_krouting *routing)
+{
+	struct cal_camerarx *phy = to_cal_camerarx(sd);
+	struct v4l2_subdev_route *route = routing->routes;
+	unsigned int i;
+	unsigned int stream_idx;
+
+	dev_dbg(phy->cal->dev, "cal_get_routing\n");
+
+	if (routing->num_routes < CAL_CAMERARX_NUM_SOURCE_PADS) {
+		routing->num_routes = CAL_CAMERARX_NUM_SOURCE_PADS;
+		return -ENOSPC;
+	}
+
+	routing->num_routes = 0;
+
+	stream_idx = 0;
+
+	for (i = 0; i < CAL_CAMERARX_NUM_SOURCE_PADS; ++i) {
+		route->sink_pad = 0;
+		route->sink_stream = stream_idx++;
+		route->source_pad = 1 + i;
+		route->source_stream = 0;
+		route->flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE | V4L2_SUBDEV_ROUTE_FL_IMMUTABLE;
+		route++;
+
+		routing->num_routes++;
+	}
+
+	return 0;
 }
 
 static const struct v4l2_subdev_video_ops cal_camerarx_video_ops = {
@@ -771,6 +825,7 @@ static const struct v4l2_subdev_pad_ops cal_camerarx_pad_ops = {
 	.enum_frame_size = cal_camerarx_sd_enum_frame_size,
 	.get_fmt = cal_camerarx_sd_get_fmt,
 	.set_fmt = cal_camerarx_sd_set_fmt,
+	.get_routing	= cal_get_routing,
 };
 
 static const struct v4l2_subdev_ops cal_camerarx_subdev_ops = {
@@ -778,8 +833,14 @@ static const struct v4l2_subdev_ops cal_camerarx_subdev_ops = {
 	.pad = &cal_camerarx_pad_ops,
 };
 
+static int cal_v4l2_subdev_link_validate(struct media_link *link)
+{
+	printk("XXX %s\n", __func__);
+	return 0;
+}
+
 struct media_entity_operations cal_camerarx_media_ops = {
-	.link_validate = v4l2_subdev_link_validate,
+	.link_validate = cal_v4l2_subdev_link_validate,
 };
 
 /* ------------------------------------------------------------------
@@ -794,6 +855,7 @@ struct cal_camerarx *cal_camerarx_create(struct cal_dev *cal,
 	struct cal_camerarx *phy;
 	struct v4l2_subdev *sd;
 	int ret;
+	unsigned int i;
 
 	phy = kzalloc(sizeof(*phy), GFP_KERNEL);
 	if (!phy)
@@ -833,7 +895,8 @@ struct cal_camerarx *cal_camerarx_create(struct cal_dev *cal,
 	sd->dev = cal->dev;
 
 	phy->pads[CAL_CAMERARX_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	phy->pads[CAL_CAMERARX_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
+	for (i = 1; i < CAL_CAMERARX_NUM_PADS; ++i)
+		phy->pads[i].flags = MEDIA_PAD_FL_SOURCE;
 	sd->entity.ops = &cal_camerarx_media_ops;
 	ret = media_entity_pads_init(&sd->entity, ARRAY_SIZE(phy->pads),
 				     phy->pads);

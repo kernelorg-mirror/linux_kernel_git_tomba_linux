@@ -551,7 +551,7 @@ error:
 	while ((pad_err = media_graph_walk_next(graph))) {
 		struct media_pad *iter;
 
-		media_entity_for_each_routed_pad(pad, iter) {
+		media_entity_for_each_routed_pad(pad_err, iter) {
 			/* Sanity check for negative stream_count */
 			if (!WARN_ON_ONCE(iter->stream_count <= 0)) {
 				--iter->stream_count;

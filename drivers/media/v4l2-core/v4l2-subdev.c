@@ -1110,9 +1110,14 @@ int v4l2_subdev_link_validate(struct media_link *link)
 	}
 
 	if (j < r[R_SINK].routing.num_routes) {
-		dev_dbg(sink->entity.graph_obj.mdev->dev,
-			"not all sink routes verified; out of source routes\n");
-		return -EINVAL;
+		for (; j < r[R_SINK].routing.num_routes; ++j) {
+			if (r[R_SINK].routes[j].sink_pad == link->sink->index &&
+			    (r[R_SINK].routes[j].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE)) {
+				dev_dbg(sink->entity.graph_obj.mdev->dev,
+					"not all sink routes verified; out of source routes\n");
+				return -EINVAL;
+			}
+		}
 	}
 
 	return 0;

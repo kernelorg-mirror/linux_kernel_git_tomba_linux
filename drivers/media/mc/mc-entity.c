@@ -523,6 +523,12 @@ __must_check int __media_pipeline_start(struct media_pad *pad,
 					entity->name, link->sink->index, ret);
 				goto error;
 			}
+
+			dev_dbg(entity->graph_obj.mdev->dev,
+					"link validation OK for '%s':%u -> '%s':%u\n",
+					link->source->entity->name,
+					link->source->index,
+					entity->name, link->sink->index);
 		}
 
 		/* Either no links or validated links are fine. */

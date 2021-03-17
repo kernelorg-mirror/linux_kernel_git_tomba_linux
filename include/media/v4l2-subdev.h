@@ -1223,4 +1223,14 @@ extern const struct v4l2_subdev_ops v4l2_subdev_call_wrappers;
 void v4l2_subdev_notify_event(struct v4l2_subdev *sd,
 			      const struct v4l2_event *ev);
 
+enum v4l2_direction {
+	V4L2_DIR_SOURCEWARD,
+	V4L2_DIR_SINKWARD,
+};
+
+int v4l2_subdev_get_format_dir(struct media_pad *pad, u16 stream,
+			       enum v4l2_direction dir,
+			       struct v4l2_subdev_format *fmt,
+			       struct media_pad **fmt_pad);
+
 #endif

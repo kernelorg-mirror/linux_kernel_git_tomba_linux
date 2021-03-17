@@ -923,6 +923,120 @@ static int v4l2_subdev_link_validate_one(struct media_link *link,
 		sink, link, source_fmt, sink_fmt);
 }
 
+int v4l2_subdev_get_format_dir(struct media_pad *pad, u16 stream,
+			       enum v4l2_direction dir,
+			       struct v4l2_subdev_format *fmt,
+			       struct media_pad **fmt_pad)
+{
+	struct device *dev = pad->entity->graph_obj.mdev->dev;
+	int ret;
+	int i;
+
+	dev_dbg(dev, "v4l2_subdev_get_format_dir %s %u/%u %s\n",
+		pad->entity->name, pad->index, stream,
+		dir == V4L2_DIR_SOURCEWARD ? "sourceward" : "sinkward");
+
+	while (true) {
+		struct v4l2_subdev_route routes[8];
+		struct v4l2_subdev_krouting routing = {
+			.routes = routes,
+			.num_routes = ARRAY_SIZE(routes),
+		};
+		struct v4l2_subdev_route *route;
+
+		if (pad->entity->obj_type != MEDIA_ENTITY_TYPE_V4L2_SUBDEV) {
+			dev_err(dev, "  entity not subdev\n");
+			return -EINVAL;
+		}
+
+		ret = v4l2_subdev_link_validate_get_format(pad, fmt);
+		if (ret == 0) {
+			if (fmt_pad)
+				*fmt_pad = pad;
+			return 0;
+		}
+
+		if (pad->flags &
+		    (dir == V4L2_DIR_SINKWARD ? MEDIA_PAD_FL_SOURCE :
+						MEDIA_PAD_FL_SINK)) {
+			pad = media_entity_remote_pad(pad);
+
+			if (!pad) {
+				dev_err(dev, "NO REMOTE PAD\n");
+				return -EINVAL;
+			}
+
+			dev_dbg(dev, "  found remote pad %s %u\n",
+			        pad->entity->name, pad->index);
+
+			if (pad->entity->obj_type !=
+			    MEDIA_ENTITY_TYPE_V4L2_SUBDEV) {
+				dev_err(dev, "  entity not subdev\n");
+				return -EINVAL;
+			}
+
+			ret = v4l2_subdev_link_validate_get_format(pad, fmt);
+			if (ret == 0) {
+				if (fmt_pad)
+					*fmt_pad = pad;
+				return 0;
+			}
+		}
+
+		ret = v4l2_subdev_call(media_entity_to_v4l2_subdev(pad->entity),
+				       pad, get_routing, &routing);
+
+		if (ret) {
+			dev_err(dev, "  failed to get routing\n");
+			return ret;
+		}
+
+		route = NULL;
+		for (i = 0; i < routing.num_routes; ++i) {
+			u16 near_stream = dir == V4L2_DIR_SINKWARD ?
+						  routes[i].sink_stream :
+						  routes[i].source_stream;
+
+			if (near_stream != stream)
+				continue;
+
+			if (!(routes[i].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE))
+				continue;
+
+			if (route) {
+				dev_err(dev, "  multiple active routes with the same stream\n");
+				return -EINVAL;
+			}
+
+			route = &routes[i];
+		}
+
+		if (!route) {
+			dev_err(dev, "  failed to find route\n");
+			return -EINVAL;
+		}
+
+		dev_dbg(dev, "  found %s route %u/%u -> %u/%u\n",
+		        pad->entity->name,
+		        route->sink_pad, route->sink_stream,
+		        route->source_pad, route->source_stream);
+
+		if (dir == V4L2_DIR_SINKWARD) {
+			pad = &pad->entity->pads[route->source_pad];
+			stream = route->source_stream;
+		} else {
+			pad = &pad->entity->pads[route->sink_pad];
+			stream = route->sink_stream;
+		}
+
+		dev_dbg(dev,
+			"  v4l2_subdev_get_format_dir retry %s %u/%u %s\n",
+			pad->entity->name, pad->index, stream,
+			dir == V4L2_DIR_SOURCEWARD ? "sourceward" : "sinkward");
+	}
+}
+EXPORT_SYMBOL_GPL(v4l2_subdev_get_format_dir);
+
 /* How many routes to assume there can be per a sub-device? */
 #define LINK_VALIDATE_ROUTES	8
 
@@ -1027,6 +1141,9 @@ int v4l2_subdev_link_validate(struct media_link *link)
 		unsigned int *ro[] = { &i, &j };
 		unsigned int k;
 
+		//printk("VALIDATING i=%u/%u, j=%u/%u\n", i, r[R_SRC].routing.num_routes - 1,
+		//       j, r[R_SINK].routing.num_routes - 1);
+
 		/* Get the first active route for the sink pad. */
 		if (r[R_SINK].has_route &&
 		    (r[R_SINK].routes[j].sink_pad != link->sink->index ||
@@ -1076,6 +1193,8 @@ int v4l2_subdev_link_validate(struct media_link *link)
 
 		for (k = 0; k < NR_R; k++) {
 			if (r[k].has_route) {
+				struct media_pad *fmt_pad;
+
 				dev_dbg(sink->entity.graph_obj.mdev->dev,
 					"validating %s route \"%s\": %u/%u -> %u/%u\n",
 					k == R_SINK ? "sink" : "source",
@@ -1084,12 +1203,28 @@ int v4l2_subdev_link_validate(struct media_link *link)
 					r[k].routes[*ro[k]].sink_stream,
 					r[k].routes[*ro[k]].source_pad,
 					r[k].routes[*ro[k]].source_stream);
-				rval = v4l2_subdev_link_validate_get_format(
+				rval = v4l2_subdev_get_format_dir(
 					&r[k].pad->entity->pads[
 						k == R_SINK
 						? r[k].routes[*ro[k]].source_pad
 						: r[k].routes[*ro[k]].sink_pad],
-					&r[k].fmt);
+
+						k == R_SINK
+							? r[k].routes[*ro[k]].source_stream
+							: r[k].routes[*ro[k]].sink_stream,
+						k == R_SINK ? V4L2_DIR_SINKWARD : V4L2_DIR_SOURCEWARD,
+
+					&r[k].fmt,
+					&fmt_pad);
+
+				if (rval) {
+					dev_err(sink->entity.graph_obj.mdev->dev, "Failed to find format\n");
+					return rval;
+				} else {
+					dev_dbg(sink->entity.graph_obj.mdev->dev,
+					        "Found format via recursive lookup at %s:%u\n",
+					       fmt_pad->entity->name, fmt_pad->index);
+				}
 			} else {
 				dev_dbg(sink->entity.graph_obj.mdev->dev,
 					"routing not supported by \"%s\":%u",

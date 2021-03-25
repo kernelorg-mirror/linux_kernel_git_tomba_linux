@@ -337,10 +337,19 @@ static void cal_ctx_csi2_config(struct cal_ctx *ctx)
 	 */
 	cal_set_field(&val, ctx->datatype, CAL_CSI2_CTX_DT_MASK);
 	cal_set_field(&val, ctx->vc, CAL_CSI2_CTX_VC_MASK);
-	cal_set_field(&val, ctx->v_fmt.fmt.pix.height, CAL_CSI2_CTX_LINES_MASK);
-	cal_set_field(&val, CAL_CSI2_CTX_ATT_PIX, CAL_CSI2_CTX_ATT_MASK);
-	cal_set_field(&val, CAL_CSI2_CTX_PACK_MODE_LINE,
-		      CAL_CSI2_CTX_PACK_MODE_MASK);
+
+	if (ctx->vb_vidq.type == V4L2_BUF_TYPE_META_CAPTURE) {
+		cal_set_field(&val, 0, CAL_CSI2_CTX_LINES_MASK); // XXX what should this be for embedded?
+		cal_set_field(&val, CAL_CSI2_CTX_ATT, CAL_CSI2_CTX_ATT_MASK);
+		cal_set_field(&val, CAL_CSI2_CTX_PACK_MODE_LINE,
+			      CAL_CSI2_CTX_PACK_MODE_MASK);
+	} else {
+		cal_set_field(&val, ctx->v_fmt.fmt.pix.height, CAL_CSI2_CTX_LINES_MASK);
+		cal_set_field(&val, CAL_CSI2_CTX_ATT_PIX, CAL_CSI2_CTX_ATT_MASK);
+		cal_set_field(&val, CAL_CSI2_CTX_PACK_MODE_LINE,
+			      CAL_CSI2_CTX_PACK_MODE_MASK);
+	}
+
 	cal_write(ctx->cal, CAL_CSI2_CTX(ctx->phy->instance, ctx->ppi_ctx), val);
 	ctx_dbg(3, ctx, "CAL_CSI2_CTX%d(%d) = 0x%08x\n",
 		ctx->phy->instance, ctx->ppi_ctx,
@@ -400,15 +409,21 @@ static void cal_ctx_pix_proc_config(struct cal_ctx *ctx)
 
 static void cal_ctx_wr_dma_config(struct cal_ctx *ctx)
 {
-	unsigned int stride = ctx->v_fmt.fmt.pix.bytesperline;
 	u32 val;
 
 	val = cal_read(ctx->cal, CAL_WR_DMA_CTRL(ctx->dma_ctx));
 	cal_set_field(&val, ctx->cport, CAL_WR_DMA_CTRL_CPORT_MASK);
-	cal_set_field(&val, ctx->v_fmt.fmt.pix.height,
-		      CAL_WR_DMA_CTRL_YSIZE_MASK);
-	cal_set_field(&val, CAL_WR_DMA_CTRL_DTAG_PIX_DAT,
-		      CAL_WR_DMA_CTRL_DTAG_MASK);
+	if (ctx->vb_vidq.type == V4L2_BUF_TYPE_META_CAPTURE) {
+		cal_set_field(&val, 1, CAL_WR_DMA_CTRL_YSIZE_MASK);
+		cal_set_field(&val, CAL_WR_DMA_CTRL_DTAG_ATT_DAT,
+			      CAL_WR_DMA_CTRL_DTAG_MASK);
+	} else {
+		cal_set_field(&val, ctx->v_fmt.fmt.pix.height,
+			      CAL_WR_DMA_CTRL_YSIZE_MASK);
+		cal_set_field(&val, CAL_WR_DMA_CTRL_DTAG_PIX_DAT,
+			      CAL_WR_DMA_CTRL_DTAG_MASK);
+	}
+
 	cal_set_field(&val, CAL_WR_DMA_CTRL_PATTERN_LINEAR,
 		      CAL_WR_DMA_CTRL_PATTERN_MASK);
 	cal_set_field(&val, 1, CAL_WR_DMA_CTRL_STALL_RD_MASK);
@@ -416,20 +431,31 @@ static void cal_ctx_wr_dma_config(struct cal_ctx *ctx)
 	ctx_dbg(3, ctx, "CAL_WR_DMA_CTRL(%d) = 0x%08x\n", ctx->dma_ctx,
 		cal_read(ctx->cal, CAL_WR_DMA_CTRL(ctx->dma_ctx)));
 
-	cal_write_field(ctx->cal, CAL_WR_DMA_OFST(ctx->dma_ctx),
-			stride / 16, CAL_WR_DMA_OFST_MASK);
+	if (ctx->vb_vidq.type == V4L2_BUF_TYPE_META_CAPTURE) {
+		cal_write_field(ctx->cal, CAL_WR_DMA_OFST(ctx->dma_ctx),
+				0, CAL_WR_DMA_OFST_MASK);
+	} else {
+		cal_write_field(ctx->cal, CAL_WR_DMA_OFST(ctx->dma_ctx),
+				ctx->v_fmt.fmt.pix.bytesperline / 16,
+				CAL_WR_DMA_OFST_MASK);
+	}
 	ctx_dbg(3, ctx, "CAL_WR_DMA_OFST(%d) = 0x%08x\n", ctx->dma_ctx,
 		cal_read(ctx->cal, CAL_WR_DMA_OFST(ctx->dma_ctx)));
 
 	val = cal_read(ctx->cal, CAL_WR_DMA_XSIZE(ctx->dma_ctx));
-	/* 64 bit word means no skipping */
-	cal_set_field(&val, 0, CAL_WR_DMA_XSIZE_XSKIP_MASK);
-	/*
-	 * The XSIZE field is expressed in 64-bit units and prevents overflows
-	 * in case of synchronization issues by limiting the number of bytes
-	 * written per line.
-	 */
-	cal_set_field(&val, stride / 8, CAL_WR_DMA_XSIZE_MASK);
+	if (ctx->vb_vidq.type == V4L2_BUF_TYPE_META_CAPTURE) {
+		val = 0;
+	} else {
+		/* 64 bit word means no skipping */
+		cal_set_field(&val, 0, CAL_WR_DMA_XSIZE_XSKIP_MASK);
+		/*
+		 * The XSIZE field is expressed in 64-bit units and prevents overflows
+		 * in case of synchronization issues by limiting the number of bytes
+		 * written per line.
+		 */
+		cal_set_field(&val, ctx->v_fmt.fmt.pix.bytesperline / 8,
+			      CAL_WR_DMA_XSIZE_MASK);
+	}
 	cal_write(ctx->cal, CAL_WR_DMA_XSIZE(ctx->dma_ctx), val);
 	ctx_dbg(3, ctx, "CAL_WR_DMA_XSIZE(%d) = 0x%08x\n", ctx->dma_ctx,
 		cal_read(ctx->cal, CAL_WR_DMA_XSIZE(ctx->dma_ctx)));
@@ -473,14 +499,18 @@ int cal_ctx_prepare(struct cal_ctx *ctx)
 {
 	int ret;
 
-	ret = cal_reserve_pix_proc(ctx->cal);
-	if (ret < 0) {
-		ctx_err(ctx, "Failed to reserve pix proc: %d\n", ret);
-		return ret;
-	}
+	if (ctx->vb_vidq.type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
+		ret = cal_reserve_pix_proc(ctx->cal);
+		if (ret < 0) {
+			ctx_err(ctx, "Failed to reserve pix proc: %d\n", ret);
+			return ret;
+		}
 
-	ctx->pix_proc = ret;
-	ctx->use_pix_proc = true;
+		ctx->pix_proc = ret;
+		ctx->use_pix_proc = true;
+	} else {
+		ctx->use_pix_proc = false;
+	}
 
 	return 0;
 }
@@ -609,7 +639,11 @@ static void cal_irq_handle_wdma(struct cal_ctx *ctx, bool start, bool end)
 
 	if (old_buf) {
 		old_buf->vb.vb2_buf.timestamp = ktime_get_ns();
-		old_buf->vb.field = ctx->v_fmt.fmt.pix.field;
+		if (ctx->vb_vidq.type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
+			old_buf->vb.field = ctx->v_fmt.fmt.pix.field;
+		else
+			old_buf->vb.field = V4L2_FIELD_NONE;
+
 		old_buf->vb.sequence = ctx->sequence++;
 		vb2_buffer_done(&old_buf->vb.vb2_buf, VB2_BUF_STATE_DONE);
 	}

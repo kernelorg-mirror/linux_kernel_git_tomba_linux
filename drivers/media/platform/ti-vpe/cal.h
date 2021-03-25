@@ -227,10 +227,13 @@ struct cal_ctx {
 
 	struct cal_dmaqueue	dma;
 
-	/* video capture */
-	const struct cal_format_info	*fmtinfo;
-	/* Used to store current pixel format */
+	/* current pixel format */
 	struct v4l2_format	v_fmt;
+	const struct cal_format_info *fmtinfo;
+
+	/* current metadata format */
+	struct v4l2_format	v_meta_fmt;
+	const struct cal_format_info *meta_fmtinfo;
 
 	/* Current subdev enumerated format (legacy) */
 	const struct cal_format_info	**active_fmt;

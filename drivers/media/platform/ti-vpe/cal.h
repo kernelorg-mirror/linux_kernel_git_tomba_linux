@@ -45,7 +45,7 @@
 
 #define CAL_CAMERARX_PAD_SINK		0
 #define CAL_CAMERARX_PAD_FIRST_SOURCE	1
-#define CAL_CAMERARX_NUM_SOURCE_PADS	1
+#define CAL_CAMERARX_NUM_SOURCE_PADS	8
 #define CAL_CAMERARX_NUM_PADS		(1 + CAL_CAMERARX_NUM_SOURCE_PADS)
 
 static inline bool cal_rx_pad_is_sink(u32 pad)
@@ -182,6 +182,8 @@ struct cal_camerarx {
 	struct mutex		mutex;
 
 	unsigned int enable_count;
+
+	struct v4l2_subdev_route routes[CAL_CAMERARX_NUM_SOURCE_PADS];
 };
 
 struct cal_dev {
@@ -209,6 +211,8 @@ struct cal_dev {
 	struct v4l2_async_notifier notifier;
 
 	unsigned long reserve_pix_proc_mask;
+
+	bool streams_support;
 };
 
 /*
@@ -249,6 +253,8 @@ struct cal_ctx {
 	u8			datatype;
 
 	bool use_pix_proc;
+
+	u32 stream;
 };
 
 extern unsigned int cal_debug;

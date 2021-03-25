@@ -53,6 +53,8 @@ bool cal_mc_api = CAL_MC_API_DEFAULT;
 module_param_named(mc_api, cal_mc_api, bool, 0444);
 MODULE_PARM_DESC(mc_api, "activates the MC API");
 
+static struct cal_ctx *cal_ctx_create(struct cal_dev *cal, int inst);
+
 /* ------------------------------------------------------------------
  *	Format Handling
  * ------------------------------------------------------------------
@@ -151,6 +153,10 @@ const struct cal_format_info cal_formats[] = {
 		.fourcc		= V4L2_PIX_FMT_SRGGB12,
 		.code		= MEDIA_BUS_FMT_SRGGB12_1X12,
 		.bpp		= 12,
+	}, {
+		.fourcc		= V4L2_META_FMT,
+		.code		= MEDIA_BUS_FMT_METADATA_FIXED,
+		.bpp		= 8,
 	},
 };
 
@@ -495,9 +501,73 @@ static bool cal_ctx_wr_dma_stopped(struct cal_ctx *ctx)
 	return stopped;
 }
 
+static int cal_get_remote_frame_desc(struct cal_camerarx *phy, struct v4l2_mbus_frame_desc *fd)
+{
+	struct media_pad *pad;
+	int ret;
+
+	if (!phy->source)
+		return -ENODEV;
+
+	pad = media_entity_remote_pad(&phy->pads[CAL_CAMERARX_PAD_SINK]);
+	if (!pad)
+		return -ENODEV;
+
+	ret = v4l2_subdev_call(phy->source, pad, get_frame_desc, pad->index, fd);
+	if (ret)
+		return ret;
+
+	if (fd->type != V4L2_MBUS_FRAME_DESC_TYPE_CSI2) {
+		dev_err(phy->cal->dev, "Frame desc do not describe CSI-2 link");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int cal_get_remote_frame_desc_entry(struct cal_camerarx *phy,
+                                           u32 stream,
+                                           struct v4l2_mbus_frame_desc_entry *entry)
+{
+	struct v4l2_mbus_frame_desc fd;
+	int ret;
+	unsigned int i;
+
+	ret = cal_get_remote_frame_desc(phy, &fd);
+	if (ret) {
+		dev_err(phy->cal->dev, "Failed to get remote frame desc: %d\n", ret);
+		return ret;
+	}
+
+	for (i = 0; i < fd.num_entries; i++) {
+		if (stream == fd.entry[i].stream) {
+			*entry = fd.entry[i];
+			return 0;
+		}
+	}
+
+	return -ENODEV;
+}
+
 int cal_ctx_prepare(struct cal_ctx *ctx)
 {
+	struct v4l2_mbus_frame_desc_entry entry;
 	int ret;
+
+	ret = cal_get_remote_frame_desc_entry(ctx->phy, ctx->stream, &entry);
+	if (ret) {
+		ctx_err(ctx, "Failed to get remote frame desc: %d\n", ret);
+		return ret;
+	}
+
+	ctx_dbg(2, ctx, "Framedesc: stream %u, len %u, vc %u, dt %#x\n",
+	       entry.stream,
+	       entry.length,
+	       entry.bus.csi2.channel,
+	       entry.bus.csi2.data_type);
+
+	ctx->vc = entry.bus.csi2.channel;
+	ctx->datatype = entry.bus.csi2.data_type;
 
 	if (ctx->vb_vidq.type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
 		ret = cal_reserve_pix_proc(ctx->cal);
@@ -757,9 +827,27 @@ static int cal_async_notifier_bound(struct v4l2_async_notifier *notifier,
 static int cal_async_notifier_complete(struct v4l2_async_notifier *notifier)
 {
 	struct cal_dev *cal = container_of(notifier, struct cal_dev, notifier);
-	unsigned int i;
 	int ret = 0;
+	unsigned int i;
 
+	/* All sources are ready */
+
+	for (i = 0; i < ARRAY_SIZE(cal->ctx); ++i) {
+		struct cal_ctx *ctx;
+
+		dev_dbg(cal->dev, "Creating CONTEXT %d\n", cal->num_contexts);
+
+		ctx = cal_ctx_create(cal, i);
+		if (!ctx) {
+			cal_err(cal, "Failed to create context %u\n", i);
+			ret = -ENODEV;
+			return ret;
+		}
+
+		cal->ctx[cal->num_contexts++] = ctx;
+	}
+
+	// XXX handle errors
 	for (i = 0; i < cal->num_contexts; ++i)
 		cal_ctx_v4l2_register(cal->ctx[i]);
 
@@ -935,12 +1023,9 @@ static struct cal_ctx *cal_ctx_create(struct cal_dev *cal, int inst)
 		return NULL;
 
 	ctx->cal = cal;
-	ctx->phy = cal->phy[inst];
 	ctx->dma_ctx = inst;
 	ctx->ppi_ctx = inst;
 	ctx->cport = inst;
-	ctx->vc = 0;
-	ctx->datatype = 1;	/* datatype filter disabled */
 
 	ret = cal_ctx_v4l2_init(ctx);
 	if (ret)
@@ -1079,6 +1164,9 @@ static int cal_probe(struct platform_device *pdev)
 	cal->dev = &pdev->dev;
 	platform_set_drvdata(pdev, cal);
 
+	// XXX always enable for now
+	cal->streams_support = true;
+
 	/* Acquire resources: clocks, CAMERARX regmap, I/O memory and IRQ. */
 	cal->fclk = devm_clk_get(&pdev->dev, "fck");
 	if (IS_ERR(cal->fclk)) {
@@ -1137,21 +1225,6 @@ static int cal_probe(struct platform_device *pdev)
 		cal_err(cal, "Neither port is configured, no point in staying up\n");
 		ret = -ENODEV;
 		goto error_camerarx;
-	}
-
-	/* Create contexts. */
-	for (i = 0; i < cal->data->num_csi2_phy; ++i) {
-		if (!cal->phy[i]->source_node)
-			continue;
-
-		cal->ctx[cal->num_contexts] = cal_ctx_create(cal, i);
-		if (!cal->ctx[cal->num_contexts]) {
-			cal_err(cal, "Failed to create context %u\n", cal->num_contexts);
-			ret = -ENODEV;
-			goto error_context;
-		}
-
-		cal->num_contexts++;
 	}
 
 	/* Register the media device. */

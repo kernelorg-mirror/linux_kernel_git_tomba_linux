@@ -330,8 +330,8 @@ static int xvip_pipeline_start_stop(struct xvip_m2m_dev *xdev,
 				    struct xvip_m2m_dma *dma, bool start)
 {
 	struct media_graph graph;
-	struct media_entity *entity = &dma->video.entity;
-	struct media_device *mdev = entity->graph_obj.mdev;
+	struct media_pad *pad = dma->video.entity.pads;
+	struct media_device *mdev = dma->video.entity.graph_obj.mdev;
 	struct xventity_list *temp, *_temp;
 	LIST_HEAD(ent_list);
 	int ret = 0;
@@ -343,14 +343,14 @@ static int xvip_pipeline_start_stop(struct xvip_m2m_dev *xdev,
 	if (ret)
 		goto error;
 
-	media_graph_walk_start(&graph, entity->pads);
+	media_graph_walk_start(&graph, pad);
 
 	/* get the list of entities */
-	while ((entity = media_graph_walk_next(&graph))) {
+	while ((pad = media_graph_walk_next(&graph))) {
 		struct xventity_list *ele;
 
 		/* We want to stream on/off only subdevs */
-		if (!is_media_entity_v4l2_subdev(entity))
+		if (!is_media_entity_v4l2_subdev(pad->entity))
 			continue;
 
 		/* Maintain the pipeline sequence in a list */
@@ -360,7 +360,7 @@ static int xvip_pipeline_start_stop(struct xvip_m2m_dev *xdev,
 			goto error;
 		}
 
-		ele->entity = entity;
+		ele->entity = pad->entity;
 		list_add(&ele->list, &ent_list);
 	}
 
@@ -446,8 +446,8 @@ static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
 				  struct xvip_m2m_dma *start)
 {
 	struct media_graph graph;
-	struct media_entity *entity = &start->video.entity;
-	struct media_device *mdev = entity->graph_obj.mdev;
+	struct media_pad *pad = start->video.entity.pads;
+	struct media_device *mdev = start->video.entity.graph_obj.mdev;
 	unsigned int num_inputs = 0;
 	unsigned int num_outputs = 0;
 	int ret;
@@ -461,10 +461,10 @@ static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
 		return ret;
 	}
 
-	media_graph_walk_start(&graph, entity->pads);
+	media_graph_walk_start(&graph, pad);
 
-	while ((entity = media_graph_walk_next(&graph))) {
-		if (entity->function != MEDIA_ENT_F_IO_V4L)
+	while ((pad = media_graph_walk_next(&graph))) {
+		if (pad->entity->function != MEDIA_ENT_F_IO_V4L)
 			continue;
 
 		num_outputs++;

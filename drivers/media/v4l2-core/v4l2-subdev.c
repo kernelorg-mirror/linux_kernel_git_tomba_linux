@@ -1066,14 +1066,25 @@ int v4l2_subdev_link_validate(struct media_link *link)
 					GFP_KERNEL);
 
 		for (i = 0; i < routing.num_routes; ++i) {
+			int j;
 			struct v4l2_subdev_route *route = &routing.routes[i];
 
 			if (!(route->flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE))
 				continue;
 
-			if (route->source_pad == link->source->index)
-				streams[num_source_streams++] =
-					route->source_stream;
+			if (route->source_pad != link->source->index)
+				continue;
+
+			for (j = 0; j < num_source_streams; ++j) {
+				if (streams[j] == route->source_stream)
+					break;
+			}
+
+			if (j != num_source_streams)
+				continue;
+
+			streams[num_source_streams++] = route->source_stream;
+
 		}
 
 		sort(streams, num_source_streams, sizeof(u32), &cmp_u32, NULL);
@@ -1103,13 +1114,23 @@ int v4l2_subdev_link_validate(struct media_link *link)
 
 		for (i = 0; i < routing.num_routes; ++i) {
 			struct v4l2_subdev_route *route = &routing.routes[i];
+			int j;
 
 			if (!(route->flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE))
 				continue;
 
-			if (route->sink_pad == link->sink->index)
-				streams[num_sink_streams++] =
-					route->sink_stream;
+			if (route->sink_pad != link->sink->index)
+				continue;
+
+			for (j = 0; j < num_sink_streams; ++j) {
+				if (streams[j] == route->sink_stream)
+					break;
+			}
+
+			if (j != num_sink_streams)
+				continue;
+
+			streams[num_sink_streams++] = route->sink_stream;
 		}
 
 		sort(streams, num_sink_streams, sizeof(u32), &cmp_u32, NULL);

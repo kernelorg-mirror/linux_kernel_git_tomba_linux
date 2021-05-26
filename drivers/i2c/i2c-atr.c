@@ -490,6 +490,7 @@ void i2c_atr_del_adapter(struct i2c_atr *atr, u32 chan_id)
 	i2c_del_adapter(adap);
 	of_node_put(np);
 	mutex_destroy(&chan->orig_addrs_lock);
+	kfree(chan->orig_addrs);
 	kfree(chan);
 }
 EXPORT_SYMBOL_GPL(i2c_atr_del_adapter);

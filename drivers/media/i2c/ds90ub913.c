@@ -51,7 +51,6 @@ struct ub913_data {
 
 	struct v4l2_subdev	sd;
 	struct media_pad	pads[2];
-	struct v4l2_mbus_framefmt	fmts[2];
 
 	struct v4l2_async_notifier	notifier;
 
@@ -274,59 +273,6 @@ static const struct regmap_config ub913_regmap_config = {
 /*
  * V4L2
  */
-static struct v4l2_mbus_framefmt *
-ub913_get_pad_format(struct ub913_data *priv,
-			    struct v4l2_subdev_state *state,
-			    unsigned int pad, u32 which)
-{
-	if (which == V4L2_SUBDEV_FORMAT_TRY)
-		return v4l2_subdev_get_try_format(&priv->sd, state, pad);
-
-	return &priv->fmts[pad];
-}
-
-static int ub913_get_fmt(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_state *state,
-				   struct v4l2_subdev_format *format)
-{
-	struct ub913_data *priv = sd_to_ub913(sd);
-	struct v4l2_mbus_framefmt *fmt;
-
-	fmt = ub913_get_pad_format(priv, state, format->pad, format->which);
-
-	if (!fmt)
-		return -EINVAL;
-
-	format->format = *fmt;
-
-	return 0;
-}
-
-static int ub913_set_fmt(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_state *state,
-				   struct v4l2_subdev_format *format)
-{
-	struct ub913_data *priv = sd_to_ub913(sd);
-	struct v4l2_mbus_framefmt *fmt;
-
-	/* No transcoding, source and sink formats must match. */
-	if (format->pad == UB913_PAD_SOURCE)
-		return ub913_get_fmt(sd, state, format);
-
-	fmt = ub913_get_pad_format(priv, state, UB913_PAD_SINK, format->which);
-	if (!fmt)
-		return -EINVAL;
-
-	*fmt = format->format;
-
-	fmt = ub913_get_pad_format(priv, state, UB913_PAD_SOURCE, format->which);
-	if (!fmt)
-		return -EINVAL;
-
-	*fmt = format->format;
-
-	return 0;
-}
 
 static int ub913_s_stream(struct v4l2_subdev *sd, int enable)
 {
@@ -339,14 +285,8 @@ static const struct v4l2_subdev_video_ops ub913_video_ops = {
 	.s_stream = ub913_s_stream,
 };
 
-static const struct v4l2_subdev_pad_ops ub913_pad_ops = {
-	.get_fmt = ub913_get_fmt,
-	.set_fmt = ub913_set_fmt,
-};
-
 static const struct v4l2_subdev_ops ub913_subdev_ops = {
 	.video = &ub913_video_ops,
-	.pad = &ub913_pad_ops,
 };
 
 static const struct media_entity_operations ub913_entity_ops = {
@@ -489,7 +429,6 @@ static int ub913_probe(struct i2c_client *client)
 	}
 
 	v4l2_i2c_subdev_init(&priv->sd, priv->client, &ub913_subdev_ops);
-	priv->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	priv->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
 	priv->sd.entity.ops = &ub913_entity_ops;
 

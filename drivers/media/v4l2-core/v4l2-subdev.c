@@ -1039,9 +1039,9 @@ int v4l2_subdev_link_validate(struct media_link *link)
 	static const u32 default_streams[] = { 0 };
 
 	u32 num_source_streams = 0;
-	const u32 *source_streams;
+	const u32 *source_streams = NULL;
 	u32 num_sink_streams = 0;
-	const u32 *sink_streams;
+	const u32 *sink_streams = NULL;
 
 	dev_dbg(dev, "validating link \"%s\":%u -> \"%s\":%u\n",
 		link->source->entity->name, link->source->index,
@@ -1101,7 +1101,7 @@ int v4l2_subdev_link_validate(struct media_link *link)
 	ret = v4l2_subdev_get_routing(sink_subdev, NULL, &routing);
 
 	if (ret && ret != -ENOIOCTLCMD)
-		return ret;
+		goto out;
 
 	if (ret == -ENOIOCTLCMD) {
 		num_sink_streams = 1;
@@ -1144,7 +1144,8 @@ int v4l2_subdev_link_validate(struct media_link *link)
 		dev_err(dev,
 			"Sink and source stream count mismatch: %d vs %d\n",
 			num_source_streams, num_sink_streams);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
 
 	/* Validate source and sink stream formats */
@@ -1152,11 +1153,11 @@ int v4l2_subdev_link_validate(struct media_link *link)
 	for (i = 0; i < num_source_streams; ++i) {
 		struct v4l2_subdev_format sink_fmt, source_fmt;
 		u32 stream;
-		int ret;
 
 		if (source_streams[i] != sink_streams[i]) {
 			dev_err(dev, "Sink and source streams do not match\n");
-			return -EINVAL;
+			ret = -EINVAL;
+			goto out;
 		}
 
 		stream = source_streams[i];
@@ -1168,19 +1169,21 @@ int v4l2_subdev_link_validate(struct media_link *link)
 		ret = v4l2_subdev_link_validate_get_format(link->source, stream,
 							   &source_fmt);
 		if (ret < 0) {
-			dev_err(dev, "Failed to get format for \"%s\":%u:%u\n",
+			dev_dbg(dev, "Failed to get format for \"%s\":%u:%u (but that's ok)\n",
 				link->source->entity->name, link->source->index,
 				stream);
-			return ret;
+			ret = 0;
+			continue;
 		}
 
 		ret = v4l2_subdev_link_validate_get_format(link->sink, stream,
 							   &sink_fmt);
 		if (ret < 0) {
-			dev_err(dev, "Failed to get format for \"%s\":%u:%u\n",
+			dev_dbg(dev, "Failed to get format for \"%s\":%u:%u (but that's ok)\n",
 				link->sink->entity->name, link->sink->index,
 				stream);
-			return ret;
+			ret = 0;
+			continue;
 		}
 
 		/* TODO: add stream number to link_validate() */
@@ -1190,22 +1193,23 @@ int v4l2_subdev_link_validate(struct media_link *link)
 			continue;
 
 		if (ret != -ENOIOCTLCMD)
-			return ret;
+			goto out;
 
 		ret = v4l2_subdev_link_validate_default(sink_subdev, link,
 							&source_fmt, &sink_fmt);
 
 		if (ret)
-			return ret;
+			goto out;
 	}
 
+out:
 	if (source_streams != default_streams)
 		kfree(source_streams);
 
 	if (sink_streams != default_streams)
 		kfree(sink_streams);
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL_GPL(v4l2_subdev_link_validate);
 

@@ -898,6 +898,8 @@ struct v4l2_subdev_platform_data {
  * @subdev_notifier: A sub-device notifier implicitly registered for the sub-
  *		     device using v4l2_async_register_subdev_sensor().
  * @pdata: common part of subdevice platform data
+ * @state: active state for the subdev (NULL for subdevs tracking the state
+ * 	   internally)
  *
  * Each instance of a subdev driver should create this struct, either
  * stand-alone or embedded in a larger struct.
@@ -929,6 +931,7 @@ struct v4l2_subdev {
 	struct v4l2_async_notifier *notifier;
 	struct v4l2_async_notifier *subdev_notifier;
 	struct v4l2_subdev_platform_data *pdata;
+	struct v4l2_subdev_state *state;
 };
 
 
@@ -1216,5 +1219,38 @@ extern const struct v4l2_subdev_ops v4l2_subdev_call_wrappers;
  */
 void v4l2_subdev_notify_event(struct v4l2_subdev *sd,
 			      const struct v4l2_event *ev);
+
+/**
+ * v4l2_subdev_alloc_state() - Allocate active subdev state for subdevice
+ * @sd: The subdev for which the state is allocated
+ *
+ * This will allocate a subdev state and store it to
+ * &struct v4l2_subdev->state.
+ *
+ * Must call v4l2_subdev_free_state() when the state is no longer needed.
+ */
+int v4l2_subdev_alloc_state(struct v4l2_subdev *sd);
+
+/**
+ * v4l2_subdev_free_state() - Free the active subdev state for subdevice
+ * @sd: The subdevice
+ *
+ * This will free the subdev's state and set
+ * &struct v4l2_subdev->state to NULL.
+ */
+void v4l2_subdev_free_state(struct v4l2_subdev *sd);
+
+/**
+ * v4l2_subdev_get_active_state() - Return the active subdev state for subdevice
+ * @sd: The subdevice
+ *
+ * Return the active state for the subdevice, or NULL if the subdev does not
+ * support active state.
+ */
+static inline struct v4l2_subdev_state *
+v4l2_subdev_get_active_state(struct v4l2_subdev *sd)
+{
+	return sd->state;
+}
 
 #endif

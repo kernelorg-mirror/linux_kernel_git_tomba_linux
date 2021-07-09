@@ -943,3 +943,24 @@ void v4l2_subdev_notify_event(struct v4l2_subdev *sd,
 	v4l2_subdev_notify(sd, V4L2_DEVICE_NOTIFY_EVENT, (void *)ev);
 }
 EXPORT_SYMBOL_GPL(v4l2_subdev_notify_event);
+
+int v4l2_subdev_alloc_state(struct v4l2_subdev *sd)
+{
+	struct v4l2_subdev_state *state;
+
+	state = v4l2_alloc_subdev_state(sd);
+	if (IS_ERR(state))
+		return PTR_ERR(state);
+
+	sd->state = state;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(v4l2_subdev_alloc_state);
+
+void v4l2_subdev_free_state(struct v4l2_subdev *sd)
+{
+	v4l2_free_subdev_state(sd->state);
+	sd->state = NULL;
+}
+EXPORT_SYMBOL_GPL(v4l2_subdev_free_state);

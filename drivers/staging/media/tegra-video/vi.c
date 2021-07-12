@@ -507,7 +507,7 @@ static int __tegra_channel_try_format(struct tegra_vi_channel *chan,
 	if (!subdev)
 		return -ENODEV;
 
-	sd_state = v4l2_alloc_subdev_state(subdev);
+	sd_state = v4l2_alloc_subdev_state(subdev, V4L2_SUBDEV_FORMAT_ACTIVE);
 	if (IS_ERR(sd_state))
 		return PTR_ERR(sd_state);
 	/*

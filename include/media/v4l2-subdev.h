@@ -626,6 +626,7 @@ struct v4l2_subdev_pad_config {
 /**
  * struct v4l2_subdev_state - Used for storing subdev state information.
  *
+ * @which: state type (from enum v4l2_subdev_format_whence)
  * @pads: &struct v4l2_subdev_pad_config array
  *
  * This structure only needs to be passed to the pad op if the 'which' field
@@ -633,6 +634,7 @@ struct v4l2_subdev_pad_config {
  * %V4L2_SUBDEV_FORMAT_ACTIVE it is safe to pass %NULL.
  */
 struct v4l2_subdev_state {
+	u32 which;
 	struct v4l2_subdev_pad_config *pads;
 };
 
@@ -1112,10 +1114,13 @@ int v4l2_subdev_link_validate(struct media_link *link);
  * v4l2_alloc_subdev_state - allocate v4l2_subdev_state
  *
  * @sd: pointer to &struct v4l2_subdev for which the state is being allocated.
+ * @which: configuration type for the state (from enum v4l2_subdev_format_whence)
  *
  * Must call v4l2_free_subdev_state() when state is no longer needed.
  */
-struct v4l2_subdev_state *v4l2_alloc_subdev_state(struct v4l2_subdev *sd);
+struct v4l2_subdev_state *
+v4l2_alloc_subdev_state(struct v4l2_subdev *sd,
+			enum v4l2_subdev_format_whence which);
 
 /**
  * v4l2_free_subdev_state - free a v4l2_subdev_state

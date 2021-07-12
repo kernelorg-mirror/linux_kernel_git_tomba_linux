@@ -28,7 +28,7 @@ static int subdev_fh_init(struct v4l2_subdev_fh *fh, struct v4l2_subdev *sd)
 {
 	struct v4l2_subdev_state *state;
 
-	state = v4l2_alloc_subdev_state(sd);
+	state = v4l2_alloc_subdev_state(sd, V4L2_SUBDEV_FORMAT_TRY);
 	if (IS_ERR(state))
 		return PTR_ERR(state);
 
@@ -860,7 +860,9 @@ int v4l2_subdev_link_validate(struct media_link *link)
 }
 EXPORT_SYMBOL_GPL(v4l2_subdev_link_validate);
 
-struct v4l2_subdev_state *v4l2_alloc_subdev_state(struct v4l2_subdev *sd)
+struct v4l2_subdev_state *
+v4l2_alloc_subdev_state(struct v4l2_subdev *sd,
+			enum v4l2_subdev_format_whence which)
 {
 	struct v4l2_subdev_state *state;
 	int ret;
@@ -868,6 +870,8 @@ struct v4l2_subdev_state *v4l2_alloc_subdev_state(struct v4l2_subdev *sd)
 	state = kzalloc(sizeof(*state), GFP_KERNEL);
 	if (!state)
 		return ERR_PTR(-ENOMEM);
+
+	state->which = which;
 
 	if (sd->entity.num_pads) {
 		state->pads = kvmalloc_array(sd->entity.num_pads,
@@ -938,7 +942,7 @@ int v4l2_subdev_alloc_state(struct v4l2_subdev *sd)
 {
 	struct v4l2_subdev_state *state;
 
-	state = v4l2_alloc_subdev_state(sd);
+	state = v4l2_alloc_subdev_state(sd, V4L2_SUBDEV_FORMAT_ACTIVE);
 	if (IS_ERR(state))
 		return PTR_ERR(state);
 

@@ -252,7 +252,7 @@ static int rvin_try_format(struct rvin_dev *vin, u32 which,
 	u32 width, height;
 	int ret;
 
-	sd_state = v4l2_alloc_subdev_state(sd);
+	sd_state = v4l2_alloc_subdev_state(sd, V4L2_SUBDEV_FORMAT_ACTIVE);
 	if (IS_ERR(sd_state))
 		return PTR_ERR(sd_state);
 

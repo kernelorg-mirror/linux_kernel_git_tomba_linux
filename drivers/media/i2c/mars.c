@@ -583,6 +583,9 @@ static int mars_initialize(struct mars_device *dev)
 	int ret;
 	unsigned int chip_version = 0;
 
+	/* wait at least 700ms */
+	usleep_range(700000, 1000000);
+
 	/* Verify communication with the MAX96705: ping to wakeup. */
 	dev->serializer.client->addr = MAX96705_DEFAULT_ADDR;
 	i2c_smbus_read_byte(dev->serializer.client);

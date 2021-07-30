@@ -646,6 +646,9 @@ static int mars_initialize(struct mars_device *dev)
 	if (ret)
 		return ret;
 
+	/* wait at least 200ms */
+	usleep_range(200000, 400000);
+
 	ret = sensor_set_regs(dev, ar0231_config_part1b,
 			 ARRAY_SIZE(ar0231_config_part1b));
 	if (ret)
@@ -656,10 +659,16 @@ static int mars_initialize(struct mars_device *dev)
 	if (ret)
 		return ret;
 
+	/* wait at least 1s */
+	usleep_range(1000000, 1200000);
+
 	ret = sensor_set_regs(dev, ar0231_config_part6_exposure,
 			 ARRAY_SIZE(ar0231_config_part6_exposure));
 	if (ret)
 		return ret;
+
+	/* wait at least 1s */
+	usleep_range(1000000, 1200000);
 
 	ret = sensor_set_regs(dev, ar0231_config_part7_gains,
 			 ARRAY_SIZE(ar0231_config_part7_gains));

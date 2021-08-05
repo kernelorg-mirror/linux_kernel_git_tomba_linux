@@ -295,6 +295,10 @@ int max96705_configure_gmsl_link(struct max96705_device *dev)
 	if (ret < 0)
 		return ret;
 
+	// align at HS rising edge
+	ret = max96705_write(dev, 0x67, 0xC4);
+	if (ret < 0)
+		return ret;
 
 	return 0;
 }

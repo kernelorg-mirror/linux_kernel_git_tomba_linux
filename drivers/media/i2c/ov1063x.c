@@ -465,7 +465,6 @@ struct ov1063x_priv {
 	bool				streaming;
 	struct v4l2_rect		analog_crop;
 	struct v4l2_rect		digital_crop;
-	struct v4l2_mbus_framefmt	format;
 
 	unsigned int			fps_numerator;
 	unsigned int			fps_denominator;
@@ -774,13 +773,22 @@ static int ov1063x_isp_reset(struct ov1063x_priv *priv, bool reset)
 
 static int ov1063x_configure(struct ov1063x_priv *priv)
 {
-	struct v4l2_mbus_framefmt *format = &priv->format;
+	struct v4l2_mbus_framefmt *format;
 	struct ov1063x_pll_config pll_cfg;
 	unsigned int width_pre_subsample;
+	struct v4l2_subdev_state *state;
 	unsigned int nr_isp_pixels;
 	unsigned int hts, vts;
 	u32 val;
 	int ret;
+
+	state = v4l2_subdev_lock_active_state(&priv->subdev);
+
+	format = v4l2_state_get_stream_format(state, 0, 0);
+	if (!format) {
+		ret = -EINVAL;
+		goto err;
+	}
 
 	/* Minimum values for HTS anv VTS. */
 	hts = priv->analog_crop.width + 200;
@@ -793,8 +801,10 @@ static int ov1063x_configure(struct ov1063x_priv *priv)
 	ret = ov1063x_pll_setup(priv->clk_rate, &hts, vts,
 				priv->fps_numerator, priv->fps_denominator,
 				&pll_cfg);
-	if (ret < 0)
-		return -EINVAL;
+	if (ret < 0) {
+		ret = -EINVAL;
+		goto err;
+	}
 
 	vts = pll_cfg.clk_out
 	    / (hts * 2 * priv->fps_numerator / priv->fps_denominator);
@@ -880,7 +890,7 @@ static int ov1063x_configure(struct ov1063x_priv *priv)
 	}
 
 	if (ret < 0)
-		return ret;
+		goto err;
 
 	if (format->height <= 400)
 		ret = ov1063x_write_array(priv, ov1063x_regs_vert_sub2,
@@ -950,10 +960,16 @@ static int ov1063x_configure(struct ov1063x_priv *priv)
 	ov1063x_write(priv, OV1063X_DVP_MOD_SEL, 0, &ret);
 
 	if (ret)
-		return ret;
+		goto err;
+
+	v4l2_subdev_unlock_state(state);
 
 	/* Take the ISP out of reset. */
 	return ov1063x_isp_reset(priv, false);
+
+err:
+	v4l2_subdev_unlock_state(state);
+	return ret;
 }
 
 /* -----------------------------------------------------------------------------
@@ -1140,36 +1156,67 @@ done:
 	return ret;
 }
 
-static struct v4l2_mbus_framefmt *
-__ov1063x_get_pad_format(struct ov1063x_priv *priv,
-			 struct v4l2_subdev_state *state,
-			 unsigned int pad, u32 which)
+static void ov1063x_init_formats(struct v4l2_subdev_state *state)
 {
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_format(&priv->subdev, state, pad);
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		return &priv->format;
-	default:
-		return NULL;
-	}
-}
-
-static int ov1063x_init_cfg(struct v4l2_subdev *sd,
-			    struct v4l2_subdev_state *state)
-{
-	u32 which = state ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
-	struct ov1063x_priv *priv = to_ov1063x(sd);
 	struct v4l2_mbus_framefmt *format;
 
-	format = __ov1063x_get_pad_format(priv, state, 0, which);
+	format = v4l2_state_get_stream_format(state, 0, 0);
 	format->code = ov1063x_mbus_formats[0];
 	format->width = ov1063x_framesizes[0].width;
 	format->height = ov1063x_framesizes[0].height;
 	format->field = V4L2_FIELD_NONE;
 	format->colorspace = V4L2_COLORSPACE_SMPTE170M;
+}
 
-	if (which == V4L2_SUBDEV_FORMAT_ACTIVE) {
+static int _ov10635_set_routing(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *state)
+{
+	struct v4l2_subdev_route routes[] = {
+		{
+			.source_pad = 0,
+			.source_stream = 0,
+			.flags = V4L2_SUBDEV_ROUTE_FL_IMMUTABLE |
+				 V4L2_SUBDEV_ROUTE_FL_SOURCE |
+				 V4L2_SUBDEV_ROUTE_FL_ACTIVE,
+		},
+	};
+
+	struct v4l2_subdev_krouting routing = {
+		.num_routes = ARRAY_SIZE(routes),
+		.routes = routes,
+	};
+
+	int ret;
+
+	ret = v4l2_subdev_set_routing(sd, state, &routing);
+	if (ret)
+		return ret;
+
+	ov1063x_init_formats(state);
+
+	return 0;
+}
+
+static int ov1063x_init_cfg(struct v4l2_subdev *sd,
+			    struct v4l2_subdev_state *state)
+{
+	struct ov1063x_priv *priv = to_ov1063x(sd);
+	int ret;
+
+	v4l2_subdev_lock_state(state);
+
+	ret = _ov10635_set_routing(sd, state);
+	if (ret) {
+		v4l2_subdev_unlock_state(state);
+		return ret;
+	}
+
+	// XXX this is done also for TRY. Move somewhere else.
+	if (true /*which == V4L2_SUBDEV_FORMAT_ACTIVE*/) {
+		struct v4l2_mbus_framefmt *format;
+
+		format = v4l2_state_get_stream_format(state, 0, 0);
+
 		/*
 		 * This assumes that ov1063x_mbus_formats[0] doesn't
 		 * sub-sample.
@@ -1187,6 +1234,8 @@ static int ov1063x_init_cfg(struct v4l2_subdev *sd,
 					    priv->digital_crop.width) / 2) & ~1;
 		priv->digital_crop.top = 0;
 	}
+
+	v4l2_subdev_unlock_state(state);
 
 	return 0;
 }
@@ -1228,18 +1277,6 @@ static int ov1063x_enum_frame_sizes(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int ov1063x_get_fmt(struct v4l2_subdev *sd,
-			   struct v4l2_subdev_state *state,
-			   struct v4l2_subdev_format *fmt)
-{
-	struct ov1063x_priv *priv = to_ov1063x(sd);
-
-	fmt->format = *__ov1063x_get_pad_format(priv, state, fmt->pad,
-						fmt->which);
-
-	return 0;
-}
-
 static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_state *state,
 			   struct v4l2_subdev_format *fmt)
@@ -1250,6 +1287,9 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 	unsigned int i;
 	u32 code;
 	int ret = 0;
+
+	if (fmt->pad != 0 || fmt->stream != 0)
+		return -EINVAL;
 
 	/*
 	 * Validate the media bus code, defaulting to the first one if the
@@ -1271,10 +1311,12 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 				       width, height, fmt->format.width,
 				       fmt->format.height);
 
-	/* Update the stored format and return it. */
-	format = __ov1063x_get_pad_format(priv, state, fmt->pad, fmt->which);
-
 	mutex_lock(priv->hdl.lock);
+
+	v4l2_subdev_lock_state(state);
+
+	/* Update the stored format and return it. */
+	format = v4l2_state_get_stream_format(state, fmt->pad, fmt->stream);
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE && priv->streaming) {
 		ret = -EBUSY;
@@ -1336,7 +1378,62 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 	fmt->format = *format;
 
 done:
+	v4l2_subdev_unlock_state(state);
 	mutex_unlock(priv->hdl.lock);
+
+	return ret;
+}
+
+static int ov1063x_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
+				  struct v4l2_mbus_frame_desc *fd)
+{
+	struct v4l2_subdev_state *state;
+	struct v4l2_mbus_framefmt *fmt;
+	u32 bpp;
+
+	if (pad != 0)
+		return -EINVAL;
+
+	state = v4l2_subdev_lock_active_state(sd);
+
+	fmt = v4l2_state_get_stream_format(state, 0, 0);
+
+	memset(fd, 0, sizeof(*fd));
+
+	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_PARALLEL;
+
+	/* pixel stream */
+
+	bpp = 16;
+
+	fd->entry[fd->num_entries].stream = 0;
+
+	fd->entry[fd->num_entries].flags = V4L2_MBUS_FRAME_DESC_FL_LEN_MAX;
+	fd->entry[fd->num_entries].length = fmt->width * fmt->height * bpp / 8;
+	fd->entry[fd->num_entries].pixelcode = fmt->code;
+
+	fd->num_entries++;
+
+	v4l2_subdev_unlock_state(state);
+
+	return 0;
+}
+
+static int ov1063x_set_routing(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state,
+			       enum v4l2_subdev_format_whence which,
+			       struct v4l2_subdev_krouting *routing)
+{
+	int ret;
+
+	if (routing->num_routes == 0 || routing->num_routes > 1)
+		return -EINVAL;
+
+	v4l2_subdev_lock_state(state);
+
+	ret = _ov10635_set_routing(sd, state);
+
+	v4l2_subdev_unlock_state(state);
 
 	return ret;
 }
@@ -1355,8 +1452,10 @@ static const struct v4l2_subdev_pad_ops ov1063x_subdev_pad_ops = {
 	.init_cfg		= ov1063x_init_cfg,
 	.enum_mbus_code		= ov1063x_enum_mbus_code,
 	.enum_frame_size	= ov1063x_enum_frame_sizes,
-	.get_fmt		= ov1063x_get_fmt,
+	.get_fmt		= v4l2_subdev_get_fmt,
 	.set_fmt		= ov1063x_set_fmt,
+	.set_routing		= ov1063x_set_routing,
+	.get_frame_desc		= ov1063x_get_frame_desc,
 };
 
 static const struct v4l2_subdev_ops ov1063x_subdev_ops = {
@@ -1569,7 +1668,8 @@ static int ov1063x_probe(struct i2c_client *client)
 	v4l2_i2c_subdev_set_name(sd, client, priv->name, NULL);
 
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
-		     V4L2_SUBDEV_FL_HAS_EVENTS;
+		     V4L2_SUBDEV_FL_HAS_EVENTS |
+		     V4L2_SUBDEV_FL_MULTIPLEXED;
 
 	v4l2_ctrl_handler_init(&priv->hdl, 3);
 	v4l2_ctrl_new_std(&priv->hdl, &ov1063x_ctrl_ops,
@@ -1591,7 +1691,6 @@ static int ov1063x_probe(struct i2c_client *client)
 	/* Default framerate */
 	priv->fps_numerator = 30;
 	priv->fps_denominator = 1;
-	ov1063x_init_cfg(&priv->subdev, NULL);
 
 	/* Initialize the media entity. */
 	priv->pad.flags = MEDIA_PAD_FL_SOURCE;
@@ -1599,6 +1698,10 @@ static int ov1063x_probe(struct i2c_client *client)
 	ret = media_entity_pads_init(&sd->entity, 1, &priv->pad);
 	if (ret < 0)
 		goto err_ctrls;
+
+	ret = v4l2_subdev_init_finalize(sd);
+	if (ret)
+		return ret;
 
 	/*
 	 * Enable runtime PM. As the device has been powered manually, mark it
@@ -1661,6 +1764,9 @@ static int ov1063x_remove(struct i2c_client *client)
 
 	v4l2_ctrl_handler_free(&priv->hdl);
 	v4l2_async_unregister_subdev(&priv->subdev);
+
+	v4l2_subdev_cleanup(&priv->subdev);
+
 	media_entity_cleanup(&priv->subdev.entity);
 
 	/*

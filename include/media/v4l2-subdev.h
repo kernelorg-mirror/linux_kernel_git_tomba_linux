@@ -1282,4 +1282,45 @@ void v4l2_subdev_lock_state(struct v4l2_subdev_state *state);
  */
 void v4l2_subdev_unlock_state(struct v4l2_subdev_state *state);
 
+/**
+ * v4l2_subdev_validate_state() - Gets the TRY or ACTIVE subdev state
+ * @sd: subdevice
+ * @state: subdevice state as passed to the subdev op
+ *
+ * Subdev ops used to be sometimes called with NULL as the state for ACTIVE
+ * case. Even if the v4l2 core now passes proper state for both TRY and
+ * ACTIVE cases, a subdev driver may call an op in another subdev driver,
+ * passing NULL.
+ *
+ * This function can be used as a helper to get the state also for the ACTIVE
+ * case. The subdev driver that supports ACTIVE state can use this function
+ * as the first thing in its ops, ensuring that the state variable contains
+ * either the TRY or ACTIVE state.
+ */
+static inline struct v4l2_subdev_state *
+v4l2_subdev_validate_state(struct v4l2_subdev *sd,
+			   struct v4l2_subdev_state *state)
+{
+	return state ? state : sd->state;
+}
+
+/**
+ * v4l2_subdev_validate_and_lock_state() - Gets locked TRY or ACTIVE subdev state
+ * @sd: subdevice
+ * @state: subdevice state as passed to the subdev op
+ *
+ * This is a helper function which does the same as v4l2_subdev_validate_state
+ * () except that it also locks the state.
+ */
+static inline struct v4l2_subdev_state *
+v4l2_subdev_validate_and_lock_state(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *state)
+{
+	state = state ? state : sd->state;
+
+	v4l2_subdev_lock_state(state);
+
+	return state;
+}
+
 #endif

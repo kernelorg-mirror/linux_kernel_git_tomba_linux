@@ -26,9 +26,11 @@
 #if defined(CONFIG_VIDEO_V4L2_SUBDEV_API)
 static int subdev_fh_init(struct v4l2_subdev_fh *fh, struct v4l2_subdev *sd)
 {
+	static struct lock_class_key __key;
 	struct v4l2_subdev_state *state;
 
-	state = v4l2_alloc_subdev_state(sd, V4L2_SUBDEV_FORMAT_TRY);
+	state = __v4l2_alloc_subdev_state(sd, V4L2_SUBDEV_FORMAT_TRY,
+					  "v4l2_subdev_fh->state", &__key);
 	if (IS_ERR(state))
 		return PTR_ERR(state);
 
@@ -941,8 +943,10 @@ int v4l2_subdev_link_validate(struct media_link *link)
 EXPORT_SYMBOL_GPL(v4l2_subdev_link_validate);
 
 struct v4l2_subdev_state *
-v4l2_alloc_subdev_state(struct v4l2_subdev *sd,
-			enum v4l2_subdev_format_whence which)
+__v4l2_alloc_subdev_state(struct v4l2_subdev *sd,
+			  enum v4l2_subdev_format_whence which,
+			  const char *lock_name,
+			  struct lock_class_key *lock_key)
 {
 	struct v4l2_subdev_state *state;
 	int ret;
@@ -950,6 +954,8 @@ v4l2_alloc_subdev_state(struct v4l2_subdev *sd,
 	state = kzalloc(sizeof(*state), GFP_KERNEL);
 	if (!state)
 		return ERR_PTR(-ENOMEM);
+
+	__mutex_init(&state->lock, lock_name, lock_key);
 
 	state->which = which;
 
@@ -977,12 +983,14 @@ err:
 
 	return ERR_PTR(ret);
 }
-EXPORT_SYMBOL_GPL(v4l2_alloc_subdev_state);
+EXPORT_SYMBOL_GPL(__v4l2_alloc_subdev_state);
 
 void v4l2_free_subdev_state(struct v4l2_subdev_state *state)
 {
 	if (!state)
 		return;
+
+	mutex_destroy(&state->lock);
 
 	kvfree(state->pads);
 	kfree(state);
@@ -1018,11 +1026,12 @@ void v4l2_subdev_notify_event(struct v4l2_subdev *sd,
 }
 EXPORT_SYMBOL_GPL(v4l2_subdev_notify_event);
 
-int v4l2_subdev_alloc_state(struct v4l2_subdev *sd)
+int __v4l2_subdev_alloc_state(struct v4l2_subdev *sd, const char *name,
+			      struct lock_class_key *key)
 {
 	struct v4l2_subdev_state *state;
 
-	state = v4l2_alloc_subdev_state(sd, V4L2_SUBDEV_FORMAT_ACTIVE);
+	state = __v4l2_alloc_subdev_state(sd, V4L2_SUBDEV_FORMAT_ACTIVE, name, key);
 	if (IS_ERR(state))
 		return PTR_ERR(state);
 
@@ -1030,7 +1039,7 @@ int v4l2_subdev_alloc_state(struct v4l2_subdev *sd)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(v4l2_subdev_alloc_state);
+EXPORT_SYMBOL_GPL(__v4l2_subdev_alloc_state);
 
 void v4l2_subdev_free_state(struct v4l2_subdev *sd)
 {
@@ -1038,3 +1047,23 @@ void v4l2_subdev_free_state(struct v4l2_subdev *sd)
 	sd->state = NULL;
 }
 EXPORT_SYMBOL_GPL(v4l2_subdev_free_state);
+
+struct v4l2_subdev_state *v4l2_subdev_lock_active_state(struct v4l2_subdev *sd)
+{
+	mutex_lock(&sd->state->lock);
+
+	return sd->state;
+}
+EXPORT_SYMBOL_GPL(v4l2_subdev_lock_active_state);
+
+void v4l2_subdev_lock_state(struct v4l2_subdev_state *state)
+{
+	mutex_lock(&state->lock);
+}
+EXPORT_SYMBOL_GPL(v4l2_subdev_lock_state);
+
+void v4l2_subdev_unlock_state(struct v4l2_subdev_state *state)
+{
+	mutex_unlock(&state->lock);
+}
+EXPORT_SYMBOL_GPL(v4l2_subdev_unlock_state);

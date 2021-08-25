@@ -655,6 +655,7 @@ struct v4l2_subdev_pad_config {
 /**
  * struct v4l2_subdev_state - Used for storing subdev state information.
  *
+ * @lock: mutex for the state
  * @which: state type (from enum v4l2_subdev_format_whence)
  * @pads: &struct v4l2_subdev_pad_config array
  *
@@ -663,6 +664,7 @@ struct v4l2_subdev_pad_config {
  * %V4L2_SUBDEV_FORMAT_ACTIVE it is safe to pass %NULL.
  */
 struct v4l2_subdev_state {
+	struct mutex lock;
 	u32 which;
 	struct v4l2_subdev_pad_config *pads;
 };
@@ -1147,9 +1149,18 @@ int v4l2_subdev_link_validate(struct media_link *link);
  *
  * Must call v4l2_free_subdev_state() when state is no longer needed.
  */
+#define v4l2_alloc_subdev_state(sd, which)                                     \
+	({                                                                     \
+		static struct lock_class_key __key;                            \
+		const char *name = KBUILD_BASENAME                             \
+			":" __stringify(__LINE__) ":sd->state->lock";          \
+		__v4l2_alloc_subdev_state(sd, which, name, &__key);            \
+	})
+
 struct v4l2_subdev_state *
-v4l2_alloc_subdev_state(struct v4l2_subdev *sd,
-			enum v4l2_subdev_format_whence which);
+__v4l2_alloc_subdev_state(struct v4l2_subdev *sd,
+			  enum v4l2_subdev_format_whence which,
+			  const char *lock_name, struct lock_class_key *key);
 
 /**
  * v4l2_free_subdev_state - free a v4l2_subdev_state
@@ -1234,7 +1245,16 @@ void v4l2_subdev_notify_event(struct v4l2_subdev *sd,
  *
  * Must call v4l2_subdev_free_state() when the state is no longer needed.
  */
-int v4l2_subdev_alloc_state(struct v4l2_subdev *sd);
+#define v4l2_subdev_alloc_state(sd)                                            \
+	({                                                                     \
+		static struct lock_class_key __key;                            \
+		const char *name = KBUILD_BASENAME                             \
+			":" __stringify(__LINE__) ":sd->state->lock";          \
+		__v4l2_subdev_alloc_state(sd, name, &__key);                   \
+	})
+
+int __v4l2_subdev_alloc_state(struct v4l2_subdev *sd, const char *name,
+			      struct lock_class_key *key);
 
 /**
  * v4l2_subdev_free_state() - Free the active subdev state for subdevice
@@ -1257,5 +1277,34 @@ v4l2_subdev_get_active_state(struct v4l2_subdev *sd)
 {
 	return sd->state;
 }
+
+/**
+ * v4l2_subdev_lock_active_state() - Lock and return the active subdev state for subdevice
+ * @sd: The subdevice
+ *
+ * Return the locked active state for the subdevice, or NULL if the subdev
+ * does not support active state.
+ *
+ * Must be unlocked with v4l2_subdev_unlock_state() after use.
+ */
+struct v4l2_subdev_state *v4l2_subdev_lock_active_state(struct v4l2_subdev *sd);
+
+/**
+ * v4l2_subdev_lock_state() - Lock the subdev state
+ * @state: The subdevice state
+ *
+ * Lock the given subdev state.
+ *
+ * Must be unlocked with v4l2_subdev_unlock_state() after use.
+ */
+void v4l2_subdev_lock_state(struct v4l2_subdev_state *state);
+
+/**
+ * v4l2_subdev_unlock_state() - Unlock the subdev state
+ * @state: The subdevice state
+ *
+ * Unlock the given subdev state.
+ */
+void v4l2_subdev_unlock_state(struct v4l2_subdev_state *state);
 
 #endif

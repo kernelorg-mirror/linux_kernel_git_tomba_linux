@@ -491,6 +491,31 @@ The :c:func:`v4l2_i2c_new_subdev` function will call
 :c:type:`i2c_board_info` structure using the ``client_type`` and the
 ``addr`` to fill it.
 
+Centrally managed subdev active state
+-------------------------------------
+
+Traditionally V4L2 subdev drivers maintained internal state for the active
+configuration for the subdev. This is often implemented as an array of struct
+v4l2_mbus_framefmt, on entry for each pad.
+
+In addition to the active configuration, each subdev filehandle has contained
+an array of struct v4l2_subdev_pad_config, managed by V4L2 core, which
+contains the TRY configuration.
+
+To simplify the subdev drivers the V4L2 subdev API now optionally supports a
+centrally managed active configuration. A subdev driver must use
+v4l2_subdev_alloc_state() to initialize the active state between calls to
+media_entity_pads_init() and v4l2_*_register_subdev().
+
+The active state must be locked before access, and can be done with e.g.
+v4l2_subdev_lock_state() or v4l2_subdev_lock_active_state().
+
+The V4L2 core will pass either the TRY or ACTIVE state to various subdev ops.
+Unfortunately all the subdev drivers do not comply with this yet, and may
+pass NULL for the ACTIVE case, so the called subdev ops must also handle the
+NULL case. This can be easily managed by the helpers
+v4l2_subdev_validate_state() or v4l2_subdev_validate_and_lock_state().
+
 V4L2 sub-device functions and data structures
 ---------------------------------------------
 

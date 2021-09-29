@@ -2024,14 +2024,15 @@ static int ub960_v4l2_notifier_register(struct ub960_data *priv)
 
 	for (i = 0; i < priv->hw_data->num_rxports; ++i) {
 		struct ub960_rxport *rxport = priv->rxports[i];
-		struct ub960_asd *asd;
+		struct v4l2_async_subdev *asd;
+		struct ub960_asd *ubasd;
 
 		if (!rxport || !rxport->locked)
 			continue;
 
 		asd = v4l2_async_notifier_add_fwnode_subdev(&priv->notifier,
 							    rxport->fwnode,
-							    struct ub960_asd);
+							    sizeof(*ubasd));
 		if (IS_ERR(asd)) {
 			dev_err(dev, "Failed to add subdev for source %u: %ld",
 				i, PTR_ERR(asd));
@@ -2039,7 +2040,8 @@ static int ub960_v4l2_notifier_register(struct ub960_data *priv)
 			return PTR_ERR(asd);
 		}
 
-		asd->rxport = rxport;
+		ubasd = to_ub960_asd(asd);
+		ubasd->rxport = rxport;
 	}
 
 	priv->notifier.ops = &ub960_notify_ops;

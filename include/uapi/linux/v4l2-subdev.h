@@ -206,13 +206,13 @@ struct v4l2_subdev_capability {
  * Is the route active? An active route will start when streaming is enabled
  * on a video node.
  */
-#define V4L2_SUBDEV_ROUTE_FL_ACTIVE		(1 << 0)
+#define V4L2_SUBDEV_ROUTE_FL_ACTIVE		_BITUL(0)
 
 /*
  * Is the route immutable, i.e. can it be activated and inactivated?
  * Set by the driver.
  */
-#define V4L2_SUBDEV_ROUTE_FL_IMMUTABLE		(1 << 1)
+#define V4L2_SUBDEV_ROUTE_FL_IMMUTABLE		_BITUL(1)
 
 /*
  * Is the route a source endpoint? A source endpoint route refers to a stream
@@ -221,7 +221,7 @@ struct v4l2_subdev_capability {
  * fields are unused.
  * Set by the driver.
  */
-#define V4L2_SUBDEV_ROUTE_FL_SOURCE		(1 << 2)
+#define V4L2_SUBDEV_ROUTE_FL_SOURCE		_BITUL(2)
 
 /**
  * struct v4l2_subdev_route - A route inside a subdev

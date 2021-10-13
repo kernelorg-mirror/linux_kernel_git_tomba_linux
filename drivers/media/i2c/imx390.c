@@ -233,10 +233,20 @@ static void imx390_init_formats(struct v4l2_subdev_state *state)
 	format->height = imx390_framesizes[0].height;
 	format->field = V4L2_FIELD_NONE;
 	format->colorspace = V4L2_COLORSPACE_SMPTE170M;
+
+	if (state->routing.routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE) {
+		format = v4l2_subdev_state_get_stream_format(state, 0, 1);
+		format->code = MEDIA_BUS_FMT_METADATA_16;
+		format->width = imx390_framesizes[0].width;
+		format->height = IMX390_METADATA_BEFORE_HEIGHT;
+		format->field = V4L2_FIELD_NONE;
+		format->colorspace = V4L2_COLORSPACE_DEFAULT;
+	}
 }
 
 static int _imx390_set_routing(struct v4l2_subdev *sd,
-			       struct v4l2_subdev_state *state)
+			       struct v4l2_subdev_state *state,
+			       bool enable_embedded_data)
 {
 	struct v4l2_subdev_route routes[] = {
 		{
@@ -249,8 +259,7 @@ static int _imx390_set_routing(struct v4l2_subdev *sd,
 		{
 			.source_pad = 0,
 			.source_stream = 1,
-			.flags = V4L2_SUBDEV_ROUTE_FL_IMMUTABLE |
-				 V4L2_SUBDEV_ROUTE_FL_SOURCE,
+			.flags = V4L2_SUBDEV_ROUTE_FL_SOURCE,
 		}
 	};
 
@@ -260,6 +269,9 @@ static int _imx390_set_routing(struct v4l2_subdev *sd,
 	};
 
 	int ret;
+
+	if (enable_embedded_data)
+		routes[1].flags |= V4L2_SUBDEV_ROUTE_FL_ACTIVE;
 
 	ret = v4l2_subdev_set_routing(sd, state, &routing);
 	if (ret)
@@ -275,7 +287,7 @@ static int imx390_init_cfg(struct v4l2_subdev *sd,
 {
 	int ret;
 
-	ret = _imx390_set_routing(sd, state);
+	ret = _imx390_set_routing(sd, state, false);
 
 	return ret;
 }
@@ -330,6 +342,10 @@ static int imx390_set_fmt(struct v4l2_subdev *sd,
 	if (fmt->pad != 0)
 		return -EINVAL;
 
+	/* metadata stream */
+	if (fmt->stream == 1)
+		return v4l2_subdev_get_fmt(sd, state, fmt);
+
 	if (fmt->stream != 0)
 		return -EINVAL;
 
@@ -364,6 +380,11 @@ static int imx390_set_fmt(struct v4l2_subdev *sd,
 	format->height = fsize->height;
 
 	fmt->format = *format;
+
+	/* update metadata width */
+	format = v4l2_subdev_state_get_stream_format(state, 0, 1);
+	if (format)
+		format->width = fmt->format.width;
 
 	return 0;
 }
@@ -405,6 +426,21 @@ static int imx390_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 
 	fd->num_entries++;
 
+	/* meta stream */
+	if (state->routing.routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE) {
+		fd->entry[fd->num_entries].stream = 1;
+
+		fd->entry[fd->num_entries].flags =
+			V4L2_MBUS_FRAME_DESC_FL_LEN_MAX;
+		fd->entry[fd->num_entries].length =
+			fmt->width * IMX390_METADATA_BEFORE_HEIGHT * bpp / 8;
+		fd->entry[fd->num_entries].pixelcode = fmt->code;
+		fd->entry[fd->num_entries].bus.csi2.vc = 0;
+		fd->entry[fd->num_entries].bus.csi2.dt = 0x12; /* Metadata */
+
+		fd->num_entries++;
+	}
+
 out:
 	v4l2_subdev_unlock_state(state);
 
@@ -416,12 +452,21 @@ static int imx390_set_routing(struct v4l2_subdev *sd,
 			      enum v4l2_subdev_format_whence which,
 			      struct v4l2_subdev_krouting *routing)
 {
+	bool enable_embedded;
 	int ret;
 
-	if (routing->num_routes == 0 || routing->num_routes > 1)
+	if (routing->num_routes == 0 || routing->num_routes > 2)
 		return -EINVAL;
 
-	ret = _imx390_set_routing(sd, state);
+	/*
+	 * The only thing that can be changed is whether the metadata stream
+	 * is active or not.
+	 */
+	enable_embedded =
+		routing->num_routes == 2 &&
+		(routing->routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE);
+
+	ret = _imx390_set_routing(sd, state, enable_embedded);
 
 	return ret;
 }

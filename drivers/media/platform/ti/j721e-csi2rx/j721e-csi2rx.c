@@ -124,8 +124,6 @@ struct ti_csi2rx_dev {
 	struct v4l2_device		v4l2_dev;
 	struct v4l2_subdev		*source;
 	struct v4l2_subdev		subdev;
-	struct v4l2_subdev_krouting	routing;
-	struct v4l2_subdev_stream_configs stream_configs;
 	struct ti_csi2rx_ctx		ctx[TI_CSI2RX_NUM_CTX];
 };
 
@@ -732,10 +730,12 @@ static int ti_csi2rx_start_streaming(struct vb2_queue *vq, unsigned int count)
 	struct ti_csi2rx_dev *csi = ctx->csi;
 	struct ti_csi2rx_dma *dma = &ctx->dma;
 	struct ti_csi2rx_buffer *buf, *tmp;
+	struct v4l2_subdev_krouting *routing;
 	struct v4l2_subdev_route *route = NULL;
 	struct media_pad *remote_pad;
 	unsigned long flags = 0;
 	int ret = 0, i;
+	struct v4l2_subdev_state *state;
 
 	spin_lock_irqsave(&dma->lock, flags);
 	if (list_empty(&dma->queue))
@@ -754,9 +754,14 @@ static int ti_csi2rx_start_streaming(struct vb2_queue *vq, unsigned int count)
 		goto err;
 	}
 
+	// XXX unlock needs to be handled in the error paths
+	state = v4l2_subdev_lock_active_state(&csi->subdev);
+
+	routing = &state->routing;
+
 	/* Find the stream to process. */
-	for (i = 0; i < csi->routing.num_routes; i++) {
-		struct v4l2_subdev_route *r = &csi->routing.routes[i];
+	for (i = 0; i < routing->num_routes; i++) {
+		struct v4l2_subdev_route *r = &routing->routes[i];
 
 		if (!(r->flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE))
 			continue;
@@ -774,6 +779,8 @@ static int ti_csi2rx_start_streaming(struct vb2_queue *vq, unsigned int count)
 	}
 
 	ctx->stream = route->sink_stream;
+
+	v4l2_subdev_unlock_state(state);
 
 	ret = ti_csi2rx_get_vc(ctx);
 	if (ret == -ENOIOCTLCMD)
@@ -890,67 +897,43 @@ static inline struct ti_csi2rx_dev *to_csi2rx_dev(struct v4l2_subdev *sd)
 	return container_of(sd, struct ti_csi2rx_dev, subdev);
 }
 
-static struct v4l2_subdev_krouting *
-ti_csi2rx_get_routing_table(struct ti_csi2rx_dev *csi,
-			    struct v4l2_subdev_state *state, u32 which)
-{
-	if (which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		return &csi->routing;
-	else
-		return &state->routing;
-}
-
-static struct v4l2_subdev_stream_configs *
-ti_csi2rx_get_stream_configs(struct ti_csi2rx_dev *csi,
-			     struct v4l2_subdev_state *state, u32 which)
-{
-	if (which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		return &csi->stream_configs;
-	else
-		return &state->stream_configs;
-}
-
-static int ti_csi2rx_sd_get_routing(struct v4l2_subdev *sd,
+static int _ti_csi2rx_sd_set_routing(struct v4l2_subdev *sd,
 				    struct v4l2_subdev_state *state,
 				    struct v4l2_subdev_krouting *routing)
 {
-	struct ti_csi2rx_dev *csi = to_csi2rx_dev(sd);
-	struct v4l2_subdev_krouting *src;
+	int ret;
 
-	src = ti_csi2rx_get_routing_table(csi, state, routing->which);
+	const struct v4l2_mbus_framefmt format = {
+		.width = 640,
+		.height = 480,
+		.code = MEDIA_BUS_FMT_UYVY8_2X8,
+		.field = V4L2_FIELD_NONE,
+		.colorspace = V4L2_COLORSPACE_SRGB,
+		.ycbcr_enc = V4L2_YCBCR_ENC_601,
+		.quantization = V4L2_QUANTIZATION_LIM_RANGE,
+		.xfer_func = V4L2_XFER_FUNC_SRGB,
+	};
 
-	return v4l2_subdev_cpy_routing(routing, src);
+	v4l2_subdev_lock_state(state);
+
+	ret = v4l2_subdev_set_routing_with_fmt(sd, state, routing, &format);
+
+	v4l2_subdev_unlock_state(state);
+
+	return ret;
 }
 
 static int ti_csi2rx_sd_set_routing(struct v4l2_subdev *sd,
 				    struct v4l2_subdev_state *state,
+				     enum v4l2_subdev_format_whence which,
 				    struct v4l2_subdev_krouting *routing)
 {
-	struct ti_csi2rx_dev *csi = to_csi2rx_dev(sd);
-	struct v4l2_subdev_krouting *dst;
-	struct v4l2_subdev_stream_configs *stream_configs;
-	int ret;
-
-	dst = ti_csi2rx_get_routing_table(csi, state, routing->which);
-	stream_configs = ti_csi2rx_get_stream_configs(csi, state,
-						      routing->which);
-
-	ret = v4l2_subdev_dup_routing(dst, routing);
-	if (ret)
-		return ret;
-
-	ret = v4l2_init_stream_configs(stream_configs, dst);
-	if (ret)
-		return ret;
-
-	return 0;
+	return _ti_csi2rx_sd_set_routing(sd, state, routing);
 }
 
 static int ti_csi2rx_sd_init_cfg(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *sd_state)
+				 struct v4l2_subdev_state *state)
 {
-	u32 which = sd_state ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
-
 	struct v4l2_subdev_route routes[] = { {
 		.sink_pad = 0,
 		.sink_stream = 0,
@@ -960,13 +943,12 @@ static int ti_csi2rx_sd_init_cfg(struct v4l2_subdev *sd,
 	} };
 
 	struct v4l2_subdev_krouting routing = {
-		.which = which,
 		.num_routes = 1,
 		.routes = routes,
 	};
 
 	/* Initialize routing to single route to the fist source pad */
-	return ti_csi2rx_sd_set_routing(sd, sd_state, &routing);
+	return _ti_csi2rx_sd_set_routing(sd, state, &routing);
 }
 
 static int ti_csi2rx_sd_s_stream(struct v4l2_subdev *sd, int enable)
@@ -1010,7 +992,6 @@ static const struct v4l2_subdev_video_ops ti_csi2rx_subdev_video_ops = {
 
 static const struct v4l2_subdev_pad_ops ti_csi2rx_subdev_pad_ops = {
 	.init_cfg = ti_csi2rx_sd_init_cfg,
-	.get_routing = ti_csi2rx_sd_get_routing,
 	.set_routing = ti_csi2rx_sd_set_routing,
 };
 

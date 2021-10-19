@@ -261,28 +261,28 @@ to_xcsi2rxssstate(struct v4l2_subdev *subdev)
 /*
  * Register related operations
  */
-static inline u32 xcsi2rxss_read(struct xcsi2rxss_state *xcsi2rxss, u32 addr)
+static inline u32 xcsi2rxss_read(struct xcsi2rxss_state *csi2rx, u32 addr)
 {
-	return ioread32(xcsi2rxss->iomem + addr);
+	return ioread32(csi2rx->iomem + addr);
 }
 
-static inline void xcsi2rxss_write(struct xcsi2rxss_state *xcsi2rxss, u32 addr,
+static inline void xcsi2rxss_write(struct xcsi2rxss_state *csi2rx, u32 addr,
 				   u32 value)
 {
-	iowrite32(value, xcsi2rxss->iomem + addr);
+	iowrite32(value, csi2rx->iomem + addr);
 }
 
-static inline void xcsi2rxss_clr(struct xcsi2rxss_state *xcsi2rxss, u32 addr,
+static inline void xcsi2rxss_clr(struct xcsi2rxss_state *csi2rx, u32 addr,
 				 u32 clr)
 {
-	xcsi2rxss_write(xcsi2rxss, addr,
-			xcsi2rxss_read(xcsi2rxss, addr) & ~clr);
+	xcsi2rxss_write(csi2rx, addr,
+			xcsi2rxss_read(csi2rx, addr) & ~clr);
 }
 
-static inline void xcsi2rxss_set(struct xcsi2rxss_state *xcsi2rxss, u32 addr,
+static inline void xcsi2rxss_set(struct xcsi2rxss_state *csi2rx, u32 addr,
 				 u32 set)
 {
-	xcsi2rxss_write(xcsi2rxss, addr, xcsi2rxss_read(xcsi2rxss, addr) | set);
+	xcsi2rxss_write(csi2rx, addr, xcsi2rxss_read(csi2rx, addr) | set);
 }
 
 /*
@@ -318,22 +318,22 @@ static u32 xcsi2rxss_get_dt(u32 mbus)
 
 /**
  * xcsi2rxss_soft_reset - Does a soft reset of the MIPI CSI-2 Rx Subsystem
- * @state: Xilinx CSI-2 Rx Subsystem structure pointer
+ * @csi2rx: Xilinx CSI-2 Rx Subsystem structure pointer
  *
  * Core takes less than 100 video clock cycles to reset.
  * So a larger timeout value is chosen for margin.
  *
  * Return: 0 - on success OR -ETIME if reset times out
  */
-static int xcsi2rxss_soft_reset(struct xcsi2rxss_state *state)
+static int xcsi2rxss_soft_reset(struct xcsi2rxss_state *csi2rx)
 {
 	u32 timeout = 1000; /* us */
 
-	xcsi2rxss_set(state, XCSI_CCR_OFFSET, XCSI_CCR_SOFTRESET);
+	xcsi2rxss_set(csi2rx, XCSI_CCR_OFFSET, XCSI_CCR_SOFTRESET);
 
-	while (xcsi2rxss_read(state, XCSI_CSR_OFFSET) & XCSI_CSR_RIPCD) {
+	while (xcsi2rxss_read(csi2rx, XCSI_CSR_OFFSET) & XCSI_CSR_RIPCD) {
 		if (timeout == 0) {
-			dev_err(state->dev, "soft reset timed out!\n");
+			dev_err(csi2rx->dev, "soft reset timed out!\n");
 			return -ETIME;
 		}
 
@@ -341,54 +341,54 @@ static int xcsi2rxss_soft_reset(struct xcsi2rxss_state *state)
 		udelay(1);
 	}
 
-	xcsi2rxss_clr(state, XCSI_CCR_OFFSET, XCSI_CCR_SOFTRESET);
+	xcsi2rxss_clr(csi2rx, XCSI_CCR_OFFSET, XCSI_CCR_SOFTRESET);
 	return 0;
 }
 
-static void xcsi2rxss_hard_reset(struct xcsi2rxss_state *state)
+static void xcsi2rxss_hard_reset(struct xcsi2rxss_state *csi2rx)
 {
-	if (!state->rst_gpio)
+	if (!csi2rx->rst_gpio)
 		return;
 
 	/* minimum of 40 dphy_clk_200M cycles */
-	gpiod_set_value_cansleep(state->rst_gpio, 1);
+	gpiod_set_value_cansleep(csi2rx->rst_gpio, 1);
 	usleep_range(1, 2);
-	gpiod_set_value_cansleep(state->rst_gpio, 0);
+	gpiod_set_value_cansleep(csi2rx->rst_gpio, 0);
 }
 
-static void xcsi2rxss_reset_event_counters(struct xcsi2rxss_state *state)
+static void xcsi2rxss_reset_event_counters(struct xcsi2rxss_state *csi2rx)
 {
 	unsigned int i;
 
 	for (i = 0; i < XCSI_NUM_EVENTS; i++)
-		state->events[i] = 0;
+		csi2rx->events[i] = 0;
 
 	for (i = 0; i < XCSI_VCX_NUM_EVENTS; i++)
-		state->vcx_events[i] = 0;
+		csi2rx->vcx_events[i] = 0;
 }
 
 /* Print event counters */
-static void xcsi2rxss_log_counters(struct xcsi2rxss_state *state)
+static void xcsi2rxss_log_counters(struct xcsi2rxss_state *csi2rx)
 {
-	struct device *dev = state->dev;
+	struct device *dev = csi2rx->dev;
 	unsigned int i;
 
 	for (i = 0; i < XCSI_NUM_EVENTS; i++) {
-		if (state->events[i] > 0) {
+		if (csi2rx->events[i] > 0) {
 			dev_info(dev, "%s events: %d\n",
 				 xcsi2rxss_events[i].name,
-				 state->events[i]);
+				 csi2rx->events[i]);
 		}
 	}
 
-	if (state->en_vcx) {
+	if (csi2rx->en_vcx) {
 		for (i = 0; i < XCSI_VCX_NUM_EVENTS; i++) {
-			if (state->vcx_events[i] > 0) {
+			if (csi2rx->vcx_events[i] > 0) {
 				dev_info(dev,
 					 "VC %d Frame %s err vcx events: %d\n",
 					 (i / 2) + XCSI_VCX_START,
 					 i & 1 ? "Sync" : "Level",
-					 state->vcx_events[i]);
+					 csi2rx->vcx_events[i]);
 			}
 		}
 	}
@@ -404,17 +404,17 @@ static void xcsi2rxss_log_counters(struct xcsi2rxss_state *state)
  */
 static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 {
-	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
-	struct device *dev = xcsi2rxss->dev;
+	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
+	struct device *dev = csi2rx->dev;
 	u32 reg, data;
 	unsigned int i, max_vc;
 
-	mutex_lock(&xcsi2rxss->lock);
+	mutex_lock(&csi2rx->lock);
 
-	xcsi2rxss_log_counters(xcsi2rxss);
+	xcsi2rxss_log_counters(csi2rx);
 
 	dev_info(dev, "***** Core Status *****\n");
-	data = xcsi2rxss_read(xcsi2rxss, XCSI_CSR_OFFSET);
+	data = xcsi2rxss_read(csi2rx, XCSI_CSR_OFFSET);
 	dev_info(dev, "Short Packet FIFO Full = %s\n",
 		 data & XCSI_CSR_SPFIFOFULL ? "true" : "false");
 	dev_info(dev, "Short Packet FIFO Not Empty = %s\n",
@@ -426,7 +426,7 @@ static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 
 	/* Clk & Lane Info  */
 	dev_info(dev, "******** Clock Lane Info *********\n");
-	data = xcsi2rxss_read(xcsi2rxss, XCSI_CLKINFR_OFFSET);
+	data = xcsi2rxss_read(csi2rx, XCSI_CLKINFR_OFFSET);
 	dev_info(dev, "Clock Lane in Stop State = %s\n",
 		 data & XCSI_CLKINFR_STOP ? "true" : "false");
 
@@ -434,7 +434,7 @@ static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 	dev_info(dev, "Lane\tSoT Error\tSoT Sync Error\tStop State\n");
 	reg = XCSI_DLXINFR_OFFSET;
 	for (i = 0; i < XCSI_MAXDL_COUNT; i++) {
-		data = xcsi2rxss_read(xcsi2rxss, reg);
+		data = xcsi2rxss_read(csi2rx, reg);
 
 		dev_info(dev, "%d\t%s\t\t%s\t\t%s\n", i,
 			 data & XCSI_DLXINFR_SOTERR ? "true" : "false",
@@ -447,7 +447,7 @@ static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 	/* Virtual Channel Image Information */
 	dev_info(dev, "********** Virtual Channel Info ************\n");
 	dev_info(dev, "VC\tLine Count\tByte Count\tData Type\n");
-	if (xcsi2rxss->en_vcx)
+	if (csi2rx->en_vcx)
 		max_vc = XCSI_MAX_VCX;
 	else
 		max_vc = XCSI_MAX_VC;
@@ -457,14 +457,14 @@ static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 		u32 line_count, byte_count, data_type;
 
 		/* Get line and byte count from VCXINFR1 Register */
-		data = xcsi2rxss_read(xcsi2rxss, reg);
+		data = xcsi2rxss_read(csi2rx, reg);
 		byte_count = data & XCSI_VCXINF1R_BYTECOUNT;
 		line_count = data & XCSI_VCXINF1R_LINECOUNT;
 		line_count >>= XCSI_VCXINF1R_LINECOUNT_SHIFT;
 
 		/* Get data type from VCXINFR2 Register */
 		reg += XCSI_NEXTREG_OFFSET;
-		data = xcsi2rxss_read(xcsi2rxss, reg);
+		data = xcsi2rxss_read(csi2rx, reg);
 		data_type = data & XCSI_VCXINF2R_DT;
 
 		dev_info(dev, "%d\t%d\t\t%d\t\t0x%x\n", i, line_count,
@@ -474,7 +474,7 @@ static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 		reg += XCSI_NEXTREG_OFFSET;
 	}
 
-	mutex_unlock(&xcsi2rxss->lock);
+	mutex_unlock(&csi2rx->lock);
 
 	return 0;
 }
@@ -493,61 +493,61 @@ static struct v4l2_subdev *xcsi2rxss_get_remote_subdev(struct media_pad *local)
 	return sd;
 }
 
-static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
+static int xcsi2rxss_start_stream(struct xcsi2rxss_state *csi2rx)
 {
 	int ret = 0;
 
 	/* enable core */
-	xcsi2rxss_set(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
+	xcsi2rxss_set(csi2rx, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
 
-	ret = xcsi2rxss_soft_reset(state);
+	ret = xcsi2rxss_soft_reset(csi2rx);
 	if (ret) {
-		state->streaming = false;
+		csi2rx->streaming = false;
 		return ret;
 	}
 
 	/* enable interrupts */
-	xcsi2rxss_clr(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
-	xcsi2rxss_write(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
-	xcsi2rxss_set(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
+	xcsi2rxss_clr(csi2rx, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
+	xcsi2rxss_write(csi2rx, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
+	xcsi2rxss_set(csi2rx, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
 
-	state->streaming = true;
+	csi2rx->streaming = true;
 
-	state->rsubdev =
-		xcsi2rxss_get_remote_subdev(&state->pads[XVIP_PAD_SINK]);
+	csi2rx->rsubdev =
+		xcsi2rxss_get_remote_subdev(&csi2rx->pads[XVIP_PAD_SINK]);
 
-	if (!state->rsubdev) {
+	if (!csi2rx->rsubdev) {
 		ret = -ENODEV;
 		goto exit_start_stream;
 	}
 
-	ret = v4l2_subdev_call(state->rsubdev, video, s_stream, 1);
+	ret = v4l2_subdev_call(csi2rx->rsubdev, video, s_stream, 1);
 
 exit_start_stream:
 	if (ret) {
 		/* disable interrupts */
-		xcsi2rxss_clr(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
-		xcsi2rxss_clr(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
+		xcsi2rxss_clr(csi2rx, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
+		xcsi2rxss_clr(csi2rx, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
 
 		/* disable core */
-		xcsi2rxss_clr(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
-		state->streaming = false;
+		xcsi2rxss_clr(csi2rx, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
+		csi2rx->streaming = false;
 	}
 
 	return ret;
 }
 
-static void xcsi2rxss_stop_stream(struct xcsi2rxss_state *state)
+static void xcsi2rxss_stop_stream(struct xcsi2rxss_state *csi2rx)
 {
-	v4l2_subdev_call(state->rsubdev, video, s_stream, 0);
+	v4l2_subdev_call(csi2rx->rsubdev, video, s_stream, 0);
 
 	/* disable interrupts */
-	xcsi2rxss_clr(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
-	xcsi2rxss_clr(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
+	xcsi2rxss_clr(csi2rx, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
+	xcsi2rxss_clr(csi2rx, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
 
 	/* disable core */
-	xcsi2rxss_clr(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
-	state->streaming = false;
+	xcsi2rxss_clr(csi2rx, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
+	csi2rx->streaming = false;
 }
 
 /**
@@ -562,12 +562,13 @@ static void xcsi2rxss_stop_stream(struct xcsi2rxss_state *state)
  */
 static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
 {
-	struct xcsi2rxss_state *state = (struct xcsi2rxss_state *)data;
-	struct device *dev = state->dev;
+	struct xcsi2rxss_state *csi2rx = (struct xcsi2rxss_state *)data;
+	struct device *dev = csi2rx->dev;
 	u32 status;
 
-	status = xcsi2rxss_read(state, XCSI_ISR_OFFSET) & XCSI_ISR_ALLINTR_MASK;
-	xcsi2rxss_write(state, XCSI_ISR_OFFSET, status);
+	status = xcsi2rxss_read(csi2rx, XCSI_ISR_OFFSET)
+	       & XCSI_ISR_ALLINTR_MASK;
+	xcsi2rxss_write(csi2rx, XCSI_ISR_OFFSET, status);
 
 	/* Received a short packet */
 	if (status & XCSI_ISR_SPFIFONE) {
@@ -580,13 +581,13 @@ static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
 		for (count = 0; count < XCSI_SPKT_FIFO_DEPTH; ++count) {
 			u32 spfifostat, spkt;
 
-			spkt = xcsi2rxss_read(state, XCSI_SPKTR_OFFSET);
+			spkt = xcsi2rxss_read(csi2rx, XCSI_SPKTR_OFFSET);
 			dev_dbg(dev, "Short packet = 0x%08x\n", spkt);
-			spfifostat = xcsi2rxss_read(state, XCSI_ISR_OFFSET);
+			spfifostat = xcsi2rxss_read(csi2rx, XCSI_ISR_OFFSET);
 			spfifostat &= XCSI_ISR_SPFIFONE;
 			if (!spfifostat)
 				break;
-			xcsi2rxss_write(state, XCSI_ISR_OFFSET, spfifostat);
+			xcsi2rxss_write(csi2rx, XCSI_ISR_OFFSET, spfifostat);
 		}
 	}
 
@@ -605,11 +606,11 @@ static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
 			dev_alert_ratelimited(dev, "YUV 420 Word count error!\n");
 
 		/* disable interrupts */
-		xcsi2rxss_clr(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
-		xcsi2rxss_clr(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
+		xcsi2rxss_clr(csi2rx, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
+		xcsi2rxss_clr(csi2rx, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
 
 		/* disable core */
-		xcsi2rxss_clr(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
+		xcsi2rxss_clr(csi2rx, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
 
 		/*
 		 * The IP needs to be hard reset before it can be used now.
@@ -629,23 +630,23 @@ static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
 		for (i = 0; i < XCSI_NUM_EVENTS; i++) {
 			if (!(status & xcsi2rxss_events[i].mask))
 				continue;
-			state->events[i]++;
+			csi2rx->events[i]++;
 			dev_dbg_ratelimited(dev, "%s: %u\n",
 					    xcsi2rxss_events[i].name,
-					    state->events[i]);
+					    csi2rx->events[i]);
 		}
 
-		if (status & XCSI_ISR_VCXFE && state->en_vcx) {
+		if (status & XCSI_ISR_VCXFE && csi2rx->en_vcx) {
 			u32 vcxstatus;
 
-			vcxstatus = xcsi2rxss_read(state, XCSI_VCXR_OFFSET);
+			vcxstatus = xcsi2rxss_read(csi2rx, XCSI_VCXR_OFFSET);
 			vcxstatus &= XCSI_VCXR_VCERR;
 			for (i = 0; i < XCSI_VCX_NUM_EVENTS; i++) {
 				if (!(vcxstatus & BIT(i)))
 					continue;
-				state->vcx_events[i]++;
+				csi2rx->vcx_events[i]++;
 			}
-			xcsi2rxss_write(state, XCSI_VCXR_OFFSET, vcxstatus);
+			xcsi2rxss_write(csi2rx, XCSI_VCXR_OFFSET, vcxstatus);
 		}
 	}
 
@@ -664,29 +665,29 @@ static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
  */
 static int xcsi2rxss_s_stream(struct v4l2_subdev *sd, int enable)
 {
-	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
+	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
 	int ret = 0;
 
-	mutex_lock(&xcsi2rxss->lock);
+	mutex_lock(&csi2rx->lock);
 
-	if (enable == xcsi2rxss->streaming)
+	if (enable == csi2rx->streaming)
 		goto stream_done;
 
 	if (enable) {
-		xcsi2rxss_reset_event_counters(xcsi2rxss);
-		ret = xcsi2rxss_start_stream(xcsi2rxss);
+		xcsi2rxss_reset_event_counters(csi2rx);
+		ret = xcsi2rxss_start_stream(csi2rx);
 	} else {
-		xcsi2rxss_stop_stream(xcsi2rxss);
-		xcsi2rxss_hard_reset(xcsi2rxss);
+		xcsi2rxss_stop_stream(csi2rx);
+		xcsi2rxss_hard_reset(csi2rx);
 	}
 
 stream_done:
-	mutex_unlock(&xcsi2rxss->lock);
+	mutex_unlock(&csi2rx->lock);
 	return ret;
 }
 
 static struct v4l2_mbus_framefmt *
-__xcsi2rxss_get_pad_format(struct xcsi2rxss_state *xcsi2rxss,
+__xcsi2rxss_get_pad_format(struct xcsi2rxss_state *csi2rx,
 			   struct v4l2_subdev_state *sd_state,
 			   unsigned int pad, u32 which)
 {
@@ -694,11 +695,11 @@ __xcsi2rxss_get_pad_format(struct xcsi2rxss_state *xcsi2rxss,
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		get_fmt = v4l2_subdev_get_try_format(&xcsi2rxss->subdev,
+		get_fmt = v4l2_subdev_get_try_format(&csi2rx->subdev,
 						     sd_state, pad);
 		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		get_fmt = &xcsi2rxss->format;
+		get_fmt = &csi2rx->format;
 		break;
 	default:
 		get_fmt = NULL;
@@ -721,16 +722,16 @@ __xcsi2rxss_get_pad_format(struct xcsi2rxss_state *xcsi2rxss,
 static int xcsi2rxss_init_cfg(struct v4l2_subdev *sd,
 			      struct v4l2_subdev_state *sd_state)
 {
-	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
+	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
 	struct v4l2_mbus_framefmt *format;
 	unsigned int i;
 
-	mutex_lock(&xcsi2rxss->lock);
+	mutex_lock(&csi2rx->lock);
 	for (i = 0; i < XCSI_MEDIA_PADS; i++) {
 		format = v4l2_subdev_get_try_format(sd, sd_state, i);
-		*format = xcsi2rxss->default_format;
+		*format = csi2rx->default_format;
 	}
-	mutex_unlock(&xcsi2rxss->lock);
+	mutex_unlock(&csi2rx->lock);
 
 	return 0;
 }
@@ -749,13 +750,13 @@ static int xcsi2rxss_get_format(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *sd_state,
 				struct v4l2_subdev_format *fmt)
 {
-	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
+	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
 	struct v4l2_mbus_framefmt *get_fmt;
 	int ret = 0;
 
-	mutex_lock(&xcsi2rxss->lock);
+	mutex_lock(&csi2rx->lock);
 
-	get_fmt = __xcsi2rxss_get_pad_format(xcsi2rxss, sd_state, fmt->pad,
+	get_fmt = __xcsi2rxss_get_pad_format(csi2rx, sd_state, fmt->pad,
 					     fmt->which);
 	if (!get_fmt) {
 		ret = -EINVAL;
@@ -765,7 +766,7 @@ static int xcsi2rxss_get_format(struct v4l2_subdev *sd,
 	fmt->format = *get_fmt;
 
 unlock_get_format:
-	mutex_unlock(&xcsi2rxss->lock);
+	mutex_unlock(&csi2rx->lock);
 
 	return ret;
 }
@@ -787,19 +788,19 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *sd_state,
 				struct v4l2_subdev_format *fmt)
 {
-	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
+	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
 	struct v4l2_mbus_framefmt *__format;
 	u32 dt;
 	int ret = 0;
 
-	mutex_lock(&xcsi2rxss->lock);
+	mutex_lock(&csi2rx->lock);
 
 	/*
 	 * Only the format->code parameter matters for CSI as the
 	 * CSI format cannot be changed at runtime.
 	 * Ensure that format to set is copied to over to CSI pad format
 	 */
-	__format = __xcsi2rxss_get_pad_format(xcsi2rxss, sd_state,
+	__format = __xcsi2rxss_get_pad_format(csi2rx, sd_state,
 					      fmt->pad, fmt->which);
 	if (!__format) {
 		ret = -EINVAL;
@@ -818,17 +819,17 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 	 * other RAW, YUV422 8/10 or RGB888, set appropriate media bus format.
 	 */
 	dt = xcsi2rxss_get_dt(fmt->format.code);
-	if (dt != xcsi2rxss->datatype && dt != MIPI_CSI2_DT_RAW8) {
-		dev_dbg(xcsi2rxss->dev, "Unsupported media bus format");
+	if (dt != csi2rx->datatype && dt != MIPI_CSI2_DT_RAW8) {
+		dev_dbg(csi2rx->dev, "Unsupported media bus format");
 		/* set the default format for the data type */
-		fmt->format.code = xcsi2rxss_get_nth_mbus(xcsi2rxss->datatype,
+		fmt->format.code = xcsi2rxss_get_nth_mbus(csi2rx->datatype,
 							  0);
 	}
 
 	*__format = fmt->format;
 
 unlock_set_format:
-	mutex_unlock(&xcsi2rxss->lock);
+	mutex_unlock(&csi2rx->lock);
 
 	return ret;
 }
@@ -845,7 +846,7 @@ static int xcsi2rxss_enum_mbus_code(struct v4l2_subdev *sd,
 				    struct v4l2_subdev_state *sd_state,
 				    struct v4l2_subdev_mbus_code_enum *code)
 {
-	struct xcsi2rxss_state *state = to_xcsi2rxssstate(sd);
+	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
 	u32 dt, n;
 	int ret = 0;
 
@@ -853,9 +854,9 @@ static int xcsi2rxss_enum_mbus_code(struct v4l2_subdev *sd,
 	if (code->index < 4) {
 		n = code->index;
 		dt = MIPI_CSI2_DT_RAW8;
-	} else if (state->datatype != MIPI_CSI2_DT_RAW8) {
+	} else if (csi2rx->datatype != MIPI_CSI2_DT_RAW8) {
 		n = code->index - 4;
-		dt = state->datatype;
+		dt = csi2rx->datatype;
 	} else {
 		return -EINVAL;
 	}
@@ -897,9 +898,9 @@ static const struct v4l2_subdev_ops xcsi2rxss_ops = {
 	.pad = &xcsi2rxss_pad_ops
 };
 
-static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
+static int xcsi2rxss_parse_of(struct xcsi2rxss_state *csi2rx)
 {
-	struct device *dev = xcsi2rxss->dev;
+	struct device *dev = csi2rx->dev;
 	struct device_node *node = dev->of_node;
 
 	struct fwnode_handle *ep;
@@ -911,19 +912,19 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 
 	en_csi_v20 = of_property_read_bool(node, "xlnx,en-csi-v2-0");
 	if (en_csi_v20)
-		xcsi2rxss->en_vcx = of_property_read_bool(node, "xlnx,en-vcx");
+		csi2rx->en_vcx = of_property_read_bool(node, "xlnx,en-vcx");
 
-	xcsi2rxss->enable_active_lanes =
+	csi2rx->enable_active_lanes =
 		of_property_read_bool(node, "xlnx,en-active-lanes");
 
 	ret = of_property_read_u32(node, "xlnx,csi-pxl-format",
-				   &xcsi2rxss->datatype);
+				   &csi2rx->datatype);
 	if (ret < 0) {
 		dev_err(dev, "missing xlnx,csi-pxl-format property\n");
 		return ret;
 	}
 
-	switch (xcsi2rxss->datatype) {
+	switch (csi2rx->datatype) {
 	case MIPI_CSI2_DT_YUV422_8B:
 	case MIPI_CSI2_DT_RGB444:
 	case MIPI_CSI2_DT_RGB555:
@@ -977,7 +978,7 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 	dev_dbg(dev, "mipi number lanes = %d\n",
 		vep.bus.mipi_csi2.num_data_lanes);
 
-	xcsi2rxss->max_num_lanes = vep.bus.mipi_csi2.num_data_lanes;
+	csi2rx->max_num_lanes = vep.bus.mipi_csi2.num_data_lanes;
 
 	ep = fwnode_graph_get_endpoint_by_id(dev_fwnode(dev),
 					     XVIP_PAD_SOURCE, 0,
@@ -990,10 +991,10 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 	fwnode_handle_put(ep);
 
 	dev_dbg(dev, "vcx %s, %u data lanes (%s), data type 0x%02x\n",
-		xcsi2rxss->en_vcx ? "enabled" : "disabled",
-		xcsi2rxss->max_num_lanes,
-		xcsi2rxss->enable_active_lanes ? "dynamic" : "static",
-		xcsi2rxss->datatype);
+		csi2rx->en_vcx ? "enabled" : "disabled",
+		csi2rx->max_num_lanes,
+		csi2rx->enable_active_lanes ? "dynamic" : "static",
+		csi2rx->datatype);
 
 	return 0;
 }
@@ -1001,38 +1002,38 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 static int xcsi2rxss_probe(struct platform_device *pdev)
 {
 	struct v4l2_subdev *subdev;
-	struct xcsi2rxss_state *xcsi2rxss;
+	struct xcsi2rxss_state *csi2rx;
 	int num_clks = ARRAY_SIZE(xcsi2rxss_clks);
 	struct device *dev = &pdev->dev;
 	int irq, ret;
 
-	xcsi2rxss = devm_kzalloc(dev, sizeof(*xcsi2rxss), GFP_KERNEL);
-	if (!xcsi2rxss)
+	csi2rx = devm_kzalloc(dev, sizeof(*csi2rx), GFP_KERNEL);
+	if (!csi2rx)
 		return -ENOMEM;
 
-	xcsi2rxss->dev = dev;
+	csi2rx->dev = dev;
 
-	xcsi2rxss->clks = devm_kmemdup(dev, xcsi2rxss_clks,
+	csi2rx->clks = devm_kmemdup(dev, xcsi2rxss_clks,
 				       sizeof(xcsi2rxss_clks), GFP_KERNEL);
-	if (!xcsi2rxss->clks)
+	if (!csi2rx->clks)
 		return -ENOMEM;
 
 	/* Reset GPIO */
-	xcsi2rxss->rst_gpio = devm_gpiod_get_optional(dev, "video-reset",
+	csi2rx->rst_gpio = devm_gpiod_get_optional(dev, "video-reset",
 						      GPIOD_OUT_HIGH);
-	if (IS_ERR(xcsi2rxss->rst_gpio)) {
-		if (PTR_ERR(xcsi2rxss->rst_gpio) != -EPROBE_DEFER)
+	if (IS_ERR(csi2rx->rst_gpio)) {
+		if (PTR_ERR(csi2rx->rst_gpio) != -EPROBE_DEFER)
 			dev_err(dev, "Video Reset GPIO not setup in DT");
-		return PTR_ERR(xcsi2rxss->rst_gpio);
+		return PTR_ERR(csi2rx->rst_gpio);
 	}
 
-	ret = xcsi2rxss_parse_of(xcsi2rxss);
+	ret = xcsi2rxss_parse_of(csi2rx);
 	if (ret < 0)
 		return ret;
 
-	xcsi2rxss->iomem = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(xcsi2rxss->iomem))
-		return PTR_ERR(xcsi2rxss->iomem);
+	csi2rx->iomem = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(csi2rx->iomem))
+		return PTR_ERR(csi2rx->iomem);
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
@@ -1040,54 +1041,54 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 
 	ret = devm_request_threaded_irq(dev, irq, NULL,
 					xcsi2rxss_irq_handler, IRQF_ONESHOT,
-					dev_name(dev), xcsi2rxss);
+					dev_name(dev), csi2rx);
 	if (ret) {
 		dev_err(dev, "Err = %d Interrupt handler reg failed!\n", ret);
 		return ret;
 	}
 
-	ret = clk_bulk_get(dev, num_clks, xcsi2rxss->clks);
+	ret = clk_bulk_get(dev, num_clks, csi2rx->clks);
 	if (ret)
 		return ret;
 
 	/* TODO: Enable/disable clocks at stream on/off time. */
-	ret = clk_bulk_prepare_enable(num_clks, xcsi2rxss->clks);
+	ret = clk_bulk_prepare_enable(num_clks, csi2rx->clks);
 	if (ret)
 		goto err_clk_put;
 
-	mutex_init(&xcsi2rxss->lock);
+	mutex_init(&csi2rx->lock);
 
-	xcsi2rxss_hard_reset(xcsi2rxss);
-	xcsi2rxss_soft_reset(xcsi2rxss);
+	xcsi2rxss_hard_reset(csi2rx);
+	xcsi2rxss_soft_reset(csi2rx);
 
 	/* Initialize V4L2 subdevice and media entity */
-	xcsi2rxss->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	xcsi2rxss->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
+	csi2rx->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
+	csi2rx->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 
 	/* Initialize the default format */
-	xcsi2rxss->default_format.code =
-		xcsi2rxss_get_nth_mbus(xcsi2rxss->datatype, 0);
-	xcsi2rxss->default_format.field = V4L2_FIELD_NONE;
-	xcsi2rxss->default_format.colorspace = V4L2_COLORSPACE_SRGB;
-	xcsi2rxss->default_format.width = XCSI_DEFAULT_WIDTH;
-	xcsi2rxss->default_format.height = XCSI_DEFAULT_HEIGHT;
-	xcsi2rxss->format = xcsi2rxss->default_format;
+	csi2rx->default_format.code =
+		xcsi2rxss_get_nth_mbus(csi2rx->datatype, 0);
+	csi2rx->default_format.field = V4L2_FIELD_NONE;
+	csi2rx->default_format.colorspace = V4L2_COLORSPACE_SRGB;
+	csi2rx->default_format.width = XCSI_DEFAULT_WIDTH;
+	csi2rx->default_format.height = XCSI_DEFAULT_HEIGHT;
+	csi2rx->format = csi2rx->default_format;
 
 	/* Initialize V4L2 subdevice and media entity */
-	subdev = &xcsi2rxss->subdev;
+	subdev = &csi2rx->subdev;
 	v4l2_subdev_init(subdev, &xcsi2rxss_ops);
 	subdev->dev = dev;
 	strscpy(subdev->name, dev_name(dev), sizeof(subdev->name));
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_EVENTS | V4L2_SUBDEV_FL_HAS_DEVNODE;
 	subdev->entity.ops = &xcsi2rxss_media_ops;
-	v4l2_set_subdevdata(subdev, xcsi2rxss);
+	v4l2_set_subdevdata(subdev, csi2rx);
 
 	ret = media_entity_pads_init(&subdev->entity, XCSI_MEDIA_PADS,
-				     xcsi2rxss->pads);
+				     csi2rx->pads);
 	if (ret < 0)
 		goto error;
 
-	platform_set_drvdata(pdev, xcsi2rxss);
+	platform_set_drvdata(pdev, csi2rx);
 
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
@@ -1098,24 +1099,24 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	return 0;
 error:
 	media_entity_cleanup(&subdev->entity);
-	mutex_destroy(&xcsi2rxss->lock);
-	clk_bulk_disable_unprepare(num_clks, xcsi2rxss->clks);
+	mutex_destroy(&csi2rx->lock);
+	clk_bulk_disable_unprepare(num_clks, csi2rx->clks);
 err_clk_put:
-	clk_bulk_put(num_clks, xcsi2rxss->clks);
+	clk_bulk_put(num_clks, csi2rx->clks);
 	return ret;
 }
 
 static int xcsi2rxss_remove(struct platform_device *pdev)
 {
-	struct xcsi2rxss_state *xcsi2rxss = platform_get_drvdata(pdev);
-	struct v4l2_subdev *subdev = &xcsi2rxss->subdev;
+	struct xcsi2rxss_state *csi2rx = platform_get_drvdata(pdev);
+	struct v4l2_subdev *subdev = &csi2rx->subdev;
 	int num_clks = ARRAY_SIZE(xcsi2rxss_clks);
 
 	v4l2_async_unregister_subdev(subdev);
 	media_entity_cleanup(&subdev->entity);
-	mutex_destroy(&xcsi2rxss->lock);
-	clk_bulk_disable_unprepare(num_clks, xcsi2rxss->clks);
-	clk_bulk_put(num_clks, xcsi2rxss->clks);
+	mutex_destroy(&csi2rx->lock);
+	clk_bulk_disable_unprepare(num_clks, csi2rx->clks);
+	clk_bulk_put(num_clks, csi2rx->clks);
 
 	return 0;
 }

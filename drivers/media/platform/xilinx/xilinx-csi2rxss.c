@@ -736,6 +736,40 @@ static int xcsi2rxss_init_cfg(struct v4l2_subdev *sd,
 	return 0;
 }
 
+/*
+ * xcsi2rxss_enum_mbus_code - Handle pixel format enumeration
+ * @sd: pointer to v4l2 subdev structure
+ * @cfg: V4L2 subdev pad configuration
+ * @code: pointer to v4l2_subdev_mbus_code_enum structure
+ *
+ * Return: -EINVAL or zero on success
+ */
+static int xcsi2rxss_enum_mbus_code(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *sd_state,
+				    struct v4l2_subdev_mbus_code_enum *code)
+{
+	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
+	u32 dt, n;
+	int ret = 0;
+
+	/* RAW8 dt packets are available in all DT configurations */
+	if (code->index < 4) {
+		n = code->index;
+		dt = MIPI_CSI2_DT_RAW8;
+	} else if (csi2rx->datatype != MIPI_CSI2_DT_RAW8) {
+		n = code->index - 4;
+		dt = csi2rx->datatype;
+	} else {
+		return -EINVAL;
+	}
+
+	code->code = xcsi2rxss_get_nth_mbus(dt, n);
+	if (!code->code)
+		ret = -EINVAL;
+
+	return ret;
+}
+
 /**
  * xcsi2rxss_get_format - Get the pad format
  * @sd: Pointer to V4L2 Sub device structure
@@ -834,40 +868,6 @@ unlock_set_format:
 	return ret;
 }
 
-/*
- * xcsi2rxss_enum_mbus_code - Handle pixel format enumeration
- * @sd: pointer to v4l2 subdev structure
- * @cfg: V4L2 subdev pad configuration
- * @code: pointer to v4l2_subdev_mbus_code_enum structure
- *
- * Return: -EINVAL or zero on success
- */
-static int xcsi2rxss_enum_mbus_code(struct v4l2_subdev *sd,
-				    struct v4l2_subdev_state *sd_state,
-				    struct v4l2_subdev_mbus_code_enum *code)
-{
-	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
-	u32 dt, n;
-	int ret = 0;
-
-	/* RAW8 dt packets are available in all DT configurations */
-	if (code->index < 4) {
-		n = code->index;
-		dt = MIPI_CSI2_DT_RAW8;
-	} else if (csi2rx->datatype != MIPI_CSI2_DT_RAW8) {
-		n = code->index - 4;
-		dt = csi2rx->datatype;
-	} else {
-		return -EINVAL;
-	}
-
-	code->code = xcsi2rxss_get_nth_mbus(dt, n);
-	if (!code->code)
-		ret = -EINVAL;
-
-	return ret;
-}
-
 /* -----------------------------------------------------------------------------
  * Media Operations
  */
@@ -886,9 +886,9 @@ static const struct v4l2_subdev_video_ops xcsi2rxss_video_ops = {
 
 static const struct v4l2_subdev_pad_ops xcsi2rxss_pad_ops = {
 	.init_cfg = xcsi2rxss_init_cfg,
+	.enum_mbus_code = xcsi2rxss_enum_mbus_code,
 	.get_fmt = xcsi2rxss_get_format,
 	.set_fmt = xcsi2rxss_set_format,
-	.enum_mbus_code = xcsi2rxss_enum_mbus_code,
 	.link_validate = v4l2_subdev_link_validate_default,
 };
 

@@ -816,6 +816,14 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 	return ret;
 }
 
+static int xcsi2rxss_set_routing(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state,
+				 enum v4l2_subdev_format_whence which,
+				 struct v4l2_subdev_krouting *routing)
+{
+	return __xcsi2rxss_set_routing(sd, state, routing);
+}
+
 /* -----------------------------------------------------------------------------
  * Media Operations
  */
@@ -839,6 +847,7 @@ static const struct v4l2_subdev_pad_ops xcsi2rxss_pad_ops = {
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xcsi2rxss_set_format,
 	.link_validate = v4l2_subdev_link_validate_default,
+	.set_routing = xcsi2rxss_set_routing,
 };
 
 static const struct v4l2_subdev_ops xcsi2rxss_ops = {

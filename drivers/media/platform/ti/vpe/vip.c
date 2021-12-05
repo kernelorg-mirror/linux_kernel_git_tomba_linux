@@ -693,7 +693,7 @@ static int add_out_dtd(struct vip_stream *stream, int srce_type)
 		break;
 	case VIP_SRCE_CHROMA:
 		plane = 1;
-		/* fallthrough */
+		fallthrough;
 	case VIP_SRCE_LUMA:
 		if (port->port_id == VIP_PORTB) {
 			if (port->scaler && !port->fmt->coplanar)

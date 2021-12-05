@@ -3337,8 +3337,8 @@ static void free_port(struct vip_port *port)
 	if (!port)
 		return;
 
-	v4l2_async_notifier_unregister(&port->notifier);
-	v4l2_async_notifier_cleanup(&port->notifier);
+	v4l2_async_nf_unregister(&port->notifier);
+	v4l2_async_nf_cleanup(&port->notifier);
 	free_stream(port->cap_streams[0]);
 }
 
@@ -3509,22 +3509,22 @@ static int vip_register_subdev_notif(struct vip_port *port,
 		}
 	}
 
-	v4l2_async_notifier_init(notifier);
+	v4l2_async_nf_init(notifier);
 
-	asd = v4l2_async_notifier_add_fwnode_subdev(notifier, subdev,
-						    sizeof(*asd));
+	asd = v4l2_async_nf_add_fwnode(notifier, subdev,
+				       struct v4l2_async_subdev);
 	if (IS_ERR(asd)) {
 		v4l2_dbg(1, debug, port, "Error adding asd\n");
 		fwnode_handle_put(subdev);
-		v4l2_async_notifier_cleanup(notifier);
+		v4l2_async_nf_cleanup(notifier);
 		return -EINVAL;
 	}
 
 	notifier->ops = &vip_async_ops;
-	ret = v4l2_async_notifier_register(dev->v4l2_dev, notifier);
+	ret = v4l2_async_nf_register(dev->v4l2_dev, notifier);
 	if (ret) {
 		v4l2_dbg(1, debug, port, "Error registering async notifier\n");
-		v4l2_async_notifier_cleanup(notifier);
+		v4l2_async_nf_cleanup(notifier);
 		ret = -EINVAL;
 	}
 

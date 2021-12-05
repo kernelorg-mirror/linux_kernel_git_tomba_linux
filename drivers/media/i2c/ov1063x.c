@@ -1151,12 +1151,12 @@ done:
 
 static struct v4l2_mbus_framefmt *
 __ov1063x_get_pad_format(struct ov1063x_priv *priv,
-			 struct v4l2_subdev_pad_config *cfg,
+			 struct v4l2_subdev_state *state,
 			 unsigned int pad, u32 which)
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_format(&priv->subdev, cfg, pad);
+		return v4l2_subdev_get_try_format(&priv->subdev, state, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		return &priv->format;
 	default:
@@ -1165,13 +1165,13 @@ __ov1063x_get_pad_format(struct ov1063x_priv *priv,
 }
 
 static int ov1063x_init_cfg(struct v4l2_subdev *sd,
-			    struct v4l2_subdev_pad_config *cfg)
+			    struct v4l2_subdev_state *state)
 {
-	u32 which = cfg ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
+	u32 which = state ? V4L2_SUBDEV_FORMAT_TRY : V4L2_SUBDEV_FORMAT_ACTIVE;
 	struct ov1063x_priv *priv = to_ov1063x(sd);
 	struct v4l2_mbus_framefmt *format;
 
-	format = __ov1063x_get_pad_format(priv, cfg, 0, which);
+	format = __ov1063x_get_pad_format(priv, state, 0, which);
 	format->code = ov1063x_mbus_formats[0];
 	format->width = ov1063x_framesizes[0].width;
 	format->height = ov1063x_framesizes[0].height;
@@ -1201,7 +1201,7 @@ static int ov1063x_init_cfg(struct v4l2_subdev *sd,
 }
 
 static int ov1063x_enum_mbus_code(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_pad_config *cfg,
+				  struct v4l2_subdev_state *state,
 				  struct v4l2_subdev_mbus_code_enum *code)
 {
 	if (code->index >= ARRAY_SIZE(ov1063x_mbus_formats))
@@ -1213,7 +1213,7 @@ static int ov1063x_enum_mbus_code(struct v4l2_subdev *sd,
 }
 
 static int ov1063x_enum_frame_sizes(struct v4l2_subdev *sd,
-				    struct v4l2_subdev_pad_config *cfg,
+				    struct v4l2_subdev_state *state,
 				    struct v4l2_subdev_frame_size_enum *fse)
 {
 	unsigned int i;
@@ -1238,19 +1238,19 @@ static int ov1063x_enum_frame_sizes(struct v4l2_subdev *sd,
 }
 
 static int ov1063x_get_fmt(struct v4l2_subdev *sd,
-			   struct v4l2_subdev_pad_config *cfg,
+			   struct v4l2_subdev_state *state,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct ov1063x_priv *priv = to_ov1063x(sd);
 
-	fmt->format = *__ov1063x_get_pad_format(priv, cfg, fmt->pad,
+	fmt->format = *__ov1063x_get_pad_format(priv, state, fmt->pad,
 						fmt->which);
 
 	return 0;
 }
 
 static int ov1063x_set_fmt(struct v4l2_subdev *sd,
-			   struct v4l2_subdev_pad_config *cfg,
+			   struct v4l2_subdev_state *state,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct ov1063x_priv *priv = to_ov1063x(sd);
@@ -1281,7 +1281,7 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 				       fmt->format.height);
 
 	/* Update the stored format and return it. */
-	format = __ov1063x_get_pad_format(priv, cfg, fmt->pad, fmt->which);
+	format = __ov1063x_get_pad_format(priv, state, fmt->pad, fmt->which);
 
 	mutex_lock(priv->hdl.lock);
 

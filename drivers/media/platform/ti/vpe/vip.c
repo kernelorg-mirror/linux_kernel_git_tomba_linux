@@ -1593,16 +1593,16 @@ static int vip_try_fmt_vid_cap(struct file *file, void *priv,
 			struct v4l2_subdev_format format = {
 				.which = V4L2_SUBDEV_FORMAT_TRY,
 			};
-			struct v4l2_subdev_pad_config *pad_cfg;
+			struct v4l2_subdev_state *state;
 
-			pad_cfg = v4l2_subdev_alloc_pad_config(port->subdev);
-			if (!pad_cfg)
+			state = v4l2_subdev_alloc_state(port->subdev);
+			if (!state)
 				return -ENOMEM;
 
 			v4l2_fill_mbus_format(&format.format, &f->fmt.pix,
 					      fmt->code);
 			ret = v4l2_subdev_call(port->subdev, pad, set_fmt,
-					       pad_cfg, &format);
+					       state, &format);
 			if (ret)
 				/* here regardless of the reason we give up */
 				break;
@@ -1616,7 +1616,7 @@ static int vip_try_fmt_vid_cap(struct file *file, void *priv,
 			best_width = format.format.width;
 			best_height = format.format.height;
 
-			v4l2_subdev_free_pad_config(pad_cfg);
+			v4l2_subdev_free_state(state);
 			break;
 
 		} else if (ret) {

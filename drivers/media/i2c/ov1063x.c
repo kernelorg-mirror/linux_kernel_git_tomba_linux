@@ -450,6 +450,12 @@ enum ov1063x_model {
 	SENSOR_OV10635,
 };
 
+enum ov1063x_streaming_state {
+	OV1063X_STREAM_OFF = 0,
+	OV1063X_STREAM_STARTING,
+	OV1063X_STREAM_ON,
+};
+
 #define OV1063X_SENSOR_WIDTH			1312
 #define OV1063X_SENSOR_HEIGHT			814
 
@@ -474,7 +480,7 @@ struct ov1063x_priv {
 	 * The streaming and format fields are protected by the control handler
 	 * lock.
 	 */
-	bool				streaming;
+	enum ov1063x_streaming_state	streaming;
 	struct v4l2_rect		analog_crop;
 	struct v4l2_rect		digital_crop;
 	struct v4l2_mbus_framefmt	format;
@@ -1025,10 +1031,11 @@ static int ov1063x_tpg_setup(struct ov1063x_priv *priv, struct v4l2_ctrl *ctrl)
 		return ov1063x_write_array(priv, ov1063x_regs_colorbar_disable,
 					   ARRAY_SIZE(ov1063x_regs_colorbar_disable));
 
-	if (!ctrl->cur.val) {
+	if (!ctrl->cur.val || priv->streaming == OV1063X_STREAM_STARTING) {
 		/*
 		 * Only write the full settings when the test pattern was
-		 * disabled, not when we're just changing the test pattern type.
+		 * disabled or when we start streaming, not when we're just
+		 * changing the test pattern type.
 		 */
 		ret = ov1063x_write_array(priv, ov1063x_regs_colorbar_enable,
 					  ARRAY_SIZE(ov1063x_regs_colorbar_enable));
@@ -1051,7 +1058,7 @@ static int ov1063x_s_ctrl(struct v4l2_ctrl *ctrl)
 					struct ov1063x_priv, hdl);
 	int ret = 0;
 
-	if (!priv->streaming)
+	if (priv->streaming == OV1063X_STREAM_OFF)
 		return 0;
 
 	switch (ctrl->id) {
@@ -1105,7 +1112,7 @@ static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 		pm_runtime_put_autosuspend(priv->dev);
 
 		mutex_lock(priv->hdl.lock);
-		priv->streaming = false;
+		priv->streaming = OV1063X_STREAM_OFF;
 		mutex_unlock(priv->hdl.lock);
 
 		return ret;
@@ -1114,7 +1121,7 @@ static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 	mutex_lock(priv->hdl.lock);
 
 	/* Streaming needs to be true for ov1063x_s_ctrl() to proceed. */
-	priv->streaming = true;
+	priv->streaming = OV1063X_STREAM_STARTING;
 
 	ret = pm_runtime_get_sync(priv->dev);
 	if (ret < 0)
@@ -1134,6 +1141,8 @@ static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
 		      OV1063X_SC_CMMN_CLKRST2_PCLK_DVP |
 		      OV1063X_SC_CMMN_CLKRST2_SCLK, &ret);
 
+	priv->streaming = OV1063X_STREAM_ON;
+
 done:
 	if (ret < 0) {
 		/*
@@ -1141,7 +1150,7 @@ done:
 		 * device likely has no other chance to recover.
 		 */
 		pm_runtime_put_sync(priv->dev);
-		priv->streaming = false;
+		priv->streaming = OV1063X_STREAM_OFF;
 	}
 
 	mutex_unlock(priv->hdl.lock);
@@ -1285,7 +1294,8 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 
 	mutex_lock(priv->hdl.lock);
 
-	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE && priv->streaming) {
+	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE &&
+	    priv->streaming != OV1063X_STREAM_OFF) {
 		ret = -EBUSY;
 		goto done;
 	}

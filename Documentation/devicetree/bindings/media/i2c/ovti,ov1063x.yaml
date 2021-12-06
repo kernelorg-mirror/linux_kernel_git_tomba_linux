@@ -39,12 +39,12 @@ properties:
       Specifier for the GPIO connected to the PWDN pin.
 
   port:
-    $ref: /schemas/graph.yaml#/properties/port
+    $ref: /schemas/graph.yaml#/$defs/port-base
     additionalProperties: false
 
     properties:
       endpoint:
-        $ref: ../video-interfaces.yaml#
+        $ref: /schemas/media/video-interfaces.yaml#
         unevaluatedProperties: false
 
         properties:

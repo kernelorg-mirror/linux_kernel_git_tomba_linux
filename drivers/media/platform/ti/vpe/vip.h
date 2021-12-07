@@ -13,20 +13,21 @@
 #define __TI_VIP_H
 
 #include <linux/videodev2.h>
+
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-event.h>
+#include <media/v4l2-fwnode.h>
 #include <media/v4l2-ioctl.h>
 #include <media/v4l2-rect.h>
 #include <media/videobuf2-core.h>
 #include <media/videobuf2-dma-contig.h>
 #include <media/videobuf2-memops.h>
-#include <media/v4l2-fwnode.h>
 
+#include "csc.h"
+#include "sc.h"
 #include "vpdma.h"
 #include "vpdma_priv.h"
-#include "sc.h"
-#include "csc.h"
 
 #define VIP_SLICE1	0
 #define VIP_SLICE2	1

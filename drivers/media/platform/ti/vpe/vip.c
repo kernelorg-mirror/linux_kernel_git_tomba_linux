@@ -14,16 +14,15 @@
 #include <linux/dma-mapping.h>
 #include <linux/err.h>
 #include <linux/interrupt.h>
-#include <linux/module.h>
-#include <linux/workqueue.h>
-#include <linux/pm_runtime.h>
-#include <linux/sched.h>
 #include <linux/mfd/syscon.h>
-#include <linux/regmap.h>
-
-#include <linux/pinctrl/consumer.h>
+#include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/of_graph.h>
+#include <linux/pinctrl/consumer.h>
+#include <linux/pm_runtime.h>
+#include <linux/regmap.h>
+#include <linux/sched.h>
+#include <linux/workqueue.h>
 
 #include "vip.h"
 

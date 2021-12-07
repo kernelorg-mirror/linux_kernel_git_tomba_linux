@@ -3881,4 +3881,4 @@ module_platform_driver(vip_pdrv);
 
 MODULE_DESCRIPTION("TI VIP driver");
 MODULE_AUTHOR("Texas Instruments");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

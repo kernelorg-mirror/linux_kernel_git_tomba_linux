@@ -233,20 +233,6 @@ static void vip_init_format_info(struct device *dev)
 	}
 }
 
-/*  Print Four-character-code (FOURCC) */
-static char *fourcc_to_str(u32 fmt)
-{
-	static char code[5];
-
-	code[0] = (unsigned char)(fmt & 0xff);
-	code[1] = (unsigned char)((fmt >> 8) & 0xff);
-	code[2] = (unsigned char)((fmt >> 16) & 0xff);
-	code[3] = (unsigned char)((fmt >> 24) & 0xff);
-	code[4] = '\0';
-
-	return code;
-}
-
 /*
  * Find our format description corresponding to the passed v4l2_format
  */
@@ -1506,8 +1492,8 @@ static int vip_calc_format_size(struct vip_port *port,
 
 	f->fmt.pix.colorspace = port->mbus_framefmt.colorspace;
 
-	v4l2_dbg(3, debug, port, "calc_format_size: fourcc:%s size: %dx%d bpl:%d img_size:%d\n",
-		 fourcc_to_str(f->fmt.pix.pixelformat),
+	v4l2_dbg(3, debug, port, "calc_format_size: fourcc:%p4cc size: %dx%d bpl:%d img_size:%d\n",
+		 &f->fmt.pix.pixelformat,
 		 f->fmt.pix.width, f->fmt.pix.height,
 		 f->fmt.pix.bytesperline, f->fmt.pix.sizeimage);
 
@@ -1816,8 +1802,8 @@ static int vip_s_fmt_vid_cap(struct file *file, void *priv,
 	else
 		port->flags &= ~FLAG_INTERLACED;
 
-	v4l2_dbg(3, debug, stream, "s_fmt fourcc:%s size: %dx%d bpl:%d img_size:%d\n",
-		 fourcc_to_str(f->fmt.pix.pixelformat),
+	v4l2_dbg(3, debug, stream, "s_fmt fourcc:%p4cc size: %dx%d bpl:%d img_size:%d\n",
+		 &f->fmt.pix.pixelformat,
 		 f->fmt.pix.width, f->fmt.pix.height,
 		 f->fmt.pix.bytesperline, f->fmt.pix.sizeimage);
 
@@ -2693,9 +2679,8 @@ static int vip_init_port(struct vip_port *port)
 	port->fmt = fmt;
 	port->mbus_framefmt = *mbus_fmt;
 
-	v4l2_dbg(3, debug, port, "%s: g_mbus_fmt subdev mbus_code: %04X fourcc:%s size: %dx%d\n",
-		 __func__, fmt->code,
-		 fourcc_to_str(fmt->fourcc),
+	v4l2_dbg(3, debug, port, "%s: g_mbus_fmt subdev mbus_code: %04X fourcc:%p4cc size: %dx%d\n",
+		 __func__, fmt->code, &fmt->fourcc,
 		 mbus_fmt->width, mbus_fmt->height);
 
 	if (mbus_fmt->field == V4L2_FIELD_ALTERNATE)
@@ -2765,8 +2750,8 @@ static int vip_init_stream(struct vip_stream *stream)
 	stream->bytesperline = f.fmt.pix.bytesperline;
 	stream->sizeimage = f.fmt.pix.sizeimage;
 
-	v4l2_dbg(3, debug, stream, "init_stream fourcc:%s size: %dx%d bpl:%d img_size:%d\n",
-		 fourcc_to_str(f.fmt.pix.pixelformat),
+	v4l2_dbg(3, debug, stream, "init_stream fourcc:%p4cc size: %dx%d bpl:%d img_size:%d\n",
+		 &f.fmt.pix.pixelformat,
 		 f.fmt.pix.width, f.fmt.pix.height,
 		 f.fmt.pix.bytesperline, f.fmt.pix.sizeimage);
 	v4l2_dbg(3, debug, stream, "init_stream vpdma data type: 0x%02X\n",
@@ -3298,8 +3283,8 @@ static int get_subdev_active_format(struct vip_port *port,
 
 			port->active_fmt[i] = fmt;
 			v4l2_dbg(2, debug, port,
-				 "matched fourcc: %s: code: %04x idx: %d\n",
-				 fourcc_to_str(fmt->fourcc), fmt->code, i);
+				 "matched fourcc: %p4cc: code: %04x idx: %d\n",
+				 &fmt->fourcc, fmt->code, i);
 			port->num_active_fmt = ++i;
 		}
 	}

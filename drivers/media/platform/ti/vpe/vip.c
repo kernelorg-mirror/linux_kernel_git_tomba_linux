@@ -3326,11 +3326,6 @@ static void free_port(struct vip_port *port)
 	free_stream(port->cap_streams[0]);
 }
 
-static int get_field(u32 value, u32 mask, int shift)
-{
-	return (value & (mask << shift)) >> shift;
-}
-
 static int vip_probe_complete(struct platform_device *pdev);
 static void vip_vpdma_fw_cb(struct platform_device *pdev)
 {
@@ -3726,7 +3721,7 @@ static int vip_probe(struct platform_device *pdev)
 	struct vip_shared *shared;
 	struct pinctrl *pinctrl;
 	int ret, slice = VIP_SLICE1;
-	u32 tmp, pid;
+	u32 pid;
 	const char *instance_name;
 	struct fwnode_handle *fwnode;
 
@@ -3771,12 +3766,12 @@ static int vip_probe(struct platform_device *pdev)
 		goto err_runtime_disable;
 
 	/* Make sure H/W module has the right functionality */
-	pid = reg_read(shared, VIP_PID);
-	tmp = get_field(pid, VIP_PID_FUNC_MASK, VIP_PID_FUNC_SHIFT);
+	pid = (reg_read(shared, VIP_PID) >> VIP_PID_FUNC_SHIFT)
+	    & VIP_PID_FUNC_MASK;
 
-	if (tmp != VIP_PID_FUNC) {
+	if (pid != VIP_PID_FUNC) {
 		dev_info(&pdev->dev, "vip: unexpected PID function: 0x%x\n",
-			 tmp);
+			 pid);
 		ret = -ENODEV;
 		goto err_runtime_put;
 	}

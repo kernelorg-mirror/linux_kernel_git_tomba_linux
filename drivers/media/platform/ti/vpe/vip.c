@@ -339,26 +339,6 @@ vip_csc_direction(u32 src_code, const struct v4l2_format_info *dfinfo)
 #define FLAG_MULT_PORT		BIT(6)
 #define FLAG_MULT_ANC		BIT(7)
 
-/*
- * Function prototype declarations
- */
-static int alloc_port(struct vip_dev *, int, const char *);
-static void free_port(struct vip_port *);
-static int vip_setup_parser(struct vip_port *port);
-static int vip_setup_scaler(struct vip_stream *stream);
-static void vip_enable_parser(struct vip_port *port, bool on);
-static void vip_reset_parser(struct vip_port *port, bool on);
-static void vip_parser_stop_imm(struct vip_port *port, bool on);
-static void stop_dma(struct vip_stream *stream, bool clear_list);
-static int vip_load_vpdma_list_fifo(struct vip_stream *stream);
-static inline bool is_scaler_available(struct vip_port *port);
-static inline bool allocate_scaler(struct vip_port *port);
-static inline void free_scaler(struct vip_port *port);
-static bool is_csc_available(struct vip_port *port);
-static bool allocate_csc(struct vip_port *port,
-				enum vip_csc_state csc_direction);
-static void free_csc(struct vip_port *port);
-
 #define reg_read(dev, offset) ioread32(dev->base + offset)
 #define reg_write(dev, offset, val) iowrite32(val, dev->base + offset)
 
@@ -899,6 +879,73 @@ static void start_dma(struct vip_stream *stream, struct vip_buffer *buf)
 			   &stream->desc_list, stream->list_num);
 }
 
+static void stop_dma(struct vip_stream *stream, bool clear_list)
+{
+	struct vip_dev *dev = stream->port->dev;
+	int ch, size = 0;
+
+	/* Create a list of channels to be cleared */
+	for (ch = 0; ch < VPDMA_MAX_CHANNELS; ch++) {
+		if (stream->vpdma_channels[ch] == 1) {
+			stream->vpdma_channels_to_abort[size++] = ch;
+			v4l2_dbg(2, debug, stream, "Clear channel no: %d\n",
+				 ch);
+		}
+	}
+
+	/* Clear all the used channels for the list */
+	vpdma_list_cleanup(dev->shared->vpdma, stream->list_num,
+			   stream->vpdma_channels_to_abort, size);
+
+	if (clear_list)
+		for (ch = 0; ch < VPDMA_MAX_CHANNELS; ch++)
+			stream->vpdma_channels[ch] = 0;
+}
+
+static int vip_load_vpdma_list_fifo(struct vip_stream *stream)
+{
+	struct vip_port *port = stream->port;
+	struct vip_dev *dev = port->dev;
+	struct vpdma_data *vpdma = dev->shared->vpdma;
+	int list_num = stream->list_num;
+	struct vip_buffer *buf;
+	unsigned long flags;
+	int timeout, i;
+
+	if (vpdma_list_busy(dev->shared->vpdma, stream->list_num))
+		return -EBUSY;
+
+	for (i = 0; i < VIP_VPDMA_FIFO_SIZE; i++) {
+		spin_lock_irqsave(&dev->slock, flags);
+		if (list_empty(&stream->vidq)) {
+			v4l2_err(stream, "No buffer left!");
+			spin_unlock_irqrestore(&dev->slock, flags);
+			return -EINVAL;
+		}
+
+		buf = list_entry(stream->vidq.next,
+				 struct vip_buffer, list);
+		buf->drop = false;
+
+		list_move_tail(&buf->list, &stream->post_bufs);
+		spin_unlock_irqrestore(&dev->slock, flags);
+
+		v4l2_dbg(2, debug, stream, "%s: start_dma vb2 buf idx:%d\n",
+			 __func__, buf->vb.vb2_buf.index);
+		start_dma(stream, buf);
+
+		timeout = 500;
+		while (vpdma_list_busy(vpdma, list_num) && timeout--)
+			usleep_range(1000, 1100);
+
+		if (timeout <= 0) {
+			v4l2_err(stream, "Timed out loading VPDMA list fifo\n");
+			return -EBUSY;
+		}
+	}
+	return 0;
+}
+
 static void vip_schedule_next_buffer(struct vip_stream *stream)
 {
 	struct vip_dev *dev = stream->port->dev;
@@ -976,6 +1023,397 @@ static void vip_process_buffer_complete(struct vip_stream *stream)
 
 	stream->sequence++;
 }
+
+/* -----------------------------------------------------------------------------
+ * CSC
+ */
+
+static bool is_csc_available(struct vip_port *port)
+{
+	if (port->endpoint.bus_type == V4L2_MBUS_PARALLEL)
+		if (port->dev->csc_assigned == VIP_NOT_ASSIGNED ||
+		    port->dev->csc_assigned == port->port_id)
+			return true;
+	return false;
+}
+
+static bool allocate_csc(struct vip_port *port,
+				enum vip_csc_state csc_direction)
+{
+	/* Is CSC needed? */
+	if (csc_direction != VIP_CSC_NA) {
+		if (is_csc_available(port)) {
+			port->dev->csc_assigned = port->port_id;
+			port->csc = csc_direction;
+			v4l2_dbg(1, debug, port, "%s: csc allocated: dir: %d\n",
+				 __func__, csc_direction);
+			return true;
+		}
+	}
+	return false;
+}
+
+static void free_csc(struct vip_port *port)
+{
+	if (port->dev->csc_assigned == port->port_id) {
+		port->dev->csc_assigned = VIP_NOT_ASSIGNED;
+		port->csc = VIP_CSC_NA;
+		v4l2_dbg(1, debug, port, "%s: csc freed\n", __func__);
+	}
+}
+
+/* -----------------------------------------------------------------------------
+ * Scaler
+ */
+
+static int vip_setup_scaler(struct vip_stream *stream)
+{
+	struct vip_port *port = stream->port;
+	struct vip_dev *dev = port->dev;
+	struct sc_data *sc = dev->sc;
+	struct csc_data *csc = dev->csc;
+	struct vpdma_data *vpdma = dev->shared->vpdma;
+	struct vip_mmr_adb *mmr_adb = port->mmr_adb.addr;
+	int list_num = stream->list_num;
+	int timeout = 500;
+	struct v4l2_format dst_f;
+	struct v4l2_format src_f;
+
+	memset(&src_f, 0, sizeof(src_f));
+	src_f.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	v4l2_fill_pix_format(&src_f.fmt.pix, &port->mbus_framefmt);
+	src_f.fmt.pix.pixelformat = vip_mbus_code_to_fourcc(port->fmt->code);
+
+	dst_f = src_f;
+	dst_f.fmt.pix.pixelformat = port->fmt->fourcc;
+	dst_f.fmt.pix.width = stream->width;
+	dst_f.fmt.pix.height = stream->height;
+
+	/* if scaler not associated with this port then skip */
+	if (port->scaler) {
+		sc_set_hs_coeffs(sc, port->sc_coeff_h.addr,
+				 port->mbus_framefmt.width,
+				 port->c_rect.width);
+		sc_set_vs_coeffs(sc, port->sc_coeff_v.addr,
+				 port->mbus_framefmt.height,
+				 port->c_rect.height);
+		sc_config_scaler(sc, &mmr_adb->sc_regs0[0],
+				 &mmr_adb->sc_regs8[0], &mmr_adb->sc_regs17[0],
+				 port->mbus_framefmt.width,
+				 port->mbus_framefmt.height,
+				 port->c_rect.width,
+				 port->c_rect.height);
+		port->load_mmrs = true;
+	}
+
+	/* if csc not associated with this port then skip */
+	if (port->csc) {
+		csc_set_coeff(csc, &mmr_adb->csc_regs[0],
+			      &src_f, &dst_f);
+
+		port->load_mmrs = true;
+	}
+
+	/* If coeff are already loaded then skip */
+	if (!sc->load_coeff_v && !sc->load_coeff_h && !port->load_mmrs)
+		return 0;
+
+	if (vpdma_list_busy(vpdma, list_num)) {
+		v4l2_dbg(3, debug, stream, "%s: List %d is busy\n",
+			 __func__, list_num);
+	}
+
+	/* Make sure we start with a clean list */
+	vpdma_reset_desc_list(&stream->desc_list);
+
+	/* config descriptors */
+	if (port->load_mmrs) {
+		vpdma_map_desc_buf(vpdma, &port->mmr_adb);
+		vpdma_add_cfd_adb(&stream->desc_list, CFD_MMR_CLIENT,
+				  &port->mmr_adb);
+
+		port->load_mmrs = false;
+		v4l2_dbg(3, debug, stream, "Added mmr_adb config desc\n");
+	}
+
+	if (sc->loaded_coeff_h != port->sc_coeff_h.dma_addr ||
+	    sc->load_coeff_h) {
+		vpdma_map_desc_buf(vpdma, &port->sc_coeff_h);
+		vpdma_add_cfd_block(&stream->desc_list,
+				    VIP_SLICE1_CFD_SC_CLIENT + dev->slice_id,
+				    &port->sc_coeff_h, 0);
+
+		sc->loaded_coeff_h = port->sc_coeff_h.dma_addr;
+		sc->load_coeff_h = false;
+		v4l2_dbg(3, debug, stream, "Added sc_coeff_h config desc\n");
+	}
+
+	if (sc->loaded_coeff_v != port->sc_coeff_v.dma_addr ||
+	    sc->load_coeff_v) {
+		vpdma_map_desc_buf(vpdma, &port->sc_coeff_v);
+		vpdma_add_cfd_block(&stream->desc_list,
+				    VIP_SLICE1_CFD_SC_CLIENT + dev->slice_id,
+				    &port->sc_coeff_v, SC_COEF_SRAM_SIZE >> 4);
+
+		sc->loaded_coeff_v = port->sc_coeff_v.dma_addr;
+		sc->load_coeff_v = false;
+		v4l2_dbg(3, debug, stream, "Added sc_coeff_v config desc\n");
+	}
+	v4l2_dbg(3, debug, stream, "CFD_SC_CLIENT %d slice_id: %d\n",
+		 VIP_SLICE1_CFD_SC_CLIENT + dev->slice_id, dev->slice_id);
+
+	vpdma_map_desc_buf(vpdma, &stream->desc_list.buf);
+	v4l2_dbg(3, debug, stream, "Submitting desc on list# %d\n", list_num);
+	vpdma_submit_descs(vpdma, &stream->desc_list, list_num);
+
+	while (vpdma_list_busy(vpdma, list_num) && timeout--)
+		usleep_range(1000, 1100);
+
+	vpdma_unmap_desc_buf(dev->shared->vpdma, &port->mmr_adb);
+	vpdma_unmap_desc_buf(dev->shared->vpdma, &port->sc_coeff_h);
+	vpdma_unmap_desc_buf(dev->shared->vpdma, &port->sc_coeff_v);
+	vpdma_unmap_desc_buf(dev->shared->vpdma, &stream->desc_list.buf);
+
+	vpdma_reset_desc_list(&stream->desc_list);
+
+	if (timeout <= 0) {
+		v4l2_err(stream, "Timed out setting up scaler through VPDMA list\n");
+		return -EBUSY;
+	}
+
+	return 0;
+}
+
+static inline bool is_scaler_available(struct vip_port *port)
+{
+	if (port->endpoint.bus_type == V4L2_MBUS_PARALLEL)
+		if (port->dev->sc_assigned == VIP_NOT_ASSIGNED ||
+		    port->dev->sc_assigned == port->port_id)
+			return true;
+	return false;
+}
+
+static inline bool allocate_scaler(struct vip_port *port)
+{
+	if (is_scaler_available(port)) {
+		if (port->dev->sc_assigned == VIP_NOT_ASSIGNED ||
+		    port->dev->sc_assigned == port->port_id) {
+			port->dev->sc_assigned = port->port_id;
+			port->scaler = true;
+			return true;
+		}
+	}
+	return false;
+}
+
+static inline void free_scaler(struct vip_port *port)
+{
+	if (port->dev->sc_assigned == port->port_id) {
+		port->dev->sc_assigned = VIP_NOT_ASSIGNED;
+		port->scaler = false;
+	}
+}
+
+/* -----------------------------------------------------------------------------
+ * VIP Parser
+ */
+
+static int vip_set_crop_parser(struct vip_port *port)
+{
+	struct vip_dev *dev = port->dev;
+	struct vip_parser_data *parser = dev->parser;
+	u32 hcrop = 0, vcrop = 0;
+	u32 width = port->mbus_framefmt.width;
+
+	if (port->fmt->vpdma_fmt[0] == &vpdma_raw_fmts[VPDMA_DATA_FMT_RAW8]) {
+		/*
+		 * Special case since we are faking a YUV422 16bit format
+		 * to have the vpdma perform the needed byte swap
+		 * we need to adjust the pixel width accordingly
+		 * otherwise the parser will attempt to collect more pixels
+		 * then available and the vpdma transfer will exceed the
+		 * allocated frame buffer.
+		 */
+		width >>= 1;
+		v4l2_dbg(3, debug, port, "%s: 8 bit raw detected, adjusting width to %d\n",
+			 __func__, width);
+	}
+
+	/*
+	 * Set Parser Crop parameters to source size otherwise
+	 * scaler and colorspace converter will yield garbage.
+	 */
+	hcrop = VIP_ACT_BYPASS;
+	insert_field(&hcrop, 0, VIP_ACT_SKIP_NUMPIX_MASK,
+		     VIP_ACT_SKIP_NUMPIX_SHFT);
+	insert_field(&hcrop, width,
+		     VIP_ACT_USE_NUMPIX_MASK, VIP_ACT_USE_NUMPIX_SHFT);
+	reg_write(parser, VIP_PARSER_CROP_H_PORT(port->port_id), hcrop);
+
+	insert_field(&vcrop, 0, VIP_ACT_SKIP_NUMLINES_MASK,
+		     VIP_ACT_SKIP_NUMLINES_SHFT);
+	insert_field(&vcrop, port->mbus_framefmt.height,
+		     VIP_ACT_USE_NUMLINES_MASK, VIP_ACT_USE_NUMLINES_SHFT);
+	reg_write(parser, VIP_PARSER_CROP_V_PORT(port->port_id), vcrop);
+
+	return 0;
+}
+
+static void vip_reset_parser(struct vip_port *port, bool on)
+{
+	u32 config0;
+	struct vip_dev *dev = port->dev;
+	struct vip_parser_data *parser = dev->parser;
+
+	config0 = reg_read(parser, VIP_PARSER_PORT(port->port_id));
+
+	if (on)
+		config0 |= VIP_SW_RESET;
+	else
+		config0 &= ~VIP_SW_RESET;
+
+	reg_write(parser, VIP_PARSER_PORT(port->port_id), config0);
+}
+
+static int vip_setup_parser(struct vip_port *port)
+{
+	struct vip_dev *dev = port->dev;
+	struct vip_parser_data *parser = dev->parser;
+	struct v4l2_fwnode_endpoint *endpoint = &port->endpoint;
+	struct vip_bt656_bus *bt656_ep = &port->bt656_endpoint;
+	int iface, sync_type;
+	u32 flags = 0, config0;
+
+	/* Reset the port */
+	vip_reset_parser(port, true);
+	usleep_range(200, 250);
+	vip_reset_parser(port, false);
+
+	config0 = reg_read(parser, VIP_PARSER_PORT(port->port_id));
+
+	switch (endpoint->bus.parallel.bus_width) {
+	case 24:
+		iface = SINGLE_24B_INTERFACE;
+		break;
+	case 16:
+		iface = SINGLE_16B_INTERFACE;
+		break;
+	case 8:
+	default:
+		iface = DUAL_8B_INTERFACE;
+	}
+
+	if (endpoint->bus_type == V4L2_MBUS_BT656) {
+		flags = endpoint->bus.parallel.flags;
+
+		/*
+		 * Ideally, this should come from subdev
+		 * port->fmt can be anything once CSC is enabled
+		 */
+		if (vip_is_mbuscode_rgb(port->fmt->code)) {
+			sync_type = EMBEDDED_SYNC_SINGLE_RGB_OR_YUV444;
+		} else {
+			switch (bt656_ep->num_channels) {
+			case 4:
+				sync_type = EMBEDDED_SYNC_4X_MULTIPLEXED_YUV422;
+				break;
+			case 2:
+				sync_type = EMBEDDED_SYNC_2X_MULTIPLEXED_YUV422;
+				break;
+			case 1:
+				sync_type = EMBEDDED_SYNC_SINGLE_YUV422;
+				break;
+			default:
+				sync_type =
+				EMBEDDED_SYNC_LINE_MULTIPLEXED_YUV422;
+			}
+			if (bt656_ep->pixmux == 0)
+				sync_type =
+				EMBEDDED_SYNC_LINE_MULTIPLEXED_YUV422;
+		}
+
+	} else if (endpoint->bus_type == V4L2_MBUS_PARALLEL) {
+		flags = endpoint->bus.parallel.flags;
+
+		if (vip_is_mbuscode_rgb(port->fmt->code))
+			sync_type = DISCRETE_SYNC_SINGLE_RGB_24B;
+		else
+			sync_type = DISCRETE_SYNC_SINGLE_YUV422;
+
+		if (flags & V4L2_MBUS_HSYNC_ACTIVE_HIGH)
+			config0 |= VIP_HSYNC_POLARITY;
+		else if (flags & V4L2_MBUS_HSYNC_ACTIVE_LOW)
+			config0 &= ~VIP_HSYNC_POLARITY;
+
+		if (flags & V4L2_MBUS_VSYNC_ACTIVE_HIGH)
+			config0 |= VIP_VSYNC_POLARITY;
+		else if (flags & V4L2_MBUS_VSYNC_ACTIVE_LOW)
+			config0 &= ~VIP_VSYNC_POLARITY;
+
+		config0 &= ~VIP_USE_ACTVID_HSYNC_ONLY;
+		config0 |= VIP_ACTVID_POLARITY;
+		config0 |= VIP_DISCRETE_BASIC_MODE;
+
+	} else {
+		v4l2_err(port, "Device doesn't support CSI2");
+		return -EINVAL;
+	}
+
+	if (flags & V4L2_MBUS_PCLK_SAMPLE_FALLING) {
+		vip_set_pclk_invert(port);
+		config0 |= VIP_PIXCLK_EDGE_POLARITY;
+	} else {
+		vip_clr_pclk_invert(port);
+		config0 &= ~VIP_PIXCLK_EDGE_POLARITY;
+	}
+
+	config0 |= ((sync_type & VIP_SYNC_TYPE_MASK) << VIP_SYNC_TYPE_SHFT);
+
+	reg_write(parser, VIP_PARSER_PORT(port->port_id), config0);
+
+	vip_set_data_interface(port, iface);
+	vip_set_crop_parser(port);
+
+	return 0;
+}
+
+static void vip_enable_parser(struct vip_port *port, bool on)
+{
+	u32 config0;
+	struct vip_dev *dev = port->dev;
+	struct vip_parser_data *parser = dev->parser;
+
+	config0 = reg_read(parser, VIP_PARSER_PORT(port->port_id));
+
+	if (on) {
+		config0 |= VIP_PORT_ENABLE;
+		config0 &= ~(VIP_ASYNC_FIFO_RD | VIP_ASYNC_FIFO_WR);
+	} else {
+		config0 &= ~VIP_PORT_ENABLE;
+		config0 |= (VIP_ASYNC_FIFO_RD | VIP_ASYNC_FIFO_WR);
+	}
+	reg_write(parser, VIP_PARSER_PORT(port->port_id), config0);
+}
+
+static void vip_parser_stop_imm(struct vip_port *port, bool on)
+{
+	u32 config0;
+	struct vip_dev *dev = port->dev;
+	struct vip_parser_data *parser = dev->parser;
+
+	config0 = reg_read(parser, VIP_PARSER_STOP_IMM_PORT(port->port_id));
+
+	if (on)
+		config0 = 0xffffffff;
+	else
+		config0 = 0;
+
+	reg_write(parser, VIP_PARSER_STOP_IMM_PORT(port->port_id), config0);
+}
+
+/* -----------------------------------------------------------------------------
+ * Overflow Recovery
+ */
 
 static int vip_reset_vpdma(struct vip_stream *stream)
 {
@@ -2269,168 +2707,6 @@ static void vip_buf_queue(struct vb2_buffer *vb)
 	spin_unlock_irqrestore(&dev->slock, flags);
 }
 
-static int vip_setup_scaler(struct vip_stream *stream)
-{
-	struct vip_port *port = stream->port;
-	struct vip_dev *dev = port->dev;
-	struct sc_data *sc = dev->sc;
-	struct csc_data *csc = dev->csc;
-	struct vpdma_data *vpdma = dev->shared->vpdma;
-	struct vip_mmr_adb *mmr_adb = port->mmr_adb.addr;
-	int list_num = stream->list_num;
-	int timeout = 500;
-	struct v4l2_format dst_f;
-	struct v4l2_format src_f;
-
-	memset(&src_f, 0, sizeof(src_f));
-	src_f.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	v4l2_fill_pix_format(&src_f.fmt.pix, &port->mbus_framefmt);
-	src_f.fmt.pix.pixelformat = vip_mbus_code_to_fourcc(port->fmt->code);
-
-	dst_f = src_f;
-	dst_f.fmt.pix.pixelformat = port->fmt->fourcc;
-	dst_f.fmt.pix.width = stream->width;
-	dst_f.fmt.pix.height = stream->height;
-
-	/* if scaler not associated with this port then skip */
-	if (port->scaler) {
-		sc_set_hs_coeffs(sc, port->sc_coeff_h.addr,
-				 port->mbus_framefmt.width,
-				 port->c_rect.width);
-		sc_set_vs_coeffs(sc, port->sc_coeff_v.addr,
-				 port->mbus_framefmt.height,
-				 port->c_rect.height);
-		sc_config_scaler(sc, &mmr_adb->sc_regs0[0],
-				 &mmr_adb->sc_regs8[0], &mmr_adb->sc_regs17[0],
-				 port->mbus_framefmt.width,
-				 port->mbus_framefmt.height,
-				 port->c_rect.width,
-				 port->c_rect.height);
-		port->load_mmrs = true;
-	}
-
-	/* if csc not associated with this port then skip */
-	if (port->csc) {
-		csc_set_coeff(csc, &mmr_adb->csc_regs[0],
-			      &src_f, &dst_f);
-
-		port->load_mmrs = true;
-	}
-
-	/* If coeff are already loaded then skip */
-	if (!sc->load_coeff_v && !sc->load_coeff_h && !port->load_mmrs)
-		return 0;
-
-	if (vpdma_list_busy(vpdma, list_num)) {
-		v4l2_dbg(3, debug, stream, "%s: List %d is busy\n",
-			 __func__, list_num);
-	}
-
-	/* Make sure we start with a clean list */
-	vpdma_reset_desc_list(&stream->desc_list);
-
-	/* config descriptors */
-	if (port->load_mmrs) {
-		vpdma_map_desc_buf(vpdma, &port->mmr_adb);
-		vpdma_add_cfd_adb(&stream->desc_list, CFD_MMR_CLIENT,
-				  &port->mmr_adb);
-
-		port->load_mmrs = false;
-		v4l2_dbg(3, debug, stream, "Added mmr_adb config desc\n");
-	}
-
-	if (sc->loaded_coeff_h != port->sc_coeff_h.dma_addr ||
-	    sc->load_coeff_h) {
-		vpdma_map_desc_buf(vpdma, &port->sc_coeff_h);
-		vpdma_add_cfd_block(&stream->desc_list,
-				    VIP_SLICE1_CFD_SC_CLIENT + dev->slice_id,
-				    &port->sc_coeff_h, 0);
-
-		sc->loaded_coeff_h = port->sc_coeff_h.dma_addr;
-		sc->load_coeff_h = false;
-		v4l2_dbg(3, debug, stream, "Added sc_coeff_h config desc\n");
-	}
-
-	if (sc->loaded_coeff_v != port->sc_coeff_v.dma_addr ||
-	    sc->load_coeff_v) {
-		vpdma_map_desc_buf(vpdma, &port->sc_coeff_v);
-		vpdma_add_cfd_block(&stream->desc_list,
-				    VIP_SLICE1_CFD_SC_CLIENT + dev->slice_id,
-				    &port->sc_coeff_v, SC_COEF_SRAM_SIZE >> 4);
-
-		sc->loaded_coeff_v = port->sc_coeff_v.dma_addr;
-		sc->load_coeff_v = false;
-		v4l2_dbg(3, debug, stream, "Added sc_coeff_v config desc\n");
-	}
-	v4l2_dbg(3, debug, stream, "CFD_SC_CLIENT %d slice_id: %d\n",
-		 VIP_SLICE1_CFD_SC_CLIENT + dev->slice_id, dev->slice_id);
-
-	vpdma_map_desc_buf(vpdma, &stream->desc_list.buf);
-	v4l2_dbg(3, debug, stream, "Submitting desc on list# %d\n", list_num);
-	vpdma_submit_descs(vpdma, &stream->desc_list, list_num);
-
-	while (vpdma_list_busy(vpdma, list_num) && timeout--)
-		usleep_range(1000, 1100);
-
-	vpdma_unmap_desc_buf(dev->shared->vpdma, &port->mmr_adb);
-	vpdma_unmap_desc_buf(dev->shared->vpdma, &port->sc_coeff_h);
-	vpdma_unmap_desc_buf(dev->shared->vpdma, &port->sc_coeff_v);
-	vpdma_unmap_desc_buf(dev->shared->vpdma, &stream->desc_list.buf);
-
-	vpdma_reset_desc_list(&stream->desc_list);
-
-	if (timeout <= 0) {
-		v4l2_err(stream, "Timed out setting up scaler through VPDMA list\n");
-		return -EBUSY;
-	}
-
-	return 0;
-}
-
-static int vip_load_vpdma_list_fifo(struct vip_stream *stream)
-{
-	struct vip_port *port = stream->port;
-	struct vip_dev *dev = port->dev;
-	struct vpdma_data *vpdma = dev->shared->vpdma;
-	int list_num = stream->list_num;
-	struct vip_buffer *buf;
-	unsigned long flags;
-	int timeout, i;
-
-	if (vpdma_list_busy(dev->shared->vpdma, stream->list_num))
-		return -EBUSY;
-
-	for (i = 0; i < VIP_VPDMA_FIFO_SIZE; i++) {
-		spin_lock_irqsave(&dev->slock, flags);
-		if (list_empty(&stream->vidq)) {
-			v4l2_err(stream, "No buffer left!");
-			spin_unlock_irqrestore(&dev->slock, flags);
-			return -EINVAL;
-		}
-
-		buf = list_entry(stream->vidq.next,
-				 struct vip_buffer, list);
-		buf->drop = false;
-
-		list_move_tail(&buf->list, &stream->post_bufs);
-		spin_unlock_irqrestore(&dev->slock, flags);
-
-		v4l2_dbg(2, debug, stream, "%s: start_dma vb2 buf idx:%d\n",
-			 __func__, buf->vb.vb2_buf.index);
-		start_dma(stream, buf);
-
-		timeout = 500;
-		while (vpdma_list_busy(vpdma, list_num) && timeout--)
-			usleep_range(1000, 1100);
-
-		if (timeout <= 0) {
-			v4l2_err(stream, "Timed out loading VPDMA list fifo\n");
-			return -EBUSY;
-		}
-	}
-	return 0;
-}
-
 static void vip_return_all_buffers(struct vip_stream *stream,
 				   struct vb2_queue *q,
 				   enum vb2_buffer_state state)
@@ -2569,70 +2845,6 @@ done:
 	dev->num_ports++;
 
 	return 0;
-}
-
-static inline bool is_scaler_available(struct vip_port *port)
-{
-	if (port->endpoint.bus_type == V4L2_MBUS_PARALLEL)
-		if (port->dev->sc_assigned == VIP_NOT_ASSIGNED ||
-		    port->dev->sc_assigned == port->port_id)
-			return true;
-	return false;
-}
-
-static inline bool allocate_scaler(struct vip_port *port)
-{
-	if (is_scaler_available(port)) {
-		if (port->dev->sc_assigned == VIP_NOT_ASSIGNED ||
-		    port->dev->sc_assigned == port->port_id) {
-			port->dev->sc_assigned = port->port_id;
-			port->scaler = true;
-			return true;
-		}
-	}
-	return false;
-}
-
-static inline void free_scaler(struct vip_port *port)
-{
-	if (port->dev->sc_assigned == port->port_id) {
-		port->dev->sc_assigned = VIP_NOT_ASSIGNED;
-		port->scaler = false;
-	}
-}
-
-static bool is_csc_available(struct vip_port *port)
-{
-	if (port->endpoint.bus_type == V4L2_MBUS_PARALLEL)
-		if (port->dev->csc_assigned == VIP_NOT_ASSIGNED ||
-		    port->dev->csc_assigned == port->port_id)
-			return true;
-	return false;
-}
-
-static bool allocate_csc(struct vip_port *port,
-				enum vip_csc_state csc_direction)
-{
-	/* Is CSC needed? */
-	if (csc_direction != VIP_CSC_NA) {
-		if (is_csc_available(port)) {
-			port->dev->csc_assigned = port->port_id;
-			port->csc = csc_direction;
-			v4l2_dbg(1, debug, port, "%s: csc allocated: dir: %d\n",
-				 __func__, csc_direction);
-			return true;
-		}
-	}
-	return false;
-}
-
-static void free_csc(struct vip_port *port)
-{
-	if (port->dev->csc_assigned == port->port_id) {
-		port->dev->csc_assigned = VIP_NOT_ASSIGNED;
-		port->csc = VIP_CSC_NA;
-		v4l2_dbg(1, debug, port, "%s: csc freed\n", __func__);
-	}
 }
 
 static int vip_init_port(struct vip_port *port)
@@ -2783,199 +2995,6 @@ static void vip_release_dev(struct vip_dev *dev)
 	}
 }
 
-static int vip_set_crop_parser(struct vip_port *port)
-{
-	struct vip_dev *dev = port->dev;
-	struct vip_parser_data *parser = dev->parser;
-	u32 hcrop = 0, vcrop = 0;
-	u32 width = port->mbus_framefmt.width;
-
-	if (port->fmt->vpdma_fmt[0] == &vpdma_raw_fmts[VPDMA_DATA_FMT_RAW8]) {
-		/*
-		 * Special case since we are faking a YUV422 16bit format
-		 * to have the vpdma perform the needed byte swap
-		 * we need to adjust the pixel width accordingly
-		 * otherwise the parser will attempt to collect more pixels
-		 * then available and the vpdma transfer will exceed the
-		 * allocated frame buffer.
-		 */
-		width >>= 1;
-		v4l2_dbg(3, debug, port, "%s: 8 bit raw detected, adjusting width to %d\n",
-			 __func__, width);
-	}
-
-	/*
-	 * Set Parser Crop parameters to source size otherwise
-	 * scaler and colorspace converter will yield garbage.
-	 */
-	hcrop = VIP_ACT_BYPASS;
-	insert_field(&hcrop, 0, VIP_ACT_SKIP_NUMPIX_MASK,
-		     VIP_ACT_SKIP_NUMPIX_SHFT);
-	insert_field(&hcrop, width,
-		     VIP_ACT_USE_NUMPIX_MASK, VIP_ACT_USE_NUMPIX_SHFT);
-	reg_write(parser, VIP_PARSER_CROP_H_PORT(port->port_id), hcrop);
-
-	insert_field(&vcrop, 0, VIP_ACT_SKIP_NUMLINES_MASK,
-		     VIP_ACT_SKIP_NUMLINES_SHFT);
-	insert_field(&vcrop, port->mbus_framefmt.height,
-		     VIP_ACT_USE_NUMLINES_MASK, VIP_ACT_USE_NUMLINES_SHFT);
-	reg_write(parser, VIP_PARSER_CROP_V_PORT(port->port_id), vcrop);
-
-	return 0;
-}
-
-static int vip_setup_parser(struct vip_port *port)
-{
-	struct vip_dev *dev = port->dev;
-	struct vip_parser_data *parser = dev->parser;
-	struct v4l2_fwnode_endpoint *endpoint = &port->endpoint;
-	struct vip_bt656_bus *bt656_ep = &port->bt656_endpoint;
-	int iface, sync_type;
-	u32 flags = 0, config0;
-
-	/* Reset the port */
-	vip_reset_parser(port, true);
-	usleep_range(200, 250);
-	vip_reset_parser(port, false);
-
-	config0 = reg_read(parser, VIP_PARSER_PORT(port->port_id));
-
-	switch (endpoint->bus.parallel.bus_width) {
-	case 24:
-		iface = SINGLE_24B_INTERFACE;
-		break;
-	case 16:
-		iface = SINGLE_16B_INTERFACE;
-		break;
-	case 8:
-	default:
-		iface = DUAL_8B_INTERFACE;
-	}
-
-	if (endpoint->bus_type == V4L2_MBUS_BT656) {
-		flags = endpoint->bus.parallel.flags;
-
-		/*
-		 * Ideally, this should come from subdev
-		 * port->fmt can be anything once CSC is enabled
-		 */
-		if (vip_is_mbuscode_rgb(port->fmt->code)) {
-			sync_type = EMBEDDED_SYNC_SINGLE_RGB_OR_YUV444;
-		} else {
-			switch (bt656_ep->num_channels) {
-			case 4:
-				sync_type = EMBEDDED_SYNC_4X_MULTIPLEXED_YUV422;
-				break;
-			case 2:
-				sync_type = EMBEDDED_SYNC_2X_MULTIPLEXED_YUV422;
-				break;
-			case 1:
-				sync_type = EMBEDDED_SYNC_SINGLE_YUV422;
-				break;
-			default:
-				sync_type =
-				EMBEDDED_SYNC_LINE_MULTIPLEXED_YUV422;
-			}
-			if (bt656_ep->pixmux == 0)
-				sync_type =
-				EMBEDDED_SYNC_LINE_MULTIPLEXED_YUV422;
-		}
-
-	} else if (endpoint->bus_type == V4L2_MBUS_PARALLEL) {
-		flags = endpoint->bus.parallel.flags;
-
-		if (vip_is_mbuscode_rgb(port->fmt->code))
-			sync_type = DISCRETE_SYNC_SINGLE_RGB_24B;
-		else
-			sync_type = DISCRETE_SYNC_SINGLE_YUV422;
-
-		if (flags & V4L2_MBUS_HSYNC_ACTIVE_HIGH)
-			config0 |= VIP_HSYNC_POLARITY;
-		else if (flags & V4L2_MBUS_HSYNC_ACTIVE_LOW)
-			config0 &= ~VIP_HSYNC_POLARITY;
-
-		if (flags & V4L2_MBUS_VSYNC_ACTIVE_HIGH)
-			config0 |= VIP_VSYNC_POLARITY;
-		else if (flags & V4L2_MBUS_VSYNC_ACTIVE_LOW)
-			config0 &= ~VIP_VSYNC_POLARITY;
-
-		config0 &= ~VIP_USE_ACTVID_HSYNC_ONLY;
-		config0 |= VIP_ACTVID_POLARITY;
-		config0 |= VIP_DISCRETE_BASIC_MODE;
-
-	} else {
-		v4l2_err(port, "Device doesn't support CSI2");
-		return -EINVAL;
-	}
-
-	if (flags & V4L2_MBUS_PCLK_SAMPLE_FALLING) {
-		vip_set_pclk_invert(port);
-		config0 |= VIP_PIXCLK_EDGE_POLARITY;
-	} else {
-		vip_clr_pclk_invert(port);
-		config0 &= ~VIP_PIXCLK_EDGE_POLARITY;
-	}
-
-	config0 |= ((sync_type & VIP_SYNC_TYPE_MASK) << VIP_SYNC_TYPE_SHFT);
-
-	reg_write(parser, VIP_PARSER_PORT(port->port_id), config0);
-
-	vip_set_data_interface(port, iface);
-	vip_set_crop_parser(port);
-
-	return 0;
-}
-
-static void vip_enable_parser(struct vip_port *port, bool on)
-{
-	u32 config0;
-	struct vip_dev *dev = port->dev;
-	struct vip_parser_data *parser = dev->parser;
-
-	config0 = reg_read(parser, VIP_PARSER_PORT(port->port_id));
-
-	if (on) {
-		config0 |= VIP_PORT_ENABLE;
-		config0 &= ~(VIP_ASYNC_FIFO_RD | VIP_ASYNC_FIFO_WR);
-	} else {
-		config0 &= ~VIP_PORT_ENABLE;
-		config0 |= (VIP_ASYNC_FIFO_RD | VIP_ASYNC_FIFO_WR);
-	}
-	reg_write(parser, VIP_PARSER_PORT(port->port_id), config0);
-}
-
-static void vip_reset_parser(struct vip_port *port, bool on)
-{
-	u32 config0;
-	struct vip_dev *dev = port->dev;
-	struct vip_parser_data *parser = dev->parser;
-
-	config0 = reg_read(parser, VIP_PARSER_PORT(port->port_id));
-
-	if (on)
-		config0 |= VIP_SW_RESET;
-	else
-		config0 &= ~VIP_SW_RESET;
-
-	reg_write(parser, VIP_PARSER_PORT(port->port_id), config0);
-}
-
-static void vip_parser_stop_imm(struct vip_port *port, bool on)
-{
-	u32 config0;
-	struct vip_dev *dev = port->dev;
-	struct vip_parser_data *parser = dev->parser;
-
-	config0 = reg_read(parser, VIP_PARSER_STOP_IMM_PORT(port->port_id));
-
-	if (on)
-		config0 = 0xffffffff;
-	else
-		config0 = 0;
-
-	reg_write(parser, VIP_PARSER_STOP_IMM_PORT(port->port_id), config0);
-}
-
 static void vip_release_stream(struct vip_stream *stream)
 {
 	struct vip_dev *dev = stream->port->dev;
@@ -2990,29 +3009,6 @@ static void vip_release_port(struct vip_port *port)
 	vpdma_free_desc_buf(&port->mmr_adb);
 	vpdma_free_desc_buf(&port->sc_coeff_h);
 	vpdma_free_desc_buf(&port->sc_coeff_v);
-}
-
-static void stop_dma(struct vip_stream *stream, bool clear_list)
-{
-	struct vip_dev *dev = stream->port->dev;
-	int ch, size = 0;
-
-	/* Create a list of channels to be cleared */
-	for (ch = 0; ch < VPDMA_MAX_CHANNELS; ch++) {
-		if (stream->vpdma_channels[ch] == 1) {
-			stream->vpdma_channels_to_abort[size++] = ch;
-			v4l2_dbg(2, debug, stream, "Clear channel no: %d\n",
-				 ch);
-		}
-	}
-
-	/* Clear all the used channels for the list */
-	vpdma_list_cleanup(dev->shared->vpdma, stream->list_num,
-			   stream->vpdma_channels_to_abort, size);
-
-	if (clear_list)
-		for (ch = 0; ch < VPDMA_MAX_CHANNELS; ch++)
-			stream->vpdma_channels[ch] = 0;
 }
 
 static int vip_open(struct file *file)
@@ -3324,15 +3320,6 @@ static void free_port(struct vip_port *port)
 	v4l2_async_nf_unregister(&port->notifier);
 	v4l2_async_nf_cleanup(&port->notifier);
 	free_stream(port->cap_streams[0]);
-}
-
-static int vip_probe_complete(struct platform_device *pdev);
-static void vip_vpdma_fw_cb(struct platform_device *pdev)
-{
-	dev_info(&pdev->dev, "VPDMA firmware loaded\n");
-
-	if (pdev->dev.of_node)
-		vip_probe_complete(pdev);
 }
 
 static int vip_create_streams(struct vip_port *port,
@@ -3648,6 +3635,14 @@ static int vip_probe_complete(struct platform_device *pdev)
 		fwnode_handle_put(port_node);
 	}
 	return 0;
+}
+
+static void vip_vpdma_fw_cb(struct platform_device *pdev)
+{
+	dev_info(&pdev->dev, "VPDMA firmware loaded\n");
+
+	if (pdev->dev.of_node)
+		vip_probe_complete(pdev);
 }
 
 static int vip_probe_slice(struct platform_device *pdev, int slice)

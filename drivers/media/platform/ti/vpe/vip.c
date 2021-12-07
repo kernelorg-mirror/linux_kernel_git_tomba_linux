@@ -77,7 +77,7 @@ struct vip_srce_info {
 #define VIP_SRCE_CHROMA		3
 #define VIP_SRCE_RGB		4
 
-static struct vip_srce_info srce_info[5] = {
+static const struct vip_srce_info srce_info[5] = {
 	[VIP_SRCE_MULT_PORT] = {
 		.base_channel	= VIP1_CHAN_NUM_MULT_PORT_A_SRC0,
 		.vb_index	= 0,
@@ -671,7 +671,7 @@ static int add_out_dtd(struct vip_stream *stream, int srce_type)
 {
 	struct vip_port *port = stream->port;
 	struct vip_dev *dev = port->dev;
-	struct vip_srce_info *sinfo = &srce_info[srce_type];
+	const struct vip_srce_info *sinfo = &srce_info[srce_type];
 	struct v4l2_rect *c_rect = &port->c_rect;
 	struct vip_fmt *fmt = port->fmt;
 	int channel, plane = 0;
@@ -3106,7 +3106,7 @@ static const struct v4l2_file_operations vip_fops = {
 	.mmap		= vb2_fop_mmap,
 };
 
-static struct video_device vip_videodev = {
+static const struct video_device vip_videodev = {
 	.name		= VIP_MODULE_NAME,
 	.fops		= &vip_fops,
 	.ioctl_ops	= &vip_ioctl_ops,

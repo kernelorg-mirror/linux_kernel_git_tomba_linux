@@ -26,7 +26,7 @@
 
 #include "vip.h"
 
-#define VIP_MODULE_NAME "vip"
+#define VIP_MODULE_NAME 	"vip"
 
 static int debug;
 module_param(debug, int, 0644);
@@ -35,18 +35,18 @@ MODULE_PARM_DESC(debug, "debug level (0-8)");
 /*
  * Minimum and maximum frame sizes
  */
-#define MIN_W		128
-#define MIN_H		128
-#define MAX_W		2048
-#define MAX_H		1536
+#define MIN_W			128
+#define MIN_H			128
+#define MAX_W			2048
+#define MAX_H			1536
 
 /*
  * Required alignments
  */
-#define S_ALIGN		0 /* multiple of 1 */
-#define H_ALIGN		1 /* multiple of 2 */
-#define W_ALIGN		1 /* multiple of 2 */
-#define L_ALIGN		7 /* multiple of 128, line stride, 16 bytes */
+#define S_ALIGN			0 /* multiple of 1 */
+#define H_ALIGN			1 /* multiple of 2 */
+#define W_ALIGN			1 /* multiple of 2 */
+#define L_ALIGN			7 /* multiple of 128, line stride, 16 bytes */
 
 /*
  * Need a descriptor entry for each of up to 15 outputs,
@@ -71,8 +71,8 @@ struct vip_srce_info {
  * Define indices into the srce_info tables
  */
 
-#define VIP_SRCE_MULT_PORT		0
-#define VIP_SRCE_MULT_ANC		1
+#define VIP_SRCE_MULT_PORT	0
+#define VIP_SRCE_MULT_ANC	1
 #define VIP_SRCE_LUMA		2
 #define VIP_SRCE_CHROMA		3
 #define VIP_SRCE_RGB		4

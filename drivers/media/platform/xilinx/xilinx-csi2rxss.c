@@ -200,45 +200,51 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
 
 /**
  * struct xcsi2rxss_state - CSI-2 Rx Subsystem device structure
- * @subdev: The v4l2 subdev structure
- * @format: Active V4L2 formats on each pad
- * @default_format: Default V4L2 format
- * @events: counter for events
- * @vcx_events: counter for vcx_events
  * @dev: Platform structure
- * @rsubdev: Remote subdev connected to sink pad
- * @rst_gpio: reset to video_aresetn
- * @clks: array of clocks
  * @iomem: Base address of subsystem
+ * @clks: array of clocks
+ * @rst_gpio: reset to video_aresetn
+ * @lock: mutex for accessing this structure
+ * @default_format: Default V4L2 format
  * @max_num_lanes: Maximum number of lanes present
  * @datatype: Data type filter
- * @lock: mutex for accessing this structure
- * @pads: media pads
- * @streaming: Flag for storing streaming state
  * @enable_active_lanes: If number of active lanes can be modified
  * @en_vcx: If more than 4 VC are enabled
+ * @pads: media pads
+ * @subdev: The v4l2 subdev structure
+ * @rsubdev: Remote subdev connected to sink pad
+ * @format: Active V4L2 formats on each pad
+ * @streaming: Flag for storing streaming state
+ * @events: counter for events
+ * @vcx_events: counter for vcx_events
  *
  * This structure contains the device driver related parameters
  */
 struct xcsi2rxss_state {
-	struct v4l2_subdev subdev;
-	struct v4l2_mbus_framefmt format;
-	struct v4l2_mbus_framefmt default_format;
-	u32 events[XCSI_NUM_EVENTS];
-	u32 vcx_events[XCSI_VCX_NUM_EVENTS];
 	struct device *dev;
-	struct v4l2_subdev *rsubdev;
-	struct gpio_desc *rst_gpio;
-	struct clk_bulk_data *clks;
+
 	void __iomem *iomem;
-	u32 max_num_lanes;
-	u32 datatype;
+	struct clk_bulk_data *clks;
+	struct gpio_desc *rst_gpio;
+
 	/* used to protect access to this struct */
 	struct mutex lock;
-	struct media_pad pads[XCSI_MEDIA_PADS];
-	bool streaming;
+
+	struct v4l2_mbus_framefmt default_format;
+	u32 max_num_lanes;
+	u32 datatype;
 	bool enable_active_lanes;
 	bool en_vcx;
+
+	struct media_pad pads[XCSI_MEDIA_PADS];
+	struct v4l2_subdev subdev;
+
+	struct v4l2_subdev *rsubdev;
+	struct v4l2_mbus_framefmt format;
+	bool streaming;
+
+	u32 events[XCSI_NUM_EVENTS];
+	u32 vcx_events[XCSI_VCX_NUM_EVENTS];
 };
 
 static const struct clk_bulk_data xcsi2rxss_clks[] = {

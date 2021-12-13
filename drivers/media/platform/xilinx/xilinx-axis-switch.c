@@ -324,11 +324,11 @@ static int xvsw_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 	return 0;
 }
 
-static struct v4l2_subdev_video_ops xvsw_video_ops = {
+static const struct v4l2_subdev_video_ops xvsw_video_ops = {
 	.s_stream = xvsw_s_stream,
 };
 
-static struct v4l2_subdev_pad_ops xvsw_pad_ops = {
+static const struct v4l2_subdev_pad_ops xvsw_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = xvsw_get_format,
@@ -337,7 +337,7 @@ static struct v4l2_subdev_pad_ops xvsw_pad_ops = {
 	.set_routing = xvsw_set_routing,
 };
 
-static struct v4l2_subdev_ops xvsw_ops = {
+static const struct v4l2_subdev_ops xvsw_ops = {
 	.video = &xvsw_video_ops,
 	.pad = &xvsw_pad_ops,
 };

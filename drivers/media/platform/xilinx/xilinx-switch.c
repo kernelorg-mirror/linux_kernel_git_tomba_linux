@@ -12,6 +12,7 @@
  * published by the Free Software Foundation.
  */
 
+#include <linux/bitops.h>
 #include <linux/device.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -31,15 +32,9 @@
 /**
  * struct xswitch_device - Xilinx Video Switch device structure
  * @xvip: Xilinx Video IP device
- * @routing: sink pad connected to each source pad (-1 if none)
- * @formats: active V4L2 media bus formats on sink pads
  */
 struct xswitch_device {
 	struct xvip_device xvip;
-
-	int routing[8];
-
-	struct v4l2_mbus_framefmt *formats;
 };
 
 static inline struct xswitch_device *to_xsw(struct v4l2_subdev *subdev)
@@ -54,50 +49,61 @@ static inline struct xswitch_device *to_xsw(struct v4l2_subdev *subdev)
 static int xsw_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xswitch_device *xsw = to_xsw(subdev);
+	struct v4l2_subdev_state *state;
+	struct v4l2_subdev_route *route;
+	unsigned long unused_outputs;
+	u32 unused_inputs;
 	unsigned int unused_input;
-	unsigned int i;
 	u32 routing;
+	unsigned int i;
 
 	if (!enable) {
 		xvip_stop(&xsw->xvip);
 		return 0;
 	}
 
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
+
 	/*
-	 * All outputs must be routed to an input. When less than 8 inputs are
-	 * synthesized we can use input 7 for that purpose. Otherwise find an
-	 * unused input to connect to unused outputs.
+	 * The hardware routing table stores in a register the input number at
+	 * the output's position. All outputs must be connected, so unused
+	 * outputs must be configured with an unused input. When the switch is
+	 * synthesized with less than 8 inputs, the index of non-existing inputs
+	 * may be used to configure unused outputs.
+	 *
+	 * Start with a first pass, iterating over all routes, to configure
+	 * used outputs and to record the unused inputs and ouputs.
 	 */
-	if (xsw->xvip.num_sinks == 8) {
-		u32 mask;
+	unused_inputs = 0xff;
+	unused_outputs = (1 << xsw->xvip.num_sources) - 1;
+	routing = 0;
 
-		for (i = 0, mask = 0xff; i < xsw->xvip.num_sources; ++i) {
-			if (xsw->routing[i] != -1)
-				mask &= ~BIT(xsw->routing[i]);
-		}
+	for_each_active_route(&state->routing, route) {
+		routing |= (XSW_CORE_CH_CTRL_FORCE | route->sink_pad)
+			<< (route->source_pad * 4);
 
-		/*
-		 * If all inputs are used all outputs are also used. We don't
-		 * need an unused input in that case, use a zero value.
-		 */
-		unused_input = mask ? ffs(mask) - 1 : 0;
-	} else {
-		unused_input = 7;
+		unused_inputs &= ~BIT(route->sink_pad);
+		unused_outputs &= ~BIT(route->source_pad);
 	}
 
-	/* Configure routing. */
-	for (i = 0, routing = 0; i < xsw->xvip.num_sources; ++i) {
-		unsigned int route;
+	/*
+	 * Iterate over unused outputs and configure them with an unused input.
+	 * If not unused input was found (implemented or non-implemented), it
+	 * means that the switch is synthesized with 8 inputs and all of them
+	 * are connected to different outputs. The unused_input value doesn't
+	 * matter in that case, as there is no unused output.
+	 */
+	unused_input = unused_inputs ? ffs(unused_inputs) - 1 : 0;
 
-		route = xsw->routing[i] == -1 ?  unused_input : xsw->routing[i];
-		routing |= (XSW_CORE_CH_CTRL_FORCE | route)
-			<< (i * 4);
-	}
+	for_each_set_bit(i, &unused_outputs, 8)
+		routing |= (XSW_CORE_CH_CTRL_FORCE | unused_input) << (i * 4);
+
+	v4l2_subdev_unlock_state(state);
 
 	xvip_write(&xsw->xvip, XSW_CORE_CH_CTRL, routing);
 
 	xvip_write(&xsw->xvip, XVIP_CTRL_CONTROL,
-		   ((((unsigned long)1 << xsw->xvip.num_sources) - 1) << 4) |
+		   (((1 << xsw->xvip.num_sources) - 1) << 4) |
 		   XVIP_CTRL_CONTROL_SW_ENABLE);
 
 	return 0;
@@ -107,189 +113,137 @@ static int xsw_s_stream(struct v4l2_subdev *subdev, int enable)
  * V4L2 Subdevice Pad Operations
  */
 
-static struct v4l2_mbus_framefmt *
-xsw_get_pad_format(struct xswitch_device *xsw,
-		   struct v4l2_subdev_state *sd_state,
-		   unsigned int pad, u32 which)
+static const struct v4l2_mbus_framefmt xsw_default_format = {
+	.code = MEDIA_BUS_FMT_RGB888_1X24,
+	.width = 1920,
+	.height = 1080,
+	.field = V4L2_FIELD_NONE,
+	.colorspace = V4L2_COLORSPACE_SRGB,
+};
+
+static int __xsw_set_routing(struct v4l2_subdev *subdev,
+			     struct v4l2_subdev_state *state,
+			     struct v4l2_subdev_krouting *routing)
 {
-	struct v4l2_mbus_framefmt *format;
+	int ret;
 
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xsw->xvip.subdev,
-						    sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		format = &xsw->formats[pad];
-		break;
-	default:
-		format = NULL;
-		break;
-	}
+	ret = v4l2_subdev_routing_validate(subdev, routing,
+					   V4L2_SUBDEV_ROUTING_NO_N_TO_1 |
+					   V4L2_SUBDEV_ROUTING_NO_STREAM_MIX);
+	if (ret)
+		return ret;
 
-	return format;
+	return v4l2_subdev_set_routing_with_fmt(subdev, state, routing,
+						&xsw_default_format);
 }
 
-static int xsw_get_format(struct v4l2_subdev *subdev,
-			  struct v4l2_subdev_state *sd_state,
-			  struct v4l2_subdev_format *fmt)
+static int xsw_init_cfg(struct v4l2_subdev *subdev,
+			struct v4l2_subdev_state *state)
 {
 	struct xswitch_device *xsw = to_xsw(subdev);
-	int pad = fmt->pad;
-	struct v4l2_mbus_framefmt *format;
+	struct v4l2_subdev_krouting routing = { };
+	struct v4l2_subdev_route *routes;
+	unsigned int num_routes;
+	unsigned int i;
+	int ret;
 
-	if (pad >= xsw->xvip.num_sinks) {
-		pad = xsw->routing[pad - xsw->xvip.num_sinks];
-		if (pad < 0) {
-			memset(&fmt->format, 0, sizeof(fmt->format));
-			return 0;
-		}
-	}
+	num_routes = min(xsw->xvip.num_sinks, xsw->xvip.num_sources);
+	routes = kcalloc(num_routes, sizeof(*routes), GFP_KERNEL);
+	if (!routes)
+		return -ENOMEM;
 
-	format = xsw_get_pad_format(xsw, sd_state, pad, fmt->which);
-	if (!format)
-		return -EINVAL;
+	/*
+	 * Set a 1:1 mapping between sinks and sources by default. If there
+	 * are more sources than sinks, the last sources are not connected.
+	 */
+	for (i = 0; i < num_routes; ++i) {
+		struct v4l2_subdev_route *route = &routes[i];
 
-	fmt->format = *format;
+		route->sink_pad = i;
+		route->source_pad = i + xsw->xvip.num_sinks;
+		route->flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE;
+	};
 
-	return 0;
+	routing.num_routes = num_routes;
+	routing.routes = routes;
+
+	ret = __xsw_set_routing(subdev, state, &routing);
+
+	kfree(routes);
+
+	return ret;
 }
 
 static int xsw_set_format(struct v4l2_subdev *subdev,
-			  struct v4l2_subdev_state *sd_state,
-			  struct v4l2_subdev_format *fmt)
+			  struct v4l2_subdev_state *state,
+			  struct v4l2_subdev_format *format)
 {
 	struct xswitch_device *xsw = to_xsw(subdev);
-	struct v4l2_mbus_framefmt *format;
+	struct v4l2_mbus_framefmt *sink_fmt;
+	struct v4l2_mbus_framefmt *source_fmt;
 
-	/* The source pad format is always identical to the sink pad format and
+	if (format->which == V4L2_SUBDEV_FORMAT_ACTIVE &&
+	    media_entity_is_streaming(&subdev->entity))
+		return -EBUSY;
+
+	/*
+	 * The source pad format is always identical to the sink pad format and
 	 * can't be modified.
 	 */
-	if (fmt->pad >= xsw->xvip.num_sinks)
-		return xsw_get_format(subdev, sd_state, fmt);
+	if (format->pad >= xsw->xvip.num_sinks)
+		return v4l2_subdev_get_fmt(subdev, state, format);
 
-	format = xsw_get_pad_format(xsw, sd_state, fmt->pad, fmt->which);
-	if (!format)
+	/* Validate the requested format. */
+	format->format.width = clamp_t(unsigned int, format->format.width,
+				       XVIP_MIN_WIDTH, XVIP_MAX_WIDTH);
+	format->format.height = clamp_t(unsigned int, format->format.height,
+					XVIP_MIN_HEIGHT, XVIP_MAX_HEIGHT);
+	format->format.field = V4L2_FIELD_NONE;
+
+	/*
+	 * Set the format on the sink stream and propagate it to the source
+	 * stream.
+	 */
+	sink_fmt = v4l2_subdev_state_get_stream_format(state, format->pad,
+						       format->stream);
+	source_fmt = v4l2_subdev_state_get_opposite_stream_format(state,
+								  format->pad,
+								  format->stream);
+	if (!sink_fmt || !source_fmt)
 		return -EINVAL;
 
-	format->code = fmt->format.code;
-	format->width = clamp_t(unsigned int, fmt->format.width,
-				XVIP_MIN_WIDTH, XVIP_MAX_WIDTH);
-	format->height = clamp_t(unsigned int, fmt->format.height,
-				 XVIP_MIN_HEIGHT, XVIP_MAX_HEIGHT);
-	format->field = V4L2_FIELD_NONE;
-	format->colorspace = V4L2_COLORSPACE_SRGB;
-
-	fmt->format = *format;
-
-	return 0;
-}
-
-static int xsw_get_routing(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_routing *route)
-{
-	struct xswitch_device *xsw = to_xsw(subdev);
-	unsigned int i;
-
-	mutex_lock(&subdev->entity.graph_obj.mdev->graph_mutex);
-
-	for (i = 0; i < min(xsw->xvip.num_sources, route->num_routes); ++i) {
-		route->routes[i].sink = xsw->routing[i];
-		route->routes[i].source = i;
-	}
-
-	route->num_routes = xsw->xvip.num_sources;
-
-	mutex_unlock(&subdev->entity.graph_obj.mdev->graph_mutex);
+	*sink_fmt = format->format;
+	*source_fmt = format->format;
 
 	return 0;
 }
 
 static int xsw_set_routing(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_routing *route)
+			   struct v4l2_subdev_state *state,
+			   enum v4l2_subdev_format_whence which,
+			   struct v4l2_subdev_krouting *routing)
 {
-	struct xswitch_device *xsw = to_xsw(subdev);
-	unsigned int i;
-	int ret = 0;
+	if (which == V4L2_SUBDEV_FORMAT_ACTIVE &&
+	    media_entity_is_streaming(&subdev->entity))
+		return -EBUSY;
 
-	mutex_lock(&subdev->entity.graph_obj.mdev->graph_mutex);
-
-	if (media_entity_is_streaming(&subdev->entity)) {
-		ret = -EBUSY;
-		goto done;
-	}
-
-	for (i = 0; i < xsw->xvip.num_sources; ++i)
-		xsw->routing[i] = -1;
-
-	for (i = 0; i < route->num_routes; ++i)
-		xsw->routing[route->routes[i].source - xsw->xvip.num_sinks] =
-			route->routes[i].sink;
-
-done:
-	mutex_unlock(&subdev->entity.graph_obj.mdev->graph_mutex);
-	return ret;
+	return __xsw_set_routing(subdev, state, routing);
 }
 
 /* -----------------------------------------------------------------------------
  * V4L2 Subdevice Operations
  */
 
-/**
- * xsw_init_formats - Initialize formats on all pads
- * @subdev: tpgper V4L2 subdevice
- * @fh: V4L2 subdev file handle
- *
- * Initialize all pad formats with default values. If fh is not NULL, try
- * formats are initialized on the file handle. Otherwise active formats are
- * initialized on the device.
- *
- * The function sets the format on pad 0 only. In two pads mode, this is the
- * sink pad and the set format handler will propagate the format to the source
- * pad. In one pad mode this is the source pad.
- */
-static void xsw_init_formats(struct v4l2_subdev *subdev,
-			      struct v4l2_subdev_fh *fh)
-{
-	struct xswitch_device *xsw = to_xsw(subdev);
-	struct v4l2_subdev_format format;
-	unsigned int i;
-
-	for (i = 0; i < xsw->xvip.num_sinks; ++i) {
-		memset(&format, 0, sizeof(format));
-
-		format.pad = 0;
-		format.which = fh ? V4L2_SUBDEV_FORMAT_TRY
-			     : V4L2_SUBDEV_FORMAT_ACTIVE;
-		format.format.width = 1920;
-		format.format.height = 1080;
-
-		xsw_set_format(subdev, fh ? fh->state : NULL, &format);
-	}
-}
-
-static int xsw_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	xsw_init_formats(subdev, fh);
-
-	return 0;
-}
-
-static int xsw_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	return 0;
-}
-
 static const struct v4l2_subdev_video_ops xsw_video_ops = {
 	.s_stream = xsw_s_stream,
 };
 
 static const struct v4l2_subdev_pad_ops xsw_pad_ops = {
+	.init_cfg = xsw_init_cfg,
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
-	.get_fmt = xsw_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xsw_set_format,
-	.get_routing = xsw_get_routing,
 	.set_routing = xsw_set_routing,
 };
 
@@ -298,37 +252,13 @@ static const struct v4l2_subdev_ops xsw_ops = {
 	.pad = &xsw_pad_ops,
 };
 
-static const struct v4l2_subdev_internal_ops xsw_internal_ops = {
-	.open = xsw_open,
-	.close = xsw_close,
-};
-
 /* -----------------------------------------------------------------------------
  * Media Operations
  */
 
-static bool xsw_has_route(struct media_entity *entity, unsigned int pad0,
-			  unsigned int pad1)
-{
-	struct xswitch_device *xsw = container_of(entity, struct xswitch_device,
-						  xvip.subdev.entity);
-	unsigned int sink0, sink1;
-
-	/* Two sinks are never connected together. */
-	if (pad0 < xsw->xvip.num_sinks && pad1 < xsw->xvip.num_sinks)
-		return false;
-
-	sink0 = pad0 < xsw->xvip.num_sinks
-	      ? pad0 : xsw->routing[pad0 - xsw->xvip.num_sinks];
-	sink1 = pad1 < xsw->xvip.num_sinks
-	      ? pad1 : xsw->routing[pad1 - xsw->xvip.num_sinks];
-
-	return sink0 == sink1;
-}
-
 static const struct media_entity_operations xsw_media_ops = {
 	.link_validate = v4l2_subdev_link_validate,
-	.has_route = xsw_has_route,
+	.has_pad_interdep = v4l2_subdev_has_pad_interdep,
 };
 
 /* -----------------------------------------------------------------------------
@@ -366,7 +296,6 @@ static int xsw_probe(struct platform_device *pdev)
 	struct v4l2_subdev *subdev;
 	struct xswitch_device *xsw;
 	unsigned int npads;
-	unsigned int i;
 	int ret;
 
 	xsw = devm_kzalloc(&pdev->dev, sizeof(*xsw), GFP_KERNEL);
@@ -388,28 +317,20 @@ static int xsw_probe(struct platform_device *pdev)
 	 */
 	npads = xsw->xvip.num_sinks + xsw->xvip.num_sources;
 
-	xsw->formats = devm_kzalloc(&pdev->dev,
-				    xsw->xvip.num_sinks * sizeof(*xsw->formats),
-				    GFP_KERNEL);
-	if (!xsw->formats)
-		goto error_resources;
-
-	for (i = 0; i < xsw->xvip.num_sources; ++i)
-		xsw->routing[i] = i < xsw->xvip.num_sinks ? i : -1;
-
 	subdev = &xsw->xvip.subdev;
 	v4l2_subdev_init(subdev, &xsw_ops);
 	subdev->dev = &pdev->dev;
-	subdev->internal_ops = &xsw_internal_ops;
 	strlcpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	v4l2_set_subdevdata(subdev, xsw);
-	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_STREAMS;
 	subdev->entity.ops = &xsw_media_ops;
-
-	xsw_init_formats(subdev, NULL);
 
 	ret = media_entity_pads_init(&subdev->entity, npads, xsw->xvip.pads);
 	if (ret < 0)
+		goto error;
+
+	ret = v4l2_subdev_init_finalize(subdev);
+	if (ret)
 		goto error;
 
 	platform_set_drvdata(pdev, xsw);
@@ -425,8 +346,8 @@ static int xsw_probe(struct platform_device *pdev)
 	return 0;
 
 error:
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
-error_resources:
 	xvip_device_cleanup(&xsw->xvip);
 	return ret;
 }
@@ -437,6 +358,7 @@ static int xsw_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xsw->xvip.subdev;
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 
 	xvip_device_cleanup(&xsw->xvip);

@@ -7,6 +7,7 @@
  * Author: Vishal Sagar <vishal.sagar@xilinx.com>
  */
 
+#include <linux/bitops.h>
 #include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/module.h>
@@ -34,16 +35,12 @@
 /**
  * struct xvswitch_device - Xilinx AXI4-Stream Switch device structure
  * @xvip: Xilinx Video IP device
- * @routing: sink pad connected to each source pad (-1 if none)
- * @formats: active V4L2 media bus formats on sink pads
  * @tdest_routing: Whether TDEST routing is enabled
  * @aclk: Video clock
  * @saxi_ctlclk: AXI-Lite control clock
  */
 struct xvswitch_device {
 	struct xvip_device xvip;
-	int routing[MAX_VSW_SRCS];
-	struct v4l2_mbus_framefmt *formats;
 	bool tdest_routing;
 	struct clk *aclk;
 	struct clk *saxi_ctlclk;
@@ -72,9 +69,18 @@ static inline void xvswitch_write(struct xvswitch_device *xvsw, u32 addr,
 static int xvsw_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xvswitch_device *xvsw = to_xvsw(subdev);
+	struct v4l2_subdev_state *state;
+	struct v4l2_subdev_route *route;
+	unsigned long unused_sources;
 	unsigned int i;
 
-	/* Nothing to be done in case of TDEST routing */
+	/*
+	 * In TDEST routing mode the hardware doesn't need to be configured.
+	 *
+	 * TODO: Validate the routing configuration by checking the frame
+	 * descriptors (this requires specifying the TDEST routing table in the
+	 * device tree).
+	 */
 	if (xvsw->tdest_routing)
 		return 0;
 
@@ -89,21 +95,36 @@ static int xvsw_s_stream(struct v4l2_subdev *subdev, int enable)
 	}
 
 	/*
-	 * In case of control reg routing,
-	 * from routing table write the values into respective reg
-	 * and enable
+	 * In case of control reg routing, from routing table write the values
+	 * into respective reg and enable.
+	 *
+	 * Start by configuring the active routes, and record the unused
+	 * sources. Avoid configuring the same output multiple times (in case
+	 * multiple streams flow through the same source pad). Finally,
+	 * configure Unused outputs as disabled.
 	 */
-	for (i = 0; i < MAX_VSW_SRCS; i++) {
-		u32 val;
 
-		if (xvsw->routing[i] != -1)
-			val = xvsw->routing[i];
-		else
-			val = XVSW_MI_MUX_DISABLE_MASK;
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
 
-		xvswitch_write(xvsw, XVSW_MI_MUX_REG_BASE + (i * 4),
-			       val);
+	unused_sources = (1 << MAX_VSW_SRCS) - 1;
+
+	for_each_active_route(&state->routing, route) {
+		unsigned int source = route->source_pad;
+
+		if (!(unused_sources & BIT(source)))
+			continue;
+
+		xvswitch_write(xvsw, XVSW_MI_MUX_REG_BASE + (source * 4),
+			       route->sink_pad);
+
+		unused_sources &= ~BIT(source);
 	}
+
+	for_each_set_bit(i, &unused_sources, MAX_VSW_SRCS)
+		xvswitch_write(xvsw, XVSW_MI_MUX_REG_BASE + (i * 4),
+			       XVSW_MI_MUX_DISABLE_MASK);
+
+	v4l2_subdev_unlock_state(state);
 
 	xvswitch_write(xvsw, XVSW_CTRL_REG, XVSW_CTRL_REG_UPDATE_MASK);
 
@@ -114,204 +135,135 @@ static int xvsw_s_stream(struct v4l2_subdev *subdev, int enable)
  * V4L2 Subdevice Pad Operations
  */
 
-static struct v4l2_mbus_framefmt *
-xvsw_get_pad_format(struct xvswitch_device *xvsw,
-		    struct v4l2_subdev_state *sd_state,
-		    unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *get_fmt;
+static const struct v4l2_mbus_framefmt xvsw_default_format = {
+	.code = MEDIA_BUS_FMT_RGB888_1X24,
+	.width = XVIP_MAX_WIDTH,
+	.height = XVIP_MAX_HEIGHT,
+	.field = V4L2_FIELD_NONE,
+	.colorspace = V4L2_COLORSPACE_SRGB,
+};
 
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		get_fmt = v4l2_subdev_get_try_format(&xvsw->xvip.subdev,
-						     sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		get_fmt = &xvsw->formats[pad];
-		break;
-	default:
-		get_fmt = NULL;
-		break;
-	}
-
-	return get_fmt;
-}
-
-static int xvsw_get_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_state *sd_state,
-			   struct v4l2_subdev_format *fmt)
+static int __xvsw_set_routing(struct v4l2_subdev *subdev,
+			      struct v4l2_subdev_state *state,
+			      struct v4l2_subdev_krouting *routing)
 {
 	struct xvswitch_device *xvsw = to_xvsw(subdev);
-	int pad = fmt->pad;
-	struct v4l2_mbus_framefmt *get_fmt;
+	enum v4l2_subdev_routing_restriction disallow;
+	int ret;
 
 	/*
-	 * If control reg routing and pad is source pad then
-	 * get corresponding sink pad. if no sink pad then
-	 * clear the format and return
+	 * In TDEST routing mode, we can't validate routes are, as the TDEST
+	 * value isn't known. Only disable 1-to-N routing, as a stream is routed
+	 * to a single output.
+	 *
+	 * In register-based mode, streams must be map 1-to-1, and can be mixed
+	 * across different source pads.
 	 */
+	if (xvsw->tdest_routing)
+		disallow = V4L2_SUBDEV_ROUTING_NO_1_TO_N;
+	else
+		disallow = V4L2_SUBDEV_ROUTING_ONLY_1_TO_1
+			 | V4L2_SUBDEV_ROUTING_NO_STREAM_MIX;
 
-	if (!xvsw->tdest_routing && pad >= xvsw->xvip.num_sinks) {
-		pad = xvsw->routing[pad - xvsw->xvip.num_sinks];
-		if (pad < 0) {
-			memset(&fmt->format, 0, sizeof(fmt->format));
-			return 0;
-		}
-	}
+	ret = v4l2_subdev_routing_validate(subdev, routing, disallow);
+	if (ret)
+		return ret;
 
-	get_fmt = xvsw_get_pad_format(xvsw, sd_state, pad, fmt->which);
-	if (!get_fmt)
-		return -EINVAL;
+	return v4l2_subdev_set_routing_with_fmt(subdev, state, routing,
+						&xvsw_default_format);
+}
 
-	fmt->format = *get_fmt;
+static int xvsw_init_cfg(struct v4l2_subdev *subdev,
+			 struct v4l2_subdev_state *state)
+{
+	struct xvswitch_device *xvsw = to_xvsw(subdev);
+	struct v4l2_subdev_krouting routing = { };
+	struct v4l2_subdev_route *routes;
+	unsigned int num_routes;
+	unsigned int i;
+	int ret;
 
-	return 0;
+	num_routes = min(xvsw->xvip.num_sinks, xvsw->xvip.num_sources);
+	routes = kcalloc(num_routes, sizeof(*routes), GFP_KERNEL);
+	if (!routes)
+		return -ENOMEM;
+
+	/*
+	 * Set a 1:1 mapping between sinks and sources by default. If there
+	 * are more sources than sinks, the last sources are not connected.
+	 */
+	for (i = 0; i < num_routes; ++i) {
+		struct v4l2_subdev_route *route = &routes[i];
+
+		route->sink_pad = i;
+		route->source_pad = i + xvsw->xvip.num_sinks;
+		route->flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE;
+	};
+
+	routing.num_routes = num_routes;
+	routing.routes = routes;
+
+	ret = __xvsw_set_routing(subdev, state, &routing);
+
+	kfree(routes);
+
+	return ret;
 }
 
 static int xvsw_set_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_state *sd_state,
-			   struct v4l2_subdev_format *fmt)
+			   struct v4l2_subdev_state *state,
+			   struct v4l2_subdev_format *format)
 {
 	struct xvswitch_device *xvsw = to_xvsw(subdev);
-	struct v4l2_mbus_framefmt *format;
+	struct v4l2_mbus_framefmt *sink_fmt;
+	struct v4l2_mbus_framefmt *source_fmt;
 
-	if (!xvsw->tdest_routing && fmt->pad >= xvsw->xvip.num_sinks) {
-		/*
-		 * In case of control reg routing,
-		 * get the corresponding sink pad to source pad passed.
-		 *
-		 * The source pad format is always identical to the
-		 * sink pad format and can't be modified.
-		 *
-		 * If sink pad found then get_format for that pad
-		 * else clear the fmt->format as the source pad
-		 * isn't connected and return.
-		 */
-		return xvsw_get_format(subdev, sd_state, fmt);
-	}
-
-	if (xvsw->xvip.num_sinks == 1 && fmt->pad != 0) {
-		struct v4l2_mbus_framefmt *sinkformat;
-
-		/*
-		 * in tdest routing if there is only one sink then all the
-		 * source pads will have same property as sink pad, assuming
-		 * streams going to each source pad will have same
-		 * properties.
-		 */
-
-		/* get sink pad format */
-		sinkformat = xvsw_get_pad_format(xvsw, sd_state, 0, fmt->which);
-		if (!sinkformat)
-			return -EINVAL;
-
-		fmt->format = *sinkformat;
-
-		/* set sink pad format on source pad */
-		format = xvsw_get_pad_format(xvsw, sd_state, fmt->pad, fmt->which);
-		if (!format)
-			return -EINVAL;
-
-		*format = *sinkformat;
-
-		return 0;
-	}
+	if (format->which == V4L2_SUBDEV_FORMAT_ACTIVE &&
+	    media_entity_is_streaming(&subdev->entity))
+		return -EBUSY;
 
 	/*
-	 * In TDEST routing mode, one can set any format on the pad as
-	 * it can't be checked which pad's data will travel to
-	 * which pad. E.g. In a system with 2 slaves and 4 masters,
-	 * S0 or S1 data can reach M0 thru M3 based on TDEST
-	 * S0 may have RBG and S1 may have YUV. M0, M1 stream RBG
-	 * and M2, M3 stream YUV based on TDEST.
-	 *
-	 * In Control reg routing mode, set format only for sink pads.
+	 * The source pad format is always identical to the sink pad format and
+	 * can't be modified.
 	 */
-	format = xvsw_get_pad_format(xvsw, sd_state, fmt->pad, fmt->which);
-	if (!format)
+	if (format->pad >= xvsw->xvip.num_sinks)
+		return v4l2_subdev_get_fmt(subdev, state, format);
+
+	/* Validate the requested format. */
+	format->format.width = clamp_t(unsigned int, format->format.width,
+				       XVIP_MIN_WIDTH, XVIP_MAX_WIDTH);
+	format->format.height = clamp_t(unsigned int, format->format.height,
+					XVIP_MIN_HEIGHT, XVIP_MAX_HEIGHT);
+	format->format.field = V4L2_FIELD_NONE;
+
+	/*
+	 * Set the format on the sink stream and propagate it to the source
+	 * stream.
+	 */
+	sink_fmt = v4l2_subdev_state_get_stream_format(state, format->pad,
+						       format->stream);
+	source_fmt = v4l2_subdev_state_get_opposite_stream_format(state,
+								  format->pad,
+								  format->stream);
+	if (!sink_fmt || !source_fmt)
 		return -EINVAL;
 
-	format->code = fmt->format.code;
-	format->width = clamp_t(unsigned int, fmt->format.width,
-				XVIP_MIN_WIDTH, XVIP_MAX_WIDTH);
-	format->height = clamp_t(unsigned int, fmt->format.height,
-				 XVIP_MIN_HEIGHT, XVIP_MAX_HEIGHT);
-	format->field = V4L2_FIELD_NONE;
-	format->colorspace = V4L2_COLORSPACE_SRGB;
-
-	fmt->format = *format;
-
-	return 0;
-}
-
-static int xvsw_get_routing(struct v4l2_subdev *subdev,
-			    struct v4l2_subdev_routing *route)
-{
-	struct xvswitch_device *xvsw = to_xvsw(subdev);
-	unsigned int i;
-	u32 min;
-
-	/* In case of tdest routing, we can't get routing */
-	if (xvsw->tdest_routing)
-		return -EINVAL;
-
-	mutex_lock(&subdev->entity.graph_obj.mdev->graph_mutex);
-
-	if (xvsw->xvip.num_sources < route->num_routes)
-		min = xvsw->xvip.num_sources;
-	else
-		min = route->num_routes;
-
-	for (i = 0; i < min; ++i) {
-		route->routes[i].sink = xvsw->routing[i];
-		route->routes[i].source = i;
-	}
-
-	route->num_routes = xvsw->xvip.num_sources;
-
-	mutex_unlock(&subdev->entity.graph_obj.mdev->graph_mutex);
+	*sink_fmt = format->format;
+	*source_fmt = format->format;
 
 	return 0;
 }
 
 static int xvsw_set_routing(struct v4l2_subdev *subdev,
-			    struct v4l2_subdev_routing *route)
+			    struct v4l2_subdev_state *state,
+			    enum v4l2_subdev_format_whence which,
+			    struct v4l2_subdev_krouting *routing)
 {
-	struct xvswitch_device *xvsw = to_xvsw(subdev);
-	unsigned int i;
-	int ret = 0;
+	if (which == V4L2_SUBDEV_FORMAT_ACTIVE &&
+	    media_entity_pipeline(&subdev->entity))
+		return -EBUSY;
 
-	/* In case of tdest routing, we can't set routing */
-	if (xvsw->tdest_routing)
-		return -EINVAL;
-
-	mutex_lock(&subdev->entity.graph_obj.mdev->graph_mutex);
-
-	if (media_entity_pipeline(&subdev->entity)) {
-		ret = -EBUSY;
-		goto done;
-	}
-
-	for (i = 0; i < xvsw->xvip.num_sources; ++i)
-		xvsw->routing[i] = -1;
-
-	for (i = 0; i < route->num_routes; ++i)
-		xvsw->routing[route->routes[i].source - xvsw->xvip.num_sinks] =
-			route->routes[i].sink;
-
-done:
-	mutex_unlock(&subdev->entity.graph_obj.mdev->graph_mutex);
-	return ret;
-}
-
-static int xvsw_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	return 0;
-}
-
-static int xvsw_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	return 0;
+	return __xvsw_set_routing(subdev, state, routing);
 }
 
 static const struct v4l2_subdev_video_ops xvsw_video_ops = {
@@ -319,12 +271,12 @@ static const struct v4l2_subdev_video_ops xvsw_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops xvsw_pad_ops = {
+	.init_cfg = xvsw_init_cfg,
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
-	.get_fmt = xvsw_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xvsw_set_format,
 	.link_validate = xvip_link_validate,
-	.get_routing = xvsw_get_routing,
 	.set_routing = xvsw_set_routing,
 	.get_mbus_config = xvip_get_mbus_config,
 };
@@ -334,41 +286,13 @@ static const struct v4l2_subdev_ops xvsw_ops = {
 	.pad = &xvsw_pad_ops,
 };
 
-static const struct v4l2_subdev_internal_ops xvsw_internal_ops = {
-	.open = xvsw_open,
-	.close = xvsw_close,
-};
-
 /* -----------------------------------------------------------------------------
  * Media Operations
  */
 
-static bool xvsw_has_route(struct media_entity *entity, unsigned int pad0,
-			   unsigned int pad1)
-{
-	struct xvswitch_device *xvsw =
-		to_xvsw(media_entity_to_v4l2_subdev(entity));
-	unsigned int sink0, sink1;
-
-	/* Two sinks are never connected together. */
-	if (pad0 < xvsw->xvip.num_sinks && pad1 < xvsw->xvip.num_sinks)
-		return false;
-
-	/* In TDEST routing, assume all sinks and sources are connected */
-	if (xvsw->tdest_routing)
-		return true;
-
-	sink0 = pad0 < xvsw->xvip.num_sinks
-	       ? pad0 : xvsw->routing[pad0 - xvsw->xvip.num_sinks];
-	sink1 = pad1 < xvsw->xvip.num_sinks
-	      ? pad1 : xvsw->routing[pad1 - xvsw->xvip.num_sinks];
-
-	return sink0 == sink1;
-}
-
 static const struct media_entity_operations xvsw_media_ops = {
 	.link_validate = v4l2_subdev_link_validate,
-	.has_route = xvsw_has_route,
+	.has_pad_interdep = v4l2_subdev_has_pad_interdep,
 };
 
 /* -----------------------------------------------------------------------------
@@ -444,7 +368,6 @@ static int xvsw_probe(struct platform_device *pdev)
 	struct v4l2_subdev *subdev;
 	struct xvswitch_device *xvsw;
 	unsigned int npads;
-	unsigned int i, padcount;
 	int ret;
 
 	xvsw = devm_kzalloc(&pdev->dev, sizeof(*xvsw), GFP_KERNEL);
@@ -466,38 +389,6 @@ static int xvsw_probe(struct platform_device *pdev)
 	 * number of pads.
 	 */
 	npads = xvsw->xvip.num_sinks + xvsw->xvip.num_sources;
-	padcount = xvsw->tdest_routing ? npads : xvsw->xvip.num_sinks;
-
-	/*
-	 * In case of tdest routing, allocate format per pad.
-	 * source pad format has to match one of the sink pads in tdest routing.
-	 *
-	 * Otherwise only allocate for sinks as sources will
-	 * get the same pad format and corresponding sink.
-	 * set format on src pad will return corresponding sinks data.
-	 */
-	xvsw->formats = devm_kzalloc(&pdev->dev,
-				     padcount * sizeof(*xvsw->formats),
-				     GFP_KERNEL);
-	if (!xvsw->formats) {
-		ret = -ENOMEM;
-		goto error_xvip;
-	}
-
-	for (i = 0; i < padcount; i++) {
-		xvsw->formats[i].code = MEDIA_BUS_FMT_RGB888_1X24;
-		xvsw->formats[i].field = V4L2_FIELD_NONE;
-		xvsw->formats[i].colorspace = V4L2_COLORSPACE_SRGB;
-		xvsw->formats[i].width = XVIP_MAX_WIDTH;
-		xvsw->formats[i].height = XVIP_MAX_HEIGHT;
-	}
-
-	/*
-	 * Initialize the routing table if none are connected.
-	 * Routing table is valid only incase routing is not TDEST based.
-	 */
-	for (i = 0; i < MAX_VSW_SRCS; ++i)
-		xvsw->routing[i] = -1;
 
 	ret = clk_prepare_enable(xvsw->aclk);
 	if (ret) {
@@ -520,15 +411,18 @@ static int xvsw_probe(struct platform_device *pdev)
 	subdev = &xvsw->xvip.subdev;
 	v4l2_subdev_init(subdev, &xvsw_ops);
 	subdev->dev = &pdev->dev;
-	subdev->internal_ops = &xvsw_internal_ops;
 	strlcpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	v4l2_set_subdevdata(subdev, xvsw);
-	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_STREAMS;
 	subdev->entity.ops = &xvsw_media_ops;
 
 	ret = media_entity_pads_init(&subdev->entity, npads, xvsw->xvip.pads);
 	if (ret < 0)
 		goto error_clk;
+
+	ret = v4l2_subdev_init_finalize(subdev);
+	if (ret)
+		goto error;
 
 	platform_set_drvdata(pdev, xvsw);
 
@@ -543,6 +437,7 @@ static int xvsw_probe(struct platform_device *pdev)
 	return 0;
 
 error:
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 error_clk:
 	if (!xvsw->tdest_routing)
@@ -559,6 +454,7 @@ static int xvsw_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xvsw->xvip.subdev;
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 	if (!xvsw->tdest_routing)
 		clk_disable_unprepare(xvsw->saxi_ctlclk);

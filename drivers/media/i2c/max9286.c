@@ -266,6 +266,17 @@ static const struct max9286_format_info max9286_formats[] = {
 	},
 };
 
+static const struct v4l2_mbus_framefmt max9286_default_format = {
+	.width		= 1280,
+	.height		= 800,
+	.code		= MEDIA_BUS_FMT_UYVY8_1X16,
+	.colorspace	= V4L2_COLORSPACE_SRGB,
+	.field		= V4L2_FIELD_NONE,
+	.ycbcr_enc	= V4L2_YCBCR_ENC_DEFAULT,
+	.quantization	= V4L2_QUANTIZATION_DEFAULT,
+	.xfer_func	= V4L2_XFER_FUNC_DEFAULT,
+};
+
 static const struct max9286_i2c_speed max9286_i2c_speeds[] = {
 	{ .rate =   8470, .mstbt = MAX9286_I2CMSTBT_8KBPS },
 	{ .rate =  28300, .mstbt = MAX9286_I2CMSTBT_28KBPS },
@@ -980,6 +991,39 @@ static int max9286_get_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int max9286_init_cfg(struct v4l2_subdev *sd,
+			    struct v4l2_subdev_state *state)
+{
+	struct v4l2_subdev_route routes[MAX9286_NUM_GMSL];
+	struct max9286_priv *priv = sd_to_max9286(sd);
+	struct v4l2_subdev_krouting routing;
+	struct max9286_source *source;
+	unsigned int num_routes = 0;
+	int ret;
+
+	/* Create a route for each enable source. */
+	for_each_source(priv, source) {
+		struct v4l2_subdev_route *route = &routes[num_routes++];
+		unsigned int idx = to_index(priv, source);
+
+		route->sink_pad = idx;
+		route->sink_stream = 0;
+		route->source_pad = MAX9286_SRC_PAD;
+		route->source_stream = idx;
+		route->flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE;
+	}
+
+	routing.num_routes = num_routes;
+	routing.routes = routes;
+
+	v4l2_subdev_lock_state(state);
+	ret = v4l2_subdev_set_routing_with_fmt(sd, state, &routing,
+					       &max9286_default_format);
+	v4l2_subdev_unlock_state(state);
+
+	return ret;
+}
+
 static const struct v4l2_subdev_video_ops max9286_video_ops = {
 	.s_stream	= max9286_s_stream,
 	.g_frame_interval = max9286_g_frame_interval,
@@ -987,6 +1031,7 @@ static const struct v4l2_subdev_video_ops max9286_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops max9286_pad_ops = {
+	.init_cfg	= max9286_init_cfg,
 	.enum_mbus_code = max9286_enum_mbus_code,
 	.get_fmt	= max9286_get_fmt,
 	.set_fmt	= max9286_set_fmt,
@@ -995,39 +1040,6 @@ static const struct v4l2_subdev_pad_ops max9286_pad_ops = {
 static const struct v4l2_subdev_ops max9286_subdev_ops = {
 	.video		= &max9286_video_ops,
 	.pad		= &max9286_pad_ops,
-};
-
-static const struct v4l2_mbus_framefmt max9286_default_format = {
-	.width		= 1280,
-	.height		= 800,
-	.code		= MEDIA_BUS_FMT_UYVY8_1X16,
-	.colorspace	= V4L2_COLORSPACE_SRGB,
-	.field		= V4L2_FIELD_NONE,
-	.ycbcr_enc	= V4L2_YCBCR_ENC_DEFAULT,
-	.quantization	= V4L2_QUANTIZATION_DEFAULT,
-	.xfer_func	= V4L2_XFER_FUNC_DEFAULT,
-};
-
-static void max9286_init_format(struct v4l2_mbus_framefmt *fmt)
-{
-	*fmt = max9286_default_format;
-}
-
-static int max9286_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	struct v4l2_mbus_framefmt *format;
-	unsigned int i;
-
-	for (i = 0; i < MAX9286_N_SINKS; i++) {
-		format = v4l2_subdev_get_try_format(subdev, fh->state, i);
-		max9286_init_format(format);
-	}
-
-	return 0;
-}
-
-static const struct v4l2_subdev_internal_ops max9286_subdev_internal_ops = {
-	.open = max9286_open,
 };
 
 static const struct media_entity_operations max9286_media_ops = {
@@ -1065,11 +1077,10 @@ static int max9286_v4l2_register(struct max9286_priv *priv)
 	/* Configure V4L2 for the MAX9286 itself */
 
 	for (i = 0; i < MAX9286_N_SINKS; i++)
-		max9286_init_format(&priv->fmt[i]);
+		priv->fmt[i] = max9286_default_format;
 
 	v4l2_i2c_subdev_init(&priv->sd, priv->client, &max9286_subdev_ops);
-	priv->sd.internal_ops = &max9286_subdev_internal_ops;
-	priv->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	priv->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_STREAMS;
 
 	v4l2_ctrl_handler_init(&priv->ctrls, 1);
 	priv->pixelrate_ctrl = v4l2_ctrl_new_std(&priv->ctrls,
@@ -1102,14 +1113,20 @@ static int max9286_v4l2_register(struct max9286_priv *priv)
 	}
 	priv->sd.fwnode = ep;
 
+	ret = v4l2_subdev_init_finalize(&priv->sd);
+	if (ret)
+		goto err_put_node;
+
 	ret = v4l2_async_register_subdev(&priv->sd);
 	if (ret < 0) {
 		dev_err(dev, "Unable to register subdevice\n");
-		goto err_put_node;
+		goto err_state_cleanup;
 	}
 
 	return 0;
 
+err_state_cleanup:
+	v4l2_subdev_cleanup(&priv->sd);
 err_put_node:
 	fwnode_handle_put(ep);
 err_async:
@@ -1122,6 +1139,7 @@ static void max9286_v4l2_unregister(struct max9286_priv *priv)
 {
 	fwnode_handle_put(priv->sd.fwnode);
 	v4l2_async_unregister_subdev(&priv->sd);
+	v4l2_subdev_cleanup(&priv->sd);
 	max9286_v4l2_notifier_unregister(priv);
 }
 

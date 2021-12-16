@@ -108,13 +108,7 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 
 	dev_dbg(xdev->dev, "creating links for entity %s\n", local->name);
 
-	while (1) {
-		/* Get the next endpoint and parse its link. */
-		ep = fwnode_graph_get_next_endpoint(entity->asd.match.fwnode,
-						    ep);
-		if (ep == NULL)
-			break;
-
+	fwnode_graph_for_each_endpoint(entity->asd.match.fwnode, ep) {
 		dev_dbg(xdev->dev, "processing endpoint %pfw\n", ep);
 
 		ret = v4l2_fwnode_parse_link(ep, &link);
@@ -192,6 +186,9 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 			break;
 		}
 	}
+
+	if (ep)
+		fwnode_handle_put(ep);
 
 	return ret;
 }
@@ -563,17 +560,13 @@ static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
 				struct fwnode_handle *fwnode)
 {
 	struct fwnode_handle *remote;
-	struct fwnode_handle *ep = NULL;
+	struct fwnode_handle *ep;
 	int ret = 0;
 
 	dev_dbg(xdev->dev, "parsing node %pfw\n", fwnode);
 
-	while (1) {
+	fwnode_graph_for_each_endpoint(fwnode, ep) {
 		struct xvip_graph_entity *xge;
-
-		ep = fwnode_graph_get_next_endpoint(fwnode, ep);
-		if (ep == NULL)
-			break;
 
 		dev_dbg(xdev->dev, "handling endpoint %pfw\n", ep);
 
@@ -582,8 +575,6 @@ static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
 			ret = -EINVAL;
 			goto err_notifier_cleanup;
 		}
-
-		fwnode_handle_put(ep);
 
 		/* Skip entities that we have already processed. */
 		if (remote == of_fwnode_handle(xdev->dev->of_node) ||

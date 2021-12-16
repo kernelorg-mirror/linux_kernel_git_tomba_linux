@@ -991,6 +991,86 @@ static int max9286_get_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int max9286_routing_validate(struct max9286_priv *priv,
+				    struct v4l2_subdev_krouting *routing)
+{
+	unsigned int i;
+	int ret;
+
+	ret = v4l2_subdev_routing_validate(&priv->sd, routing, 0);
+	if (ret)
+		return ret;
+
+	/*
+	 * Make sure all routes points to the single source pad which can have
+	 * up to 4 streams. All routes shall start from a sink pad and shall not
+	 * have more than one sink stream. The GMSL link for the sink has to be
+	 * enabled.
+	 */
+	for (i = 0; i < routing->num_routes; ++i) {
+		const struct v4l2_subdev_route *route = &routing->routes[i];
+		struct max9286_source *source;
+
+		if (route->sink_stream != 0) {
+			dev_err(&priv->client->dev,
+				"Invalid sink (%u,%u) in route %u\n",
+				route->sink_pad, route->sink_stream, i);
+			return -EINVAL;
+		}
+
+		if (route->source_stream > 4) {
+			dev_err(&priv->client->dev,
+				"Invalid source (%u,%u) in route %u\n",
+				route->source_pad, route->source_stream, i);
+			return -EINVAL;
+		}
+
+		source = &priv->sources[route->sink_pad];
+		if (!source->fwnode) {
+			dev_err(&priv->client->dev,
+				"Cannot set route for non-active source %u\n",
+				route->sink_pad);
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
+static int _max9286_set_routing(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *state,
+				struct v4l2_subdev_krouting *routing)
+{
+	struct max9286_priv *priv = sd_to_max9286(sd);
+	int ret;
+
+	ret = max9286_routing_validate(priv, routing);
+	if (ret)
+		return ret;
+
+	/* Re-initialize the format on a routing change. */
+	ret = v4l2_subdev_set_routing_with_fmt(sd, state, routing,
+					       &max9286_default_format);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int max9286_set_routing(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state,
+			       enum v4l2_subdev_format_whence which,
+			       struct v4l2_subdev_krouting *routing)
+{
+	int ret;
+
+	v4l2_subdev_lock_state(state);
+	ret = _max9286_set_routing(sd, state, routing);
+	v4l2_subdev_unlock_state(state);
+
+	return ret;
+}
+
 static int max9286_init_cfg(struct v4l2_subdev *sd,
 			    struct v4l2_subdev_state *state)
 {
@@ -1017,8 +1097,7 @@ static int max9286_init_cfg(struct v4l2_subdev *sd,
 	routing.routes = routes;
 
 	v4l2_subdev_lock_state(state);
-	ret = v4l2_subdev_set_routing_with_fmt(sd, state, &routing,
-					       &max9286_default_format);
+	ret = _max9286_set_routing(sd, state, &routing);
 	v4l2_subdev_unlock_state(state);
 
 	return ret;
@@ -1035,6 +1114,7 @@ static const struct v4l2_subdev_pad_ops max9286_pad_ops = {
 	.enum_mbus_code = max9286_enum_mbus_code,
 	.get_fmt	= max9286_get_fmt,
 	.set_fmt	= max9286_set_fmt,
+	.set_routing	= max9286_set_routing,
 };
 
 static const struct v4l2_subdev_ops max9286_subdev_ops = {

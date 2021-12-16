@@ -1028,6 +1028,58 @@ static int max9286_set_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int max9286_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
+				  struct v4l2_mbus_frame_desc *fd)
+{
+	struct v4l2_subdev_route *route;
+	struct v4l2_subdev_state *state;
+	int ret = 0;
+
+	if (pad != MAX9286_SRC_PAD)
+		return -EINVAL;
+
+	state = v4l2_subdev_lock_and_get_active_state(sd);
+
+	memset(fd, 0, sizeof(*fd));
+
+	/* One stream entry per each connected route. */
+	for_each_active_route(&state->routing, route) {
+		struct v4l2_mbus_frame_desc_entry *entry =
+						&fd->entry[fd->num_entries];
+		struct v4l2_mbus_framefmt *fmt;
+
+		fmt = v4l2_subdev_state_get_stream_format(state, pad,
+							  route->source_stream);
+		if (!fmt) {
+			ret = -EINVAL;
+			goto out;
+		}
+
+		/*
+		 * Assume a YUYV format (0x1e DT) and 16 bpp: we only support
+		 * these formats at the moment.
+		 */
+		entry->stream = fd->num_entries++;
+		entry->flags = V4L2_MBUS_FRAME_DESC_FL_LEN_MAX;
+		entry->length = fmt->width * fmt->height * 16 / 8;
+		entry->pixelcode = fmt->code;
+
+		/*
+		 * The source stream id corresponds to the virtual channel a
+		 * stream is output on.
+		 */
+		entry->bus.csi2.vc = route->source_stream;
+		entry->bus.csi2.dt = 0x1e;
+	}
+
+	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_CSI2;
+
+out:
+	v4l2_subdev_unlock_state(state);
+
+	return ret;
+}
+
 static int max9286_routing_validate(struct max9286_priv *priv,
 				    struct v4l2_subdev_krouting *routing)
 {
@@ -1167,6 +1219,7 @@ static const struct v4l2_subdev_pad_ops max9286_pad_ops = {
 	.enum_mbus_code = max9286_enum_mbus_code,
 	.get_fmt	= v4l2_subdev_get_fmt,
 	.set_fmt	= max9286_set_fmt,
+	.get_frame_desc = max9286_get_frame_desc,
 	.set_routing	= max9286_set_routing,
 };
 

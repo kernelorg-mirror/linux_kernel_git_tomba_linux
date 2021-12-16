@@ -393,30 +393,25 @@ int xvip_graph_pipeline_start_stop(struct xvip_composite_device *xdev,
 static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
 {
 	const u32 link_flags = MEDIA_LNK_FL_ENABLED;
-	struct device_node *node = xdev->dev->of_node;
+	struct fwnode_handle *fwnode = of_fwnode_handle(xdev->dev->of_node);
 	struct media_entity *source;
 	struct media_entity *sink;
 	struct media_pad *source_pad;
 	struct media_pad *sink_pad;
 	struct xvip_graph_entity *ent;
 	struct v4l2_fwnode_link link;
-	struct device_node *ep = NULL;
+	struct fwnode_handle *ep = NULL;
 	struct xvip_dma *dma;
 	int ret = 0;
 
 	dev_dbg(xdev->dev, "creating links for DMA engines\n");
 
-	while (1) {
-		/* Get the next endpoint and parse its link. */
-		ep = of_graph_get_next_endpoint(node, ep);
-		if (ep == NULL)
-			break;
+	fwnode_graph_for_each_endpoint(fwnode, ep) {
+		dev_dbg(xdev->dev, "processing endpoint %pfw\n", ep);
 
-		dev_dbg(xdev->dev, "processing endpoint %pOF\n", ep);
-
-		ret = v4l2_fwnode_parse_link(of_fwnode_handle(ep), &link);
+		ret = v4l2_fwnode_parse_link(ep, &link);
 		if (ret < 0) {
-			dev_err(xdev->dev, "failed to parse link for %pOF\n",
+			dev_err(xdev->dev, "failed to parse link for %pfw\n",
 				ep);
 			continue;
 		}
@@ -437,17 +432,16 @@ static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
 		/* Find the remote entity. */
 		ent = xvip_graph_find_entity(xdev, link.remote_node);
 		if (ent == NULL) {
-			dev_err(xdev->dev, "no entity found for %pOF\n",
-				to_of_node(link.remote_node));
+			dev_err(xdev->dev, "no entity found for %pfw\n",
+				link.remote_node);
 			v4l2_fwnode_put_link(&link);
 			ret = -ENODEV;
 			break;
 		}
 
 		if (link.remote_port >= ent->entity->num_pads) {
-			dev_err(xdev->dev, "invalid port number %u on %pOF\n",
-				link.remote_port,
-				to_of_node(link.remote_node));
+			dev_err(xdev->dev, "invalid port number %u on %pfw\n",
+				link.remote_port, link.remote_node);
 			v4l2_fwnode_put_link(&link);
 			ret = -EINVAL;
 			break;
@@ -483,6 +477,9 @@ static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
 			break;
 		}
 	}
+
+	if (ep)
+		fwnode_handle_put(ep);
 
 	return ret;
 }

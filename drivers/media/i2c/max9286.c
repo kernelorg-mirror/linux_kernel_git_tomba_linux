@@ -197,7 +197,6 @@ struct max9286_priv {
 	struct v4l2_ctrl *pixelrate_ctrl;
 	unsigned int pixelrate;
 
-	struct v4l2_mbus_framefmt fmt[MAX9286_N_SINKS];
 	struct v4l2_fract interval;
 
 	/* Protects controls and fmt structures */
@@ -642,6 +641,7 @@ static void max9286_config_links(struct max9286_priv *priv)
 	const struct v4l2_subdev_krouting *routing;
 	const struct v4l2_mbus_framefmt *format;
 	struct v4l2_subdev_state *state;
+	unsigned int pad;
 	u8 link_order = 0;
 	u8 vc_mask = 0xf;
 	unsigned int i;
@@ -690,7 +690,8 @@ static void max9286_config_links(struct max9286_priv *priv)
 	 * Get the format from the first used sink pad, as all sink formats
 	 * must be identical.
 	 */
-	format = &priv->fmt[__ffs(priv->bound_sources)];
+	pad = __ffs(priv->route_mask);
+	format = v4l2_subdev_state_get_stream_format(state, pad, 0);
 
 	max9286_set_video_format(priv, format);
 	max9286_set_fsync_period(priv);
@@ -988,31 +989,19 @@ static int max9286_enum_mbus_code(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static struct v4l2_mbus_framefmt *
-max9286_get_pad_format(struct max9286_priv *priv,
-		       struct v4l2_subdev_state *sd_state,
-		       unsigned int pad, u32 which)
-{
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_format(&priv->sd, sd_state, pad);
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		return &priv->fmt[pad];
-	default:
-		return NULL;
-	}
-}
-
 static int max9286_set_fmt(struct v4l2_subdev *sd,
-			   struct v4l2_subdev_state *sd_state,
+			   struct v4l2_subdev_state *state,
 			   struct v4l2_subdev_format *format)
 {
-	struct max9286_priv *priv = sd_to_max9286(sd);
-	struct v4l2_mbus_framefmt *cfg_fmt;
+	struct v4l2_mbus_framefmt *fmt;
 	unsigned int i;
 
+	/*
+	 * Format is propagated from sinks streams to source streams, it can't
+	 * be changed on the source pad.
+	 */	
 	if (format->pad == MAX9286_SRC_PAD)
-		return -EINVAL;
+		return v4l2_subdev_get_fmt(sd, state, format);
 
 	/* Validate the format. */
 	for (i = 0; i < ARRAY_SIZE(max9286_formats); ++i) {
@@ -1023,42 +1012,18 @@ static int max9286_set_fmt(struct v4l2_subdev *sd,
 	if (i == ARRAY_SIZE(max9286_formats))
 		format->format.code = max9286_formats[0].code;
 
-	cfg_fmt = max9286_get_pad_format(priv, sd_state, format->pad,
-					 format->which);
-	if (!cfg_fmt)
+	fmt = v4l2_subdev_state_get_stream_format(state, format->pad,
+						  format->stream);
+	if (!fmt)
 		return -EINVAL;
+	*fmt = format->format;
 
-	mutex_lock(&priv->mutex);
-	*cfg_fmt = format->format;
-	mutex_unlock(&priv->mutex);
-
-	return 0;
-}
-
-static int max9286_get_fmt(struct v4l2_subdev *sd,
-			   struct v4l2_subdev_state *sd_state,
-			   struct v4l2_subdev_format *format)
-{
-	struct max9286_priv *priv = sd_to_max9286(sd);
-	struct v4l2_mbus_framefmt *cfg_fmt;
-	unsigned int pad = format->pad;
-
-	/*
-	 * Multiplexed Stream Support: Support link validation by returning the
-	 * format of the first bound link. All links must have the same format,
-	 * as we do not support mixing and matching of cameras connected to the
-	 * max9286.
-	 */
-	if (pad == MAX9286_SRC_PAD)
-		pad = __ffs(priv->bound_sources);
-
-	cfg_fmt = max9286_get_pad_format(priv, sd_state, pad, format->which);
-	if (!cfg_fmt)
+	/* Propagate format to the other end of the route. */
+	fmt = v4l2_subdev_state_get_opposite_stream_format(state, format->pad,
+							   format->stream);
+	if (!fmt)
 		return -EINVAL;
-
-	mutex_lock(&priv->mutex);
-	format->format = *cfg_fmt;
-	mutex_unlock(&priv->mutex);
+	*fmt = format->format;
 
 	return 0;
 }
@@ -1138,14 +1103,12 @@ static int max9286_set_routing(struct v4l2_subdev *sd,
 	unsigned int i;
 	int ret;
 
-	v4l2_subdev_lock_state(state);
-
 	ret = _max9286_set_routing(sd, state, routing);
 	if (ret)
-		goto out;
+		return ret;
 
 	if (which == V4L2_SUBDEV_FORMAT_TRY)
-		goto out;
+		return ret;
 
 	/*
 	 * Update the active routes mask and the pixel rate according to the
@@ -1163,10 +1126,7 @@ static int max9286_set_routing(struct v4l2_subdev *sd,
 
 	max9286_set_pixelrate(priv);
 
-out:
-	v4l2_subdev_unlock_state(state);
-
-	return ret;
+	return 0;
 }
 
 static int max9286_init_cfg(struct v4l2_subdev *sd,
@@ -1177,7 +1137,6 @@ static int max9286_init_cfg(struct v4l2_subdev *sd,
 	struct v4l2_subdev_krouting routing;
 	struct max9286_source *source;
 	unsigned int num_routes = 0;
-	int ret;
 
 	/* Create a route for each enable source. */
 	for_each_source(priv, source) {
@@ -1194,11 +1153,7 @@ static int max9286_init_cfg(struct v4l2_subdev *sd,
 	routing.num_routes = num_routes;
 	routing.routes = routes;
 
-	v4l2_subdev_lock_state(state);
-	ret = _max9286_set_routing(sd, state, &routing);
-	v4l2_subdev_unlock_state(state);
-
-	return ret;
+	return _max9286_set_routing(sd, state, &routing);
 }
 
 static const struct v4l2_subdev_video_ops max9286_video_ops = {
@@ -1210,7 +1165,7 @@ static const struct v4l2_subdev_video_ops max9286_video_ops = {
 static const struct v4l2_subdev_pad_ops max9286_pad_ops = {
 	.init_cfg	= max9286_init_cfg,
 	.enum_mbus_code = max9286_enum_mbus_code,
-	.get_fmt	= max9286_get_fmt,
+	.get_fmt	= v4l2_subdev_get_fmt,
 	.set_fmt	= max9286_set_fmt,
 	.set_routing	= max9286_set_routing,
 };
@@ -1253,9 +1208,6 @@ static int max9286_v4l2_register(struct max9286_priv *priv)
 	}
 
 	/* Configure V4L2 for the MAX9286 itself */
-
-	for (i = 0; i < MAX9286_N_SINKS; i++)
-		priv->fmt[i] = max9286_default_format;
 
 	v4l2_i2c_subdev_init(&priv->sd, priv->client, &max9286_subdev_ops);
 	priv->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_STREAMS;

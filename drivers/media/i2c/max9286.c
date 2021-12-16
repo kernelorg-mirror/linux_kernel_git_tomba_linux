@@ -212,8 +212,11 @@ struct max9286_priv {
 	struct v4l2_async_notifier notifier;
 };
 
+#define to_index(priv, source) ((source) - &(priv)->sources[0])
+
 static struct max9286_source *next_source(struct max9286_priv *priv,
-					  struct max9286_source *source)
+					  struct max9286_source *source,
+					  bool routed)
 {
 	if (!source)
 		source = &priv->sources[0];
@@ -221,17 +224,27 @@ static struct max9286_source *next_source(struct max9286_priv *priv,
 		source++;
 
 	for (; source < &priv->sources[MAX9286_NUM_GMSL]; source++) {
-		if (source->fwnode)
+		unsigned int index = to_index(priv, source);
+
+		if (!source->fwnode)
+			continue;
+
+		/*
+		 * Careful here! A very unfortunate call to set_routing() can
+		 * change priv->route_mask behind our back!
+		 */
+		if (!routed || priv->route_mask & BIT(index))
 			return source;
 	}
 
 	return NULL;
 }
 
-#define for_each_source(priv, source) \
-	for ((source) = NULL; ((source) = next_source((priv), (source))); )
+#define for_each_route(priv, source) \
+	for ((source) = NULL; ((source) = next_source((priv), (source), true)); )
 
-#define to_index(priv, source) ((source) - &(priv)->sources[0])
+#define for_each_source(priv, source) \
+	for ((source) = NULL; ((source) = next_source((priv), (source), false)); )
 
 static inline struct max9286_priv *sd_to_max9286(struct v4l2_subdev *sd)
 {
@@ -472,7 +485,7 @@ static int max9286_check_video_links(struct max9286_priv *priv)
 		if (ret < 0)
 			return -EIO;
 
-		if ((ret & MAX9286_VIDEO_DETECT_MASK) == priv->source_mask)
+		if ((ret & MAX9286_VIDEO_DETECT_MASK) == priv->route_mask)
 			break;
 
 		usleep_range(350, 500);
@@ -627,9 +640,10 @@ static void max9286_set_fsync_period(struct max9286_priv *priv)
 static int max9286_set_pixelrate(struct max9286_priv *priv)
 {
 	struct max9286_source *source = NULL;
+	unsigned int num_routes = 0;
 	u64 pixelrate = 0;
 
-	for_each_source(priv, source) {
+	for_each_route(priv, source) {
 		struct v4l2_ctrl *ctrl;
 		u64 source_rate = 0;
 
@@ -650,6 +664,8 @@ static int max9286_set_pixelrate(struct max9286_priv *priv)
 				"Unable to calculate pixel rate\n");
 			return -EINVAL;
 		}
+
+		num_routes++;
 	}
 
 	if (!pixelrate) {
@@ -665,7 +681,7 @@ static int max9286_set_pixelrate(struct max9286_priv *priv)
 	 * by the number of available sources.
 	 */
 	return v4l2_ctrl_s_ctrl_int64(priv->pixelrate_ctrl,
-				      pixelrate * priv->nsources);
+				      pixelrate * num_routes);
 }
 
 static int max9286_notify_bound(struct v4l2_async_notifier *notifier,
@@ -822,8 +838,8 @@ static int max9286_s_stream(struct v4l2_subdev *sd, int enable)
 		 */
 		max9286_i2c_mux_open(priv);
 
-		/* Start all cameras. */
-		for_each_source(priv, source) {
+		/* Start cameras. */
+		for_each_route(priv, source) {
 			ret = v4l2_subdev_call(source->sd, video, s_stream, 1);
 			if (ret)
 				return ret;
@@ -868,8 +884,8 @@ static int max9286_s_stream(struct v4l2_subdev *sd, int enable)
 			      MAX9286_EN_CCBSYB_CLK_STR |
 			      MAX9286_EN_GPI_CCBSYB);
 
-		/* Stop all cameras. */
-		for_each_source(priv, source)
+		/* Stop cameras. */
+		for_each_route(priv, source)
 			v4l2_subdev_call(source->sd, video, s_stream, 0);
 
 		max9286_i2c_mux_close(priv);
@@ -1062,10 +1078,36 @@ static int max9286_set_routing(struct v4l2_subdev *sd,
 			       enum v4l2_subdev_format_whence which,
 			       struct v4l2_subdev_krouting *routing)
 {
+	struct max9286_priv *priv = sd_to_max9286(sd);
+	unsigned int i;
 	int ret;
 
 	v4l2_subdev_lock_state(state);
+
 	ret = _max9286_set_routing(sd, state, routing);
+	if (ret)
+		goto out;
+
+	if (which == V4L2_SUBDEV_FORMAT_TRY)
+		goto out;
+
+	/*
+	 * Update the active routes mask and the pixel rate according to the
+	 * routed sources.
+	 */
+	priv->route_mask = 0;
+	for (i = 0; i < routing->num_routes; ++i) {
+		struct v4l2_subdev_route *route = &routing->routes[i];
+
+		if (!(route->flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE))
+			continue;
+
+		priv->route_mask |= BIT(route->sink_pad);
+	}
+
+	max9286_set_pixelrate(priv);
+
+out:
 	v4l2_subdev_unlock_state(state);
 
 	return ret;

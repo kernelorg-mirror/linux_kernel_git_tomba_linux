@@ -96,7 +96,7 @@ xvip_graph_find_entity_from_media(struct xvip_composite_device *xdev,
 static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 				struct xvip_graph_entity *entity)
 {
-	u32 link_flags = MEDIA_LNK_FL_ENABLED;
+	const u32 link_flags = MEDIA_LNK_FL_ENABLED;
 	struct media_entity *local = entity->entity;
 	struct media_entity *remote;
 	struct media_pad *local_pad;
@@ -395,7 +395,7 @@ int xvip_graph_pipeline_start_stop(struct xvip_composite_device *xdev,
 
 static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
 {
-	u32 link_flags = MEDIA_LNK_FL_ENABLED;
+	const u32 link_flags = MEDIA_LNK_FL_ENABLED;
 	struct device_node *node = xdev->dev->of_node;
 	struct media_entity *source;
 	struct media_entity *sink;

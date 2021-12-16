@@ -553,6 +553,43 @@ static const struct v4l2_async_notifier_operations xvip_graph_notify_ops = {
 	.complete = xvip_graph_notify_complete,
 };
 
+static bool xvip_graph_is_internal(const struct xvip_graph_entity *entity)
+{
+	const char **compats;
+	unsigned int i;
+	int nval;
+	int ret;
+
+	/*
+	 * Check if the entity is internal to the FPGA. This is currently done
+	 * by matching the compatible string with the "xlnx," prefix. This
+	 * mechanism needs to be extended to support third-party IP cores,
+	 * possibly by adding a fallback "xlnx," wildcard compatible string, or
+	 * a custom property.
+	 */
+
+	nval = fwnode_property_read_string_array(entity->asd.match.fwnode,
+						 "compatible", NULL, 0);
+	if (nval <= 0)
+		return false;
+
+	compats = kcalloc(nval, sizeof(*compats), GFP_KERNEL);
+	if (!compats)
+		return false;
+
+	ret = fwnode_property_read_string_array(entity->asd.match.fwnode,
+						"compatible", compats, nval);
+	if (ret < 0)
+		return false;
+
+	for (i = 0; i < nval; ++i) {
+		if (strstarts(compats[i], "xlnx,"))
+			return true;
+	}
+
+	return false;
+}
+
 static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
 				struct fwnode_handle *fwnode)
 {
@@ -599,7 +636,6 @@ err_notifier_cleanup:
 
 static int xvip_graph_parse(struct xvip_composite_device *xdev)
 {
-	struct xvip_graph_entity *entity;
 	struct v4l2_async_subdev *asd;
 	int ret;
 
@@ -614,7 +650,15 @@ static int xvip_graph_parse(struct xvip_composite_device *xdev)
 		return 0;
 
 	list_for_each_entry(asd, &xdev->notifier.asd_list, asd_list) {
-		entity = to_xvip_entity(asd);
+		struct xvip_graph_entity *entity = to_xvip_entity(asd);
+
+		/*
+		 * Skip external entities, as they register their own subdev
+		 * async notifier.
+		 */
+		if (!xvip_graph_is_internal(entity))
+			continue;
+
 		ret = xvip_graph_parse_one(xdev, entity->asd.match.fwnode);
 		if (ret < 0) {
 			v4l2_async_nf_cleanup(&xdev->notifier);

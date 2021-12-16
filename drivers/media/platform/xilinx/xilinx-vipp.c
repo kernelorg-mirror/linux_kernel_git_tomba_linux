@@ -42,12 +42,14 @@ module_param_named(is_mplane, xvip_is_mplane, bool, 0444);
  * @asd: subdev asynchronous registration information
  * @entity: media entity, from the corresponding V4L2 subdev
  * @subdev: V4L2 subdev
+ * @internal: whether the entity is an internal IP core or an external device
  * @streaming: status of the V4L2 subdev if streaming or not
  */
 struct xvip_graph_entity {
 	struct v4l2_async_subdev asd; /* must be first */
 	struct media_entity *entity;
 	struct v4l2_subdev *subdev;
+	bool internal;
 	bool streaming;
 };
 
@@ -98,17 +100,23 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 {
 	const u32 link_flags = MEDIA_LNK_FL_ENABLED;
 	struct media_entity *local = entity->entity;
-	struct media_entity *remote;
-	struct media_pad *local_pad;
-	struct media_pad *remote_pad;
-	struct xvip_graph_entity *ent;
-	struct v4l2_fwnode_link link;
+	struct fwnode_handle *entity_node;
 	struct fwnode_handle *ep = NULL;
 	int ret = 0;
 
 	dev_dbg(xdev->dev, "creating links for entity %s\n", local->name);
 
-	fwnode_graph_for_each_endpoint(entity->asd.match.fwnode, ep) {
+	entity_node = entity->asd.match.fwnode;
+	if (!entity->internal)
+		entity_node = fwnode_graph_get_port_parent(entity_node);
+
+	fwnode_graph_for_each_endpoint(entity_node, ep) {
+		struct media_entity *remote;
+		struct media_pad *local_pad;
+		struct media_pad *remote_pad;
+		struct xvip_graph_entity *ent;
+		struct v4l2_fwnode_link link;
+
 		dev_dbg(xdev->dev, "processing endpoint %pfw\n", ep);
 
 		ret = v4l2_fwnode_parse_link(ep, &link);
@@ -189,6 +197,9 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 
 	if (ep)
 		fwnode_handle_put(ep);
+
+	if (!entity->internal)
+		fwnode_handle_put(entity_node);
 
 	return ret;
 }
@@ -553,7 +564,7 @@ static const struct v4l2_async_notifier_operations xvip_graph_notify_ops = {
 	.complete = xvip_graph_notify_complete,
 };
 
-static bool xvip_graph_is_internal(const struct xvip_graph_entity *entity)
+static bool xvip_graph_is_internal(struct fwnode_handle *entity_node)
 {
 	const char **compats;
 	unsigned int i;
@@ -568,8 +579,8 @@ static bool xvip_graph_is_internal(const struct xvip_graph_entity *entity)
 	 * a custom property.
 	 */
 
-	nval = fwnode_property_read_string_array(entity->asd.match.fwnode,
-						 "compatible", NULL, 0);
+	nval = fwnode_property_read_string_array(entity_node, "compatible",
+						 NULL, 0);
 	if (nval <= 0)
 		return false;
 
@@ -577,8 +588,8 @@ static bool xvip_graph_is_internal(const struct xvip_graph_entity *entity)
 	if (!compats)
 		return false;
 
-	ret = fwnode_property_read_string_array(entity->asd.match.fwnode,
-						"compatible", compats, nval);
+	ret = fwnode_property_read_string_array(entity_node, "compatible",
+						compats, nval);
 	if (ret < 0)
 		return false;
 
@@ -591,32 +602,64 @@ static bool xvip_graph_is_internal(const struct xvip_graph_entity *entity)
 }
 
 static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
-				struct fwnode_handle *fwnode)
+				struct fwnode_handle *entity_node)
 {
-	struct fwnode_handle *remote;
 	struct fwnode_handle *ep;
 	int ret = 0;
 
-	dev_dbg(xdev->dev, "parsing node %pfw\n", fwnode);
+	dev_dbg(xdev->dev, "parsing node %pfw\n", entity_node);
 
-	fwnode_graph_for_each_endpoint(fwnode, ep) {
+	fwnode_graph_for_each_endpoint(entity_node, ep) {
+		struct fwnode_handle *remote_node;
+		struct fwnode_handle *remote_ep;
+		struct fwnode_handle *remote;
 		struct xvip_graph_entity *xge;
+		bool internal;
 
 		dev_dbg(xdev->dev, "handling endpoint %pfw\n", ep);
 
-		remote = fwnode_graph_get_remote_port_parent(ep);
-		if (remote == NULL) {
+		/* Get the remote endpoint and device nodes. */
+		remote_ep = fwnode_graph_get_remote_endpoint(ep);
+		if (remote_ep == NULL) {
 			ret = -EINVAL;
 			goto err_notifier_cleanup;
 		}
 
+		remote_node = fwnode_graph_get_port_parent(remote_ep);
+		if (remote_node == NULL) {
+			ret = -EINVAL;
+			fwnode_handle_put(remote_ep);
+			goto err_notifier_cleanup;
+		}
+
+		/*
+		 * Select the right node depending on the entity type.  For
+		 * internal devices, use the remote device node, as the Xilinx
+		 * video IP core drivers register their subdev using device
+		 * nodes. For external devices, use the remote endpoint node,
+		 * to support endpoint matching.
+		 */
+		internal = xvip_graph_is_internal(remote_node);
+		if (internal) {
+			fwnode_handle_put(remote_ep);
+			remote = remote_node;
+		} else {
+			fwnode_handle_put(remote_node);
+			remote = remote_ep;
+		}
+
+		dev_dbg(xdev->dev, "remote device %pfw is %s\n",
+			remote, internal ? "internal" : "external");
+
 		/* Skip entities that we have already processed. */
 		if (remote == of_fwnode_handle(xdev->dev->of_node) ||
 		    xvip_graph_find_entity(xdev, remote)) {
+			dev_dbg(xdev->dev, "device already present, skipping\n");
 			fwnode_handle_put(remote);
 			continue;
 		}
 
+		/* Register a notifier entry. */
 		xge = v4l2_async_nf_add_fwnode(&xdev->notifier, remote,
 					       struct xvip_graph_entity);
 		fwnode_handle_put(remote);
@@ -624,6 +667,8 @@ static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
 			ret = PTR_ERR(xge);
 			goto err_notifier_cleanup;
 		}
+
+		xge->internal = internal;
 	}
 
 	return 0;
@@ -656,7 +701,7 @@ static int xvip_graph_parse(struct xvip_composite_device *xdev)
 		 * Skip external entities, as they register their own subdev
 		 * async notifier.
 		 */
-		if (!xvip_graph_is_internal(entity))
+		if (!entity->internal)
 			continue;
 
 		ret = xvip_graph_parse_one(xdev, entity->asd.match.fwnode);

@@ -28,7 +28,7 @@
 #include "max96705.h"
 
 /*
- * As the drivers supports a single MEDIA_BUS_FMT_SGRBG8_1X8 format we
+ * As the drivers supports a single MEDIA_BUS_FMT_SGRBG12_1X12 format we
  * can harcode the pixel rate.
  */
 #define AR0231_PIXEL_RATE		(75000000)
@@ -376,7 +376,7 @@ static int mars_enum_mbus_code(struct v4l2_subdev *sd,
 	if (code->pad || code->index > 0)
 		return -EINVAL;
 
-	code->code = MEDIA_BUS_FMT_SGRBG8_1X8;
+	code->code = MEDIA_BUS_FMT_SGRBG12_1X12;
 
 	return 0;
 }
@@ -570,7 +570,7 @@ static void mars_init_format(struct v4l2_mbus_framefmt *fmt)
 {
 	fmt->width		= mars_modes[0].width;
 	fmt->height		= mars_modes[0].height;
-	fmt->code		= MEDIA_BUS_FMT_SGRBG8_1X8;
+	fmt->code		= MEDIA_BUS_FMT_SGRBG12_1X12;
 	fmt->colorspace		= V4L2_COLORSPACE_SRGB;
 	fmt->field		= V4L2_FIELD_NONE;
 	fmt->ycbcr_enc		= V4L2_YCBCR_ENC_DEFAULT;

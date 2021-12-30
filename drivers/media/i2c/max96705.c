@@ -17,7 +17,7 @@
 
 #include "max96705.h"
 
-int max96705_read(struct max96705_device *dev, u8 reg)
+static int max96705_read(struct max96705_device *dev, u8 reg)
 {
 	int ret;
 	int retry = 5;
@@ -44,7 +44,7 @@ int max96705_read(struct max96705_device *dev, u8 reg)
 	return ret;
 }
 
-int max96705_write(struct max96705_device *dev, u8 reg, u8 val)
+static int max96705_write(struct max96705_device *dev, u8 reg, u8 val)
 {
 	int ret;
 	int retry = 5;

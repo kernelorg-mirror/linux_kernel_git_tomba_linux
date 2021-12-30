@@ -559,8 +559,8 @@ static void max9286_set_video_format(struct max9286_priv *priv,
 	 * number, enable I2C clock stretching when CCBSY is low, enable CCBSY
 	 * in external GPI-to-GPO mode.
 	 */
-	max9286_write(priv, 0x15, MAX9286_VCTYPE | MAX9286_EN_CCBSYB_CLK_STR |
-		      MAX9286_EN_GPI_CCBSYB);
+	max9286_write(priv, 0x15, MAX9286_VCTYPE | MAX9286_SWP_ENDIAN |
+		      MAX9286_EN_CCBSYB_CLK_STR | MAX9286_EN_GPI_CCBSYB);
 
 	/* Enable CSI-2 Lane D0-D3 only, DBL mode. */
 	max9286_write(priv, 0x12, MAX9286_CSIDBL | MAX9286_DBL |
@@ -850,10 +850,10 @@ static int max9286_s_stream(struct v4l2_subdev *sd, int enable)
 		 * images stitched side-by-side) and enable it.
 		 */
 		max9286_write(priv, 0x15, MAX9286_CSI_IMAGE_TYP | MAX9286_VCTYPE |
-			      MAX9286_CSIOUTEN | MAX9286_EN_CCBSYB_CLK_STR |
-			      MAX9286_EN_GPI_CCBSYB);
+			      MAX9286_CSIOUTEN | MAX9286_SWP_ENDIAN |
+			      MAX9286_EN_CCBSYB_CLK_STR | MAX9286_EN_GPI_CCBSYB);
 	} else {
-		max9286_write(priv, 0x15, MAX9286_VCTYPE |
+		max9286_write(priv, 0x15, MAX9286_VCTYPE | MAX9286_SWP_ENDIAN |
 			      MAX9286_EN_CCBSYB_CLK_STR |
 			      MAX9286_EN_GPI_CCBSYB);
 

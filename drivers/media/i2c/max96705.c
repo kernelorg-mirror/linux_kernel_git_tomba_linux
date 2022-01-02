@@ -20,8 +20,6 @@ static int max96705_read(struct max96705_device *dev, u8 reg)
 	int ret;
 	int retry = 5;
 
-	dev_dbg(&dev->client->dev, "%s(0x%02x)\n", __func__, reg);
-
 	while (retry--) {
 		ret = i2c_smbus_read_byte_data(dev->client, reg);
 		if (ret < 0) {
@@ -34,10 +32,14 @@ static int max96705_read(struct max96705_device *dev, u8 reg)
 		usleep_range(5000, 10000);
 	}
 
-	if (ret < 0)
+	if (ret < 0) {
 		dev_err(&dev->client->dev,
 			"%s: register 0x%02x read failed (%d) - all retries failed\n",
 			__func__, reg, ret);
+		return ret;
+	}
+
+	dev_dbg(&dev->client->dev, "%s(0x%02x) -> 0x%02x\n", __func__, reg, ret);
 
 	return ret;
 }
@@ -168,15 +170,11 @@ int max96705_set_high_threshold(struct max96705_device *dev, bool enable)
 	int retry = 5;
 	int write_cmd = 0;
 
-	ret = max96705_read(dev, MAX96705_RSVD_97);
-
-	dev_info(&dev->client->dev, "max96705_read 0x97:  read 0x%02x\n", ret);
+	max96705_read(dev, MAX96705_RSVD_97);
 
 	ret = max96705_read(dev, MAX96705_RSVD_8);
 	if (ret < 0)
 		return ret;
-
-	dev_info(&dev->client->dev, "max96705_read 0x08:  read 0x%02x\n", ret);
 
 	/*
 	 * Enable or disable reverse channel high threshold to increase
@@ -190,9 +188,6 @@ int max96705_set_high_threshold(struct max96705_device *dev, bool enable)
 		usleep_range(200000, 250000);
 
 		ret = max96705_read(dev, MAX96705_RSVD_8);
-
-		dev_info(&dev->client->dev, "max96705_read 0x08: read 0x%02x\n",
-			 ret);
 
 		if (write_cmd == ret)
 			break;
@@ -213,8 +208,6 @@ int max96705_set_high_threshold(struct max96705_device *dev, bool enable)
 		usleep_range(200000, 250000);
 
 		ret = max96705_read(dev, MAX96705_RSVD_97);
-		dev_info(&dev->client->dev, "max96705_read 0x97: read 0x%02x\n",
-			 ret);
 
 		if (write_cmd == ret)
 			break;

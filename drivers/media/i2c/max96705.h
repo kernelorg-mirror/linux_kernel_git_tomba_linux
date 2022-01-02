@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
-/*
- */
+
+#ifndef __MEDIA_I2C_MAX96705_H__
+#define __MEDIA_I2C_MAX96705_H__
 
 #include <linux/i2c.h>
 
@@ -208,3 +209,5 @@ int max96705_set_deserializer_address(struct max96705_device *dev, u8 addr);
  * Return 0 on success or a negative error code on failure
  */
 int max96705_set_translation(struct max96705_device *dev, u8 source, u8 dest);
+
+#endif /* __MEDIA_I2C_MAX96705_H__ */

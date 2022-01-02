@@ -231,6 +231,7 @@ EXPORT_SYMBOL_GPL(max96705_set_high_threshold);
 
 int max96705_configure_gmsl_link(struct max96705_device *dev)
 {
+	unsigned int value;
 	int ret;
 
 	/*
@@ -266,32 +267,31 @@ int max96705_configure_gmsl_link(struct max96705_device *dev)
 	if (ret < 0)
 		return ret;
 
-	/*
-	 * Set VSync Delay,  should be on the order of 4 lines or more:
-	 * 2162 * 4 = 8648 (0x21C8)
-	 */
-	ret = max96705_write(dev, MAX96705_VS_DLY_2, 0x00);
+	/* Set VSync Delay,  should be on the order of 4 lines or more */
+	value = 2162 * 4;
+	ret = max96705_write(dev, MAX96705_VS_DLY_2, (value >> 16) & 0xff);
 	if (ret < 0)
 		return ret;
 
-	ret = max96705_write(dev, MAX96705_VS_DLY_1, 0x21);
+	ret = max96705_write(dev, MAX96705_VS_DLY_1, (value >> 8) & 0xff);
 	if (ret < 0)
 		return ret;
 
-	ret = max96705_write(dev, MAX96705_VS_DLY_0, 0xC8);
+	ret = max96705_write(dev, MAX96705_VS_DLY_0, (value >> 0) & 0xff);
 	if (ret < 0)
 		return ret;
 
-	/* Set VSync High time, should be > 200 (0xC8) Pclks */
-	ret = max96705_write(dev, MAX96705_VS_H_2, 0x00);
+	/* Set VSync High time, should be > 200 Pclks */
+	value = 200;
+	ret = max96705_write(dev, MAX96705_VS_H_2, (value >> 16) & 0xff);
 	if (ret < 0)
 		return ret;
 
-	ret = max96705_write(dev, MAX96705_VS_H_1, 0x00);
+	ret = max96705_write(dev, MAX96705_VS_H_1, (value >> 8) & 0xff);
 	if (ret < 0)
 		return ret;
 
-	ret = max96705_write(dev, MAX96705_VS_H_0, 0xC8);
+	ret = max96705_write(dev, MAX96705_VS_H_0, (value >> 0) & 0xff);
 	if (ret < 0)
 		return ret;
 

@@ -390,11 +390,8 @@ int max96705_verify_id(struct max96705_device *dev)
 	int ret;
 
 	ret = max96705_read(dev, MAX96705_ID);
-	if (ret < 0) {
-		dev_err(&dev->client->dev, "MAX96705 ID read failed (%d)\n",
-			ret);
+	if (ret < 0)
 		return ret;
-	}
 
 	if (ret != MAX96705_ID_VALUE) {
 		dev_err(&dev->client->dev, "MAX96705 ID mismatch (0x%02x)\n",

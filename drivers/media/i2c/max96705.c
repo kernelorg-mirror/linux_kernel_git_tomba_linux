@@ -44,31 +44,37 @@ static int max96705_read(struct max96705_device *dev, u8 reg)
 	return ret;
 }
 
-static int max96705_write(struct max96705_device *dev, u8 reg, u8 val)
+static int max96705_write(struct max96705_device *dev, u8 reg, u8 val, int *err)
 {
 	int ret;
 	int retry = 5;
+
+	if (err && *err)
+		return *err;
 
 	dev_dbg(&dev->client->dev, "%s(0x%02x, 0x%02x)\n", __func__, reg, val);
 
 	while (retry--) {
 		ret = i2c_smbus_write_byte_data(dev->client, reg, val);
-		if (ret < 0) {
-			dev_err(&dev->client->dev,
-				"%s: register 0x%02x write failed (%d)\n",
-				__func__, reg, ret);
-		} else {
+		if (ret >= 0)
 			break;
-		}
+
+		dev_err(&dev->client->dev,
+			"%s: register 0x%02x write failed (%d)\n",
+			__func__, reg, ret);
 		usleep_range(5000, 10000);
 	}
 
-	if (ret < 0)
+	if (ret < 0) {
 		dev_err(&dev->client->dev,
 			"%s: register 0x%02x write failed (%d) - all retries failed\n",
 			__func__, reg, ret);
+		if (err)
+			*err = ret;
+		return ret;
+	}
 
-	return ret;
+	return 0;
 }
 
 /*
@@ -125,7 +131,7 @@ int max96705_set_serial_link(struct max96705_device *dev, bool enable)
 	 * Short delays here appear to show bit-errors in the writes following.
 	 * Therefore a conservative delay seems best here.
 	 */
-	ret = max96705_write(dev, MAX96705_MAIN_CONTROL, val);
+	ret = max96705_write(dev, MAX96705_MAIN_CONTROL, val, NULL);
 	if (ret < 0)
 		return ret;
 
@@ -139,7 +145,7 @@ int max96705_configure_i2c(struct max96705_device *dev, u8 i2c_config)
 {
 	int ret;
 
-	ret = max96705_write(dev, MAX96705_I2C_CONFIG, i2c_config);
+	ret = max96705_write(dev, MAX96705_I2C_CONFIG, i2c_config, NULL);
 	if (ret < 0)
 		return ret;
 
@@ -183,7 +189,7 @@ int max96705_set_high_threshold(struct max96705_device *dev, bool enable)
 
 	write_cmd = enable ? ret | BIT(0) : ret & ~BIT(0);
 	while (retry--) {
-		ret = max96705_write(dev, MAX96705_RSVD_8, write_cmd);
+		ret = max96705_write(dev, MAX96705_RSVD_8, write_cmd, NULL);
 
 		usleep_range(200000, 250000);
 
@@ -203,7 +209,7 @@ int max96705_set_high_threshold(struct max96705_device *dev, bool enable)
 		  | MAX96705_REV_HIRES | MAX96705_REV_PRES(7);
 
 	while (retry--) {
-		ret = max96705_write(dev, MAX96705_RSVD_97, write_cmd);
+		ret = max96705_write(dev, MAX96705_RSVD_97, write_cmd, NULL);
 
 		usleep_range(200000, 250000);
 
@@ -237,14 +243,14 @@ int max96705_configure_gmsl_link(struct max96705_device *dev)
 	 * TODO: Make the GMSL link configuration parametric.
 	 */
 	ret = max96705_write(dev, MAX96705_CONFIG, MAX96705_DBL | MAX96705_HIBW |
-			     MAX96705_HVEN | MAX96705_EDC_1BIT_PARITY);
+			     MAX96705_HVEN | MAX96705_EDC_1BIT_PARITY, NULL);
 	if (ret < 0)
 		return ret;
 
 	usleep_range(5000, 8000);
 
 	ret = max96705_write(dev, MAX96705_CMLLVL_PREEMP, MAX96705_CMLLVL(500) |
-			     MAX96705_PREEMP_6_0DB_PREEMP);
+			     MAX96705_PREEMP_6_0DB_PREEMP, NULL);
 	if (ret < 0)
 		return ret;
 
@@ -254,47 +260,28 @@ int max96705_configure_gmsl_link(struct max96705_device *dev)
 	 * Enable vsync re-gen (VS internally generated),
 	 * falling edge triggers one VS frame
 	 */
-	ret = max96705_write(dev, MAX96705_SYNC_GEN_CONFIG, MAX96705_GEN_VS |
-			     MAX96705_VS_TRIG_FALL |
-			     MAX96705_VTG_MODE_VS_FRAME);
-	if (ret < 0)
-		return ret;
+	ret = 0;
+	max96705_write(dev, MAX96705_SYNC_GEN_CONFIG, MAX96705_GEN_VS |
+		       MAX96705_VS_TRIG_FALL | MAX96705_VTG_MODE_VS_FRAME,
+		       &ret);
 
 	/* Set VSync Delay,  should be on the order of 4 lines or more */
 	value = 2162 * 4;
-	ret = max96705_write(dev, MAX96705_VS_DLY_2, (value >> 16) & 0xff);
-	if (ret < 0)
-		return ret;
-
-	ret = max96705_write(dev, MAX96705_VS_DLY_1, (value >> 8) & 0xff);
-	if (ret < 0)
-		return ret;
-
-	ret = max96705_write(dev, MAX96705_VS_DLY_0, (value >> 0) & 0xff);
-	if (ret < 0)
-		return ret;
+	max96705_write(dev, MAX96705_VS_DLY_2, (value >> 16) & 0xff, &ret);
+	max96705_write(dev, MAX96705_VS_DLY_1, (value >> 8) & 0xff, &ret);
+	max96705_write(dev, MAX96705_VS_DLY_0, (value >> 0) & 0xff, &ret);
 
 	/* Set VSync High time, should be > 200 Pclks */
 	value = 200;
-	ret = max96705_write(dev, MAX96705_VS_H_2, (value >> 16) & 0xff);
-	if (ret < 0)
-		return ret;
-
-	ret = max96705_write(dev, MAX96705_VS_H_1, (value >> 8) & 0xff);
-	if (ret < 0)
-		return ret;
-
-	ret = max96705_write(dev, MAX96705_VS_H_0, (value >> 0) & 0xff);
-	if (ret < 0)
-		return ret;
+	max96705_write(dev, MAX96705_VS_H_2, (value >> 16) & 0xff, &ret);
+	max96705_write(dev, MAX96705_VS_H_1, (value >> 8) & 0xff, &ret);
+	max96705_write(dev, MAX96705_VS_H_0, (value >> 0) & 0xff, &ret);
 
 	// align at HS rising edge
-	ret = max96705_write(dev, MAX96705_DBL_ALIGN_TO,
-			     0xc0 | MAX96705_DBL_ALIGN_TO_HS);
-	if (ret < 0)
-		return ret;
+	max96705_write(dev, MAX96705_DBL_ALIGN_TO,
+		       0xc0 | MAX96705_DBL_ALIGN_TO_HS, &ret);
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL_GPL(max96705_configure_gmsl_link);
 
@@ -307,7 +294,7 @@ int max96705_set_gpios(struct max96705_device *dev, u8 gpio_mask)
 		return 0;
 
 	ret |= gpio_mask;
-	ret = max96705_write(dev, MAX96705_GPIO_OUT, ret);
+	ret = max96705_write(dev, MAX96705_GPIO_OUT, ret, NULL);
 	if (ret < 0) {
 		dev_err(&dev->client->dev, "Failed to set gpio (%d)\n", ret);
 		return ret;
@@ -328,7 +315,7 @@ int max96705_clear_gpios(struct max96705_device *dev, u8 gpio_mask)
 		return 0;
 
 	ret &= ~gpio_mask;
-	ret = max96705_write(dev, MAX96705_GPIO_OUT, ret);
+	ret = max96705_write(dev, MAX96705_GPIO_OUT, ret, NULL);
 	if (ret < 0) {
 		dev_err(&dev->client->dev, "Failed to clear gpio (%d)\n", ret);
 		return ret;
@@ -350,7 +337,7 @@ int max96705_enable_gpios(struct max96705_device *dev, u8 gpio_mask)
 
 	/* BIT(0) reserved: GPO is always enabled. */
 	ret |= (gpio_mask & ~BIT(0));
-	ret = max96705_write(dev, MAX96705_GPIO_EN, ret);
+	ret = max96705_write(dev, MAX96705_GPIO_EN, ret, NULL);
 	if (ret < 0) {
 		dev_err(&dev->client->dev, "Failed to enable gpio (%d)\n", ret);
 		return ret;
@@ -372,7 +359,7 @@ int max96705_disable_gpios(struct max96705_device *dev, u8 gpio_mask)
 
 	/* BIT(0) reserved: GPO cannot be disabled */
 	ret &= ~(gpio_mask | BIT(0));
-	ret = max96705_write(dev, MAX96705_GPIO_EN, ret);
+	ret = max96705_write(dev, MAX96705_GPIO_EN, ret, NULL);
 	if (ret < 0) {
 		dev_err(&dev->client->dev, "Failed to disable gpio (%d)\n",
 			ret);
@@ -407,7 +394,7 @@ int max96705_set_address(struct max96705_device *dev, u8 addr)
 {
 	int ret;
 
-	ret = max96705_write(dev, MAX96705_SERADDR, addr << 1);
+	ret = max96705_write(dev, MAX96705_SERADDR, addr << 1, NULL);
 	if (ret < 0) {
 		dev_err(&dev->client->dev,
 			"MAX96705 I2C address change failed (%d)\n", ret);
@@ -423,7 +410,7 @@ int max96705_set_deserializer_address(struct max96705_device *dev, u8 addr)
 {
 	int ret;
 
-	ret = max96705_write(dev, MAX96705_DESADDR, addr << 1);
+	ret = max96705_write(dev, MAX96705_DESADDR, addr << 1, NULL);
 	if (ret < 0) {
 		dev_err(&dev->client->dev,
 			"MAX96705 deserializer address set failed (%d)\n", ret);
@@ -439,7 +426,7 @@ int max96705_set_translation(struct max96705_device *dev, u8 source, u8 dest)
 {
 	int ret;
 
-	ret = max96705_write(dev, MAX96705_I2C_SOURCE_A, source << 1);
+	ret = max96705_write(dev, MAX96705_I2C_SOURCE_A, source << 1, NULL);
 	if (ret < 0) {
 		dev_err(&dev->client->dev,
 			"MAX96705 I2C translation setup failed (%d)\n", ret);
@@ -447,7 +434,7 @@ int max96705_set_translation(struct max96705_device *dev, u8 source, u8 dest)
 	}
 	usleep_range(3500, 5000);
 
-	ret = max96705_write(dev, MAX96705_I2C_DEST_A, dest << 1);
+	ret = max96705_write(dev, MAX96705_I2C_DEST_A, dest << 1, NULL);
 	if (ret < 0) {
 		dev_err(&dev->client->dev,
 			"MAX96705 I2C translation setup failed (%d)\n", ret);

@@ -12,6 +12,7 @@
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_graph.h>
 #include <linux/platform_device.h>
 #include <linux/xilinx-v4l2-controls.h>
 
@@ -53,7 +54,6 @@ enum xgamma_video_format {
 /**
  * struct xgamma_dev - Xilinx Video Gamma LUT device structure
  * @xvip: Xilinx Video IP device
- * @pads: Scaler sub-device media pads
  * @formats: V4L2 media bus formats at the sink and source pads
  * @default_formats: default V4L2 media bus formats
  * @ctrl_handler: V4L2 Control Handler for R,G,B Gamma Controls
@@ -68,7 +68,6 @@ enum xgamma_video_format {
  */
 struct xgamma_dev {
 	struct xvip_device xvip;
-	struct media_pad pads[2];
 	struct v4l2_mbus_framefmt formats[2];
 	struct v4l2_mbus_framefmt default_formats[2];
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -371,9 +370,7 @@ static int xg_parse_of(struct xgamma_dev *xg)
 {
 	struct device *dev = xg->xvip.dev;
 	struct device_node *node = dev->of_node;
-	struct device_node *ports;
 	struct device_node *port;
-	u32 port_id = 0;
 	int rval;
 
 	rval = of_property_read_u32(node, "xlnx,max-height", &xg->max_height);
@@ -396,42 +393,32 @@ static int xg_parse_of(struct xgamma_dev *xg)
 		return -EINVAL;
 	}
 
-	ports = of_get_child_by_name(node, "ports");
-	if (!ports)
-		ports = node;
+	port = of_graph_get_port_by_id(node, 0);
+	if (!port) {
+		dev_err(dev, "Port 0 not found\n");
+		return -EINVAL;
+	}
 
-	/* Get the format description for each pad */
-	for_each_child_of_node(ports, port) {
-		if (port->name && (of_node_cmp(port->name, "port") == 0)) {
-			rval = of_property_read_u32(port, "reg", &port_id);
-			if (rval < 0) {
-				dev_err(dev, "No reg in DT");
-				return rval;
-			}
-			if (port_id != 0 && port_id != 1) {
-				dev_err(dev, "Invalid reg in DT");
-				return -EINVAL;
-			}
+	rval = of_property_read_u32(port, "xlnx,video-width",
+				    &xg->color_depth);
+	of_node_put(port);
 
-			rval = of_property_read_u32(port, "xlnx,video-width",
-						    &xg->color_depth);
-			if (rval < 0) {
-				dev_err(dev, "Missing xlnx-video-width in DT");
-				return rval;
-			}
-			switch (xg->color_depth) {
-			case GAMMA_BPC_8:
-				xg->gamma_table = xgamma8_curves;
-				break;
-			case GAMMA_BPC_10:
-				xg->gamma_table = xgamma10_curves;
-				break;
-			default:
-				dev_err(dev, "Unsupported color depth %d",
-					xg->color_depth);
-				return -EINVAL;
-			}
-		}
+	if (rval < 0) {
+		dev_err(dev, "Missing xlnx,video-width in DT\n");
+		return rval;
+	}
+
+	switch (xg->color_depth) {
+	case GAMMA_BPC_8:
+		xg->gamma_table = xgamma8_curves;
+		break;
+	case GAMMA_BPC_10:
+		xg->gamma_table = xgamma10_curves;
+		break;
+	default:
+		dev_err(dev, "Unsupported color depth %d\n",
+			xg->color_depth);
+		return -EINVAL;
 	}
 
 	xg->rst_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
@@ -445,6 +432,8 @@ static int xg_parse_of(struct xgamma_dev *xg)
 
 static const struct xvip_device_info xg_info = {
 	.has_axi_lite = true,
+	.num_sinks = 1,
+	.num_sources = 1,
 };
 
 static int xg_probe(struct platform_device *pdev)
@@ -491,12 +480,9 @@ static int xg_probe(struct platform_device *pdev)
 	*def_fmt = xg->default_formats[XVIP_PAD_SINK];
 	xg->formats[XVIP_PAD_SOURCE] = *def_fmt;
 
-	xg->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	xg->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
-
 	/* Init Media Entity */
 	subdev->entity.ops = &xg_media_ops;
-	rval = media_entity_pads_init(&subdev->entity, 2, xg->pads);
+	rval = media_entity_pads_init(&subdev->entity, 2, xg->xvip.pads);
 	if (rval < 0)
 		goto media_error;
 

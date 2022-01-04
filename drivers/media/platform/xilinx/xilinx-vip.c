@@ -338,6 +338,51 @@ void xvip_set_format_size(struct v4l2_mbus_framefmt *format,
 }
 EXPORT_SYMBOL_GPL(xvip_set_format_size);
 
+/* -----------------------------------------------------------------------------
+ * Video IP device operations
+ */
+
+/**
+ * xvip_device_init - Initialize a Xilinx video IP device
+ * @xvip: The video IP device
+ *
+ * Before being used, xvip_device instances must be initialized by a call to
+ * this function. Initialization acquires resources needed by the device.
+ *
+ * Every device successfully initialized by this function must be cleaned up by
+ * a call to xvip_device_cleanup().
+ *
+ * Return: 0 on success or a negative error code on failure
+ */
+int xvip_device_init(struct xvip_device *xvip)
+{
+	struct platform_device *pdev = to_platform_device(xvip->dev);
+
+	xvip->iomem = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(xvip->iomem))
+		return PTR_ERR(xvip->iomem);
+
+	xvip->clk = devm_clk_get(xvip->dev, NULL);
+	if (IS_ERR(xvip->clk))
+		return PTR_ERR(xvip->clk);
+
+	return clk_prepare_enable(xvip->clk);
+}
+EXPORT_SYMBOL_GPL(xvip_device_init);
+
+/**
+ * xvip_device_cleanup - Cleanup a Xilinx video IP device
+ * @xvip: The video IP device
+ *
+ * This function is the counterpart of xvip_device_init() and must be called to
+ * release all allocated resources before destroying the device.
+ */
+void xvip_device_cleanup(struct xvip_device *xvip)
+{
+	clk_disable_unprepare(xvip->clk);
+}
+EXPORT_SYMBOL_GPL(xvip_device_cleanup);
+
 /**
  * xvip_clr_or_set - Clear or set the register with a bitmask
  * @xvip: Xilinx Video IP device
@@ -385,28 +430,6 @@ void xvip_clr_and_set(struct xvip_device *xvip, u32 addr, u32 clr, u32 set)
 	xvip_write(xvip, addr, reg);
 }
 EXPORT_SYMBOL_GPL(xvip_clr_and_set);
-
-int xvip_device_init(struct xvip_device *xvip)
-{
-	struct platform_device *pdev = to_platform_device(xvip->dev);
-
-	xvip->iomem = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(xvip->iomem))
-		return PTR_ERR(xvip->iomem);
-
-	xvip->clk = devm_clk_get(xvip->dev, NULL);
-	if (IS_ERR(xvip->clk))
-		return PTR_ERR(xvip->clk);
-
-	return clk_prepare_enable(xvip->clk);
-}
-EXPORT_SYMBOL_GPL(xvip_device_init);
-
-void xvip_device_cleanup(struct xvip_device *xvip)
-{
-	clk_disable_unprepare(xvip->clk);
-}
-EXPORT_SYMBOL_GPL(xvip_device_cleanup);
 
 /* -----------------------------------------------------------------------------
  * Subdev operations handlers

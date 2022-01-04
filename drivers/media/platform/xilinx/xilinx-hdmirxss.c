@@ -14,11 +14,14 @@
 #include <linux/of.h>
 #include <linux/phy/phy.h>
 #include <linux/platform_device.h>
+
 #include <media/media-entity.h>
 #include <media/v4l2-dv-timings.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-subdev.h>
+
 #include "xilinx-hdmirx-hw.h"
+#include "xilinx-vip.h"
 
 #define XHDMI_MAX_LANES		(4)
 #define XEDID_BLOCKS_MAX	(10)
@@ -321,10 +324,7 @@ struct xhdmi_aux {
 
 /**
  * struct xhdmirx_state - HDMI Rx driver state
- * @dev: Platform structure
- * @regs: Base address
- * @sd: V4L2 subdev structure
- * @pad: Media pad
+ * @xvip: Xilinx Video IP device
  * @mbus_fmt: Detected media bus format
  * @dv_timings: Detected DV timings
  * @stream: struct to save stream properties
@@ -348,10 +348,8 @@ struct xhdmi_aux {
  * @isstreamup: flag whether stream is up
  */
 struct xhdmirx_state {
-	struct device *dev;
-	void __iomem *regs;
-	struct v4l2_subdev sd;
-	struct media_pad pad;
+	struct xvip_device xvip;
+
 	struct v4l2_mbus_framefmt mbus_fmt;
 	struct v4l2_dv_timings dv_timings;
 	struct xstream stream;
@@ -663,18 +661,18 @@ static void xhdmi_execfrlstate(struct xhdmirx_state *xhdmi);
 
 static inline u32 xhdmi_read(struct xhdmirx_state *xhdmi, u32 addr)
 {
-	return ioread32(xhdmi->regs + addr);
+	return xvip_read(&xhdmi->xvip, addr);
 }
 
 static inline void xhdmi_write(struct xhdmirx_state *xhdmi,
 			       u32 addr, u32 val)
 {
-	iowrite32(val, xhdmi->regs + addr);
+	xvip_write(&xhdmi->xvip, addr, val);
 }
 
 static inline struct xhdmirx_state *to_xhdmirx_state(struct v4l2_subdev *subdev)
 {
-	return container_of(subdev, struct xhdmirx_state, sd);
+	return container_of(subdev, struct xhdmirx_state, xvip.subdev);
 }
 
 static inline u32 xhdmi_getfrlactivepixratio(struct xhdmirx_state *xhdmi)
@@ -721,7 +719,7 @@ static u32 xhdmi_frlddcreadfield(struct xhdmirx_state *xhdmi, enum xhdmi_frlscdc
 	}
 
 	if (!(data & HDMIRX_FRL_SCDC_RDY_MASK)) {
-		dev_dbg_ratelimited(xhdmi->dev, "%s - scdc is not ready!", __func__);
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "%s - scdc is not ready!", __func__);
 		return data;
 	}
 
@@ -739,7 +737,7 @@ static u32 xhdmi_frlddcreadfield(struct xhdmirx_state *xhdmi, enum xhdmi_frlscdc
 		}
 	}
 
-	dev_dbg_ratelimited(xhdmi->dev, "%s - failed!", __func__);
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "%s - failed!", __func__);
 	return 0xFFFFFFFF;
 }
 
@@ -784,7 +782,7 @@ static int xhdmi_frlddcwritefield(struct xhdmirx_state *xhdmi,
 
 	data = xhdmi_frlddcreadfield(xhdmi, field);
 	if (data != value) {
-		dev_err_ratelimited(xhdmi->dev, "field %u to write %u != written value %u",
+		dev_err_ratelimited(xhdmi->xvip.dev, "field %u to write %u != written value %u",
 				    field, value, data);
 	}
 
@@ -944,7 +942,7 @@ static u32 xhdmirx1_gettmdsclkratio(struct xhdmirx_state *xhdmi)
 	val = xhdmi_read(xhdmi, HDMIRX_PIO_IN_OFFSET);
 	val = FIELD_GET(HDMIRX_PIO_IN_SCDC_TMDS_CLOCK_RATIO_MASK, val);
 
-	dev_dbg(xhdmi->dev, "Get TMDS Clk Ratio = %u\n", val);
+	dev_dbg(xhdmi->xvip.dev, "Get TMDS Clk Ratio = %u\n", val);
 	return val;
 }
 
@@ -961,7 +959,7 @@ static u8 xhdmirx1_getavi_vic(struct xhdmirx_state *xhdmi)
 	val = xhdmi_read(xhdmi, HDMIRX_AUX_STA_OFFSET);
 	val = FIELD_GET(HDMIRX_AUX_STA_AVI_VIC_MASK, val);
 
-	dev_dbg_ratelimited(xhdmi->dev, "Get AVI VIC = %u\n", val);
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "Get AVI VIC = %u\n", val);
 	return (u8)val;
 }
 
@@ -977,24 +975,24 @@ static enum xcolorspace xhdmirx1_getavi_colorspace(struct xhdmirx_state *xhdmi)
 	u32 val;
 	enum xcolorspace cs;
 
-	dev_dbg_ratelimited(xhdmi->dev, "Get avi colorspace ");
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "Get avi colorspace ");
 	val = xhdmi_read(xhdmi, HDMIRX_AUX_STA_OFFSET);
 	switch (FIELD_GET(HDMIRX_AUX_STA_AVI_CS_MASK, val)) {
 	case 1:
 		cs = XCS_YUV422;
-		dev_dbg_ratelimited(xhdmi->dev, "YUV 422\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "YUV 422\n");
 		break;
 	case 2:
 		cs = XCS_YUV444;
-		dev_dbg_ratelimited(xhdmi->dev, "YUV 444\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "YUV 444\n");
 		break;
 	case 3:
 		cs = XCS_YUV420;
-		dev_dbg_ratelimited(xhdmi->dev, "YUV 420\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "YUV 420\n");
 		break;
 	default:
 		cs = XCS_RGB;
-		dev_dbg_ratelimited(xhdmi->dev, "RGB\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "RGB\n");
 		break;
 	}
 
@@ -1029,7 +1027,7 @@ static enum xcolordepth xhdmirx1_getgcp_colordepth(struct xhdmirx_state *xhdmi)
 		break;
 	}
 
-	dev_dbg_ratelimited(xhdmi->dev, "get GCP colordepth %u\n", ret);
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "get GCP colordepth %u\n", ret);
 
 	return ret;
 }
@@ -1233,7 +1231,7 @@ static void xhdmirx1_setpixelclk(struct xhdmirx_state *xhdmi)
 	if (xhdmi->stream.video.colorspace == XCS_YUV422)
 		xhdmi->stream.pixelclk = xhdmi->stream.refclk;
 
-	dev_dbg(xhdmi->dev, "pixel clk = %u Hz ref clk = %u Hz\n",
+	dev_dbg(xhdmi->xvip.dev, "pixel clk = %u Hz ref clk = %u Hz\n",
 		xhdmi->stream.pixelclk, xhdmi->stream.refclk);
 }
 
@@ -1245,7 +1243,8 @@ static int xhdmirx_phy_configure(struct xhdmirx_state *xhdmi,
 	for (i = 0; i < XHDMI_MAX_LANES; i++) {
 		ret = phy_configure(xhdmi->phy[i], opts);
 		if (ret) {
-			dev_err(xhdmi->dev, "phy_configure error %d\n", ret);
+			dev_err(xhdmi->xvip.dev, "phy_configure error %d\n",
+				ret);
 			return ret;
 		}
 	}
@@ -1267,7 +1266,7 @@ static void phy_rxinit_cb(void *param)
 
 	/* set the TMDS clock ratio in phy */
 	xhdmirx_phy_configure(xhdmi, &opts);
-	dev_dbg(xhdmi->dev, "Phy RxInitCallback tmds clk ratio = %u\n", val);
+	dev_dbg(xhdmi->xvip.dev, "Phy RxInitCallback tmds clk ratio = %u\n", val);
 }
 
 static void phy_rxready_cb(void *param)
@@ -1279,7 +1278,7 @@ static void phy_rxready_cb(void *param)
 	opts.hdmi.rx_get_refclk = 1;
 	ret = xhdmirx_phy_configure(xhdmi, &opts);
 	if (ret) {
-		dev_err(xhdmi->dev, "Unable to get ref clk from phy %d\n", ret);
+		dev_err(xhdmi->xvip.dev, "Unable to get ref clk from phy %d\n", ret);
 		return;
 	}
 
@@ -1292,7 +1291,8 @@ static void phy_rxready_cb(void *param)
 	if (xhdmirx1_gettmdsclkratio(xhdmi))
 		xhdmi->stream.refclk *= 4;
 
-	dev_dbg(xhdmi->dev, "Phy RxReadyCallback refclk = %u Hz\n", xhdmi->stream.refclk);
+	dev_dbg(xhdmi->xvip.dev, "Phy RxReadyCallback refclk = %u Hz\n",
+		xhdmi->stream.refclk);
 }
 
 /**
@@ -1407,7 +1407,7 @@ static void xhdmirx1_get_mbusfmtcode(struct xhdmirx_state *xhdmi)
 		}
 		break;
 	}
-	dev_dbg_ratelimited(xhdmi->dev, "mbus_fmt code = 0x%08x\n",
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "mbus_fmt code = 0x%08x\n",
 			    xhdmi->mbus_fmt.code);
 }
 
@@ -1510,9 +1510,9 @@ static void rxstreamup(struct xhdmirx_state *xhdmi)
 
 	xhdmi->isstreamup = true;
 
-	v4l2_subdev_notify_event(&xhdmi->sd, &xhdmi_ev_fmt);
+	v4l2_subdev_notify_event(&xhdmi->xvip.subdev, &xhdmi_ev_fmt);
 
-	dev_dbg_ratelimited(xhdmi->dev, "mbus fmt width = %u height = %u code = 0x%08x\n",
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "mbus fmt width = %u height = %u code = 0x%08x\n",
 			    xhdmi->mbus_fmt.width, xhdmi->mbus_fmt.height, xhdmi->mbus_fmt.code);
 #ifdef DEBUG
 	v4l2_print_dv_timings("xilinx-hdmi-rx", "", &xhdmi->dv_timings, 1);
@@ -1553,7 +1553,7 @@ static void rxconnect(struct xhdmirx_state *xhdmi)
 {
 	union phy_configure_opts phy_cfg = {0};
 
-	dev_dbg_ratelimited(xhdmi->dev, "%s - enter cable %s\n",
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "%s - enter cable %s\n",
 			    __func__, xhdmi->stream.cable_connected ?
 			    "connected" : "disconnected");
 
@@ -1591,7 +1591,7 @@ static void tmdsconfig(struct xhdmirx_state *xhdmi)
 	phy_cfg.hdmi.config_hdmi20 = 1;
 	xhdmirx_phy_configure(xhdmi, &phy_cfg);
 	xhdmirx_setfrl_vclkvckeratio(xhdmi, 0);
-	dev_dbg_ratelimited(xhdmi->dev, "Set HDMI 2.0 phy");
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "Set HDMI 2.0 phy");
 }
 
 static void frlconfig(struct xhdmirx_state *xhdmi)
@@ -1604,7 +1604,7 @@ static void frlconfig(struct xhdmirx_state *xhdmi)
 	phy_cfg.hdmi.nchannels = nchannels;
 	phy_cfg.hdmi.config_hdmi21 = 1;
 	xhdmirx_phy_configure(xhdmi, &phy_cfg);
-	dev_dbg_ratelimited(xhdmi->dev, "Set HDMI 2.1 phy");
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "Set HDMI 2.1 phy");
 }
 
 static void phyresetcb(struct xhdmirx_state *xhdmi)
@@ -1627,7 +1627,7 @@ static void phyresetcb(struct xhdmirx_state *xhdmi)
  */
 static void streamdown(struct xhdmirx_state *xhdmi)
 {
-	dev_dbg_ratelimited(xhdmi->dev, "%s - enter\n", __func__);
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "%s - enter\n", __func__);
 
 	/* In TMDS mode */
 	if (!xhdmi->stream.isfrl) {
@@ -1716,7 +1716,7 @@ static u32 xhdmi_getfrlltpdetection(struct xhdmirx_state *xhdmi, u8 lane)
 	if (lane < XHDMI_MAX_LANES)
 		data = xhdmi_frlddcreadfield(xhdmi, XSCDCFIELD_LN0_LTP_REQ + lane);
 	else
-		dev_dbg(xhdmi->dev, "RX:ERROR, Wrong lane is selected to get!");
+		dev_dbg(xhdmi->xvip.dev, "RX:ERROR, Wrong lane is selected to get!");
 
 	return data;
 }
@@ -1729,7 +1729,7 @@ static void xhdmi_setfrlltpdetection(struct xhdmirx_state *xhdmi, u8 lane,
 	if (lane < XHDMI_MAX_LANES)
 		xhdmi_frlddcwritefield(xhdmi, XSCDCFIELD_LN0_LTP_REQ + lane, value);
 	else
-		dev_dbg(xhdmi->dev, "RX:ERROR, Wrong lane is selected to set!");
+		dev_dbg(xhdmi->xvip.dev, "RX:ERROR, Wrong lane is selected to set!");
 }
 
 static void xhdmi_frlfltupdate(struct xhdmirx_state *xhdmi, bool flag)
@@ -1808,11 +1808,11 @@ static int xhdmi_configfrlltpdetection(struct xhdmirx_state *xhdmi)
 	if (!data)
 		return -ENODATA;
 
-	dev_dbg(xhdmi->dev, "rx: ltpreq: %x %x %x %x",
+	dev_dbg(xhdmi->xvip.dev, "rx: ltpreq: %x %x %x %x",
 		xhdmi->stream.frl.ltp.byte[0], xhdmi->stream.frl.ltp.byte[1],
 		xhdmi->stream.frl.ltp.byte[2], xhdmi->stream.frl.ltp.byte[3]);
 
-	dev_dbg(xhdmi->dev, "assert flt_update (%d)",
+	dev_dbg(xhdmi->xvip.dev, "assert flt_update (%d)",
 		xhdmirx_tmr1_getval(xhdmi));
 
 	xhdmi_frlfltupdate(xhdmi, true);
@@ -1900,7 +1900,7 @@ static void xhdmi_phyresetpoll(struct xhdmirx_state *xhdmi)
 
 static void xhdmirx_execfrlstate_ltsl(struct xhdmirx_state *xhdmi)
 {
-	dev_dbg(xhdmi->dev, "RX: LTS:L");
+	dev_dbg(xhdmi->xvip.dev, "RX: LTS:L");
 
 	/* Clear HDMI variables */
 	xhdmirx1_clear(xhdmi);
@@ -1914,7 +1914,7 @@ static void xhdmirx_execfrlstate_ltsl(struct xhdmirx_state *xhdmi)
 
 static void xhdmirx_execfrlstate_lts2(struct xhdmirx_state *xhdmi)
 {
-	dev_dbg(xhdmi->dev, "RX: LTS:2");
+	dev_dbg(xhdmi->xvip.dev, "RX: LTS:2");
 	xhdmi_frlddcwritefield(xhdmi, XSCDCFIELD_FLT_READY, 1);
 }
 
@@ -1931,7 +1931,7 @@ static void xhdmirx_execfrlstate_lts3_ratechange(struct xhdmirx_state *xhdmi)
 	else
 		xhdmi->stream.frl.ffelevels = 0;
 
-	dev_dbg(xhdmi->dev, "RX: LTS:3 Rate Change");
+	dev_dbg(xhdmi->xvip.dev, "RX: LTS:3 Rate Change");
 	/* FrlLts3Callback is just logging function */
 	xhdmi_frlfltupdate(xhdmi, false);
 
@@ -1942,7 +1942,7 @@ static void xhdmirx_execfrlstate_lts3_ratechange(struct xhdmirx_state *xhdmi)
 		xhdmi->stream.state = XSTATE_FRL_LINK_TRAININIG;
 		xhdmi->stream.isfrl = true;
 		xhdmi->stream.ishdmi = true;
-		dev_dbg(xhdmi->dev, "RX: Rate: %d Lanes: %d Ffe_lvl: %d",
+		dev_dbg(xhdmi->xvip.dev, "RX: Rate: %d Lanes: %d Ffe_lvl: %d",
 			xhdmi->stream.frl.linerate, xhdmi->stream.frl.lanes,
 			xhdmi->stream.frl.ffelevels);
 
@@ -1980,7 +1980,7 @@ static void xhdmirx_execfrlstate_lts3_ltpdetected(struct xhdmirx_state *xhdmi)
 {
 	u8 data;
 
-	dev_dbg(xhdmi->dev, "RX: LTS:3 LTP Detected %d",
+	dev_dbg(xhdmi->xvip.dev, "RX: LTS:3 LTP Detected %d",
 		xhdmirx_tmr1_getval(xhdmi));
 
 	/* Make sure phy is reset at least once after the pattterns have matched */
@@ -1992,7 +1992,7 @@ static void xhdmirx_execfrlstate_lts3_ltpdetected(struct xhdmirx_state *xhdmi)
 		phyresetcb(xhdmi);
 		xhdmi->stream.frl.trainingstate = XFRLSTATE_LTS_3;
 
-		dev_dbg(xhdmi->dev, "%s - fail", __func__);
+		dev_dbg(xhdmi->xvip.dev, "%s - fail", __func__);
 		return;
 	}
 
@@ -2008,10 +2008,10 @@ static void xhdmirx_execfrlstate_lts3_ltpdetected(struct xhdmirx_state *xhdmi)
 		xhdmi->stream.frl.trainingstate = XFRLSTATE_LTS_3_RDY;
 
 		/* FrlLtsPCallback is only a logging function */
-		dev_dbg(xhdmi->dev, "LTP_DET:MATCH");
+		dev_dbg(xhdmi->xvip.dev, "LTP_DET:MATCH");
 	} else {
 		xhdmi->stream.frl.trainingstate = XFRLSTATE_LTS_3;
-		dev_dbg(xhdmi->dev, "LTP_DET:FALSE:%x", data);
+		dev_dbg(xhdmi->xvip.dev, "LTP_DET:FALSE:%x", data);
 	}
 }
 
@@ -2024,7 +2024,7 @@ static void xhdmirx_execfrlstate_lts3_timer(struct xhdmirx_state *xhdmi)
 	xhdmi->stream.frl.timercnt = frltimeoutlts3[xhdmi->stream.frl.ffelevels];
 
 	if (xhdmi->stream.frl.trainingstate == XFRLSTATE_LTS_P) {
-		dev_dbg(xhdmi->dev, "RX: LTS:P Lts3_Timer OUT FFE_LVL: %d",
+		dev_dbg(xhdmi->xvip.dev, "RX: LTS:P Lts3_Timer OUT FFE_LVL: %d",
 			xhdmi->stream.frl.ffelevels);
 	}
 
@@ -2054,7 +2054,7 @@ static void xhdmirx_execfrlstate_lts3_timer(struct xhdmirx_state *xhdmi)
 					if (((data >> lanes) & 0x1) != 0x1) {
 						/* 0xE = Request to change TxFFE */
 						xhdmi->stream.frl.ltp.byte[lanes] = 0xE;
-						dev_dbg(xhdmi->dev, "RX: %d:0xE", lanes);
+						dev_dbg(xhdmi->xvip.dev, "RX: %d:0xE", lanes);
 					}
 				}
 				xhdmi_resetfrlltpdetection(xhdmi);
@@ -2072,8 +2072,8 @@ static void xhdmirx_execfrlstate_lts3(struct xhdmirx_state *xhdmi)
 {
 	int status;
 
-	dev_dbg(xhdmi->dev, "RX: LTS:3 %d", xhdmirx_tmr1_getval(xhdmi));
-	dev_dbg(xhdmi->dev, "scdc flt update = %d",
+	dev_dbg(xhdmi->xvip.dev, "RX: LTS:3 %d", xhdmirx_tmr1_getval(xhdmi));
+	dev_dbg(xhdmi->xvip.dev, "scdc flt update = %d",
 		xhdmi_frlddcreadfield(xhdmi, XSCDCFIELD_FLT_UPDATE));
 
 	xhdmi_frlddcwritefield(xhdmi, XSCDCFIELD_FRL_START, 0);
@@ -2082,14 +2082,14 @@ static void xhdmirx_execfrlstate_lts3(struct xhdmirx_state *xhdmi)
 	if (!status) {
 		if (xhdmi->stream.frl.trainingstate == XFRLSTATE_LTS_3_RDY) {
 			xhdmi->stream.frl.trainingstate = XFRLSTATE_LTS_P;
-			dev_dbg(xhdmi->dev, "RX: LTP Pass");
+			dev_dbg(xhdmi->xvip.dev, "RX: LTP Pass");
 			/* Disable timer */
 			xhdmi_setfrltimer(xhdmi, 0);
 			status = 0;
 		} else if (xhdmi->stream.frl.trainingstate == XFRLSTATE_LTS_3_TMR) {
 		} else if (xhdmi->stream.frl.trainingstate == XFRLSTATE_LTS_3) {
 		} else {
-			dev_dbg(xhdmi->dev, " --->ELSE");
+			dev_dbg(xhdmi->xvip.dev, " --->ELSE");
 		}
 		status = 0;
 	} else if (status == -EINVAL) {
@@ -2097,7 +2097,7 @@ static void xhdmirx_execfrlstate_lts3(struct xhdmirx_state *xhdmi)
 		 * source has not cleared FLT_update so sink should not update
 		 * FLT_req and FLT_update as to ensure proper data handshake
 		 */
-		dev_dbg(xhdmi->dev, "RX: LTS_3-->FLT_UPDATE not Cleared %d",
+		dev_dbg(xhdmi->xvip.dev, "RX: LTS_3-->FLT_UPDATE not Cleared %d",
 			xhdmirx_tmr1_getval(xhdmi));
 	} else {
 		/* case of -ENODATA */
@@ -2109,31 +2109,31 @@ static void xhdmirx_execfrlstate_lts3(struct xhdmirx_state *xhdmi)
 
 static void xhdmirx_execfrlstate_ltsp(struct xhdmirx_state *xhdmi)
 {
-	dev_dbg(xhdmi->dev, "RX: LTS:P");
+	dev_dbg(xhdmi->xvip.dev, "RX: LTS:P");
 
 	if (xhdmi->stream.frl.trainingstate == XFRLSTATE_LTS_P_FRL_RDY &&
 	    !xhdmi->stream.frl.fltupdateasserted) {
-		dev_dbg(xhdmi->dev, "RX: LTS: P_FRL_RDY");
+		dev_dbg(xhdmi->xvip.dev, "RX: LTS: P_FRL_RDY");
 		xhdmi_frlddcwritefield(xhdmi, XSCDCFIELD_FRL_START, 1);
-		dev_dbg(xhdmi->dev, "RX: FRL_START");
+		dev_dbg(xhdmi->xvip.dev, "RX: FRL_START");
 		/* FrlStartCallback is just logging function */
 	}
 }
 
 static void xhdmirx_execfrlstate_ltsp_timeout(struct xhdmirx_state *xhdmi)
 {
-	dev_dbg(xhdmi->dev, "rx: lts:p timeout");
+	dev_dbg(xhdmi->xvip.dev, "rx: lts:p timeout");
 	tmdsconfig(xhdmi);
 }
 
 static void xhdmi_execfrlstate(struct xhdmirx_state *xhdmi)
 {
-	dev_dbg(xhdmi->dev, "Rx : LTS :%u", xhdmi->stream.frl.trainingstate);
+	dev_dbg(xhdmi->xvip.dev, "Rx : LTS :%u", xhdmi->stream.frl.trainingstate);
 
 	switch (xhdmi->stream.frl.trainingstate) {
 	case XFRLSTATE_LTS_L:
 		xhdmirx_execfrlstate_ltsl(xhdmi);
-		dev_dbg(xhdmi->dev, "---LTSL:");
+		dev_dbg(xhdmi->xvip.dev, "---LTSL:");
 		break;
 
 	case XFRLSTATE_LTS_2:
@@ -2179,7 +2179,7 @@ static void xhdmi_execfrlstate(struct xhdmirx_state *xhdmi)
 		break;
 
 	default:
-		dev_err(xhdmi->dev, "RX:S:FRL_INVALID_STATE(%u)!",
+		dev_err(xhdmi->xvip.dev, "RX:S:FRL_INVALID_STATE(%u)!",
 			xhdmi->stream.frl.trainingstate);
 		break;
 	}
@@ -2191,7 +2191,7 @@ static int xhdmirx_frlmodeenable(struct xhdmirx_state *xhdmi, u8 ltpthreshold,
 	int i;
 
 	if (ffesuppflag > 1) {
-		dev_err(xhdmi->dev, "ffesuppflag can be 0 or 1 and not %u", ffesuppflag);
+		dev_err(xhdmi->xvip.dev, "ffesuppflag can be 0 or 1 and not %u", ffesuppflag);
 		return -EINVAL;
 	}
 
@@ -2201,7 +2201,7 @@ static int xhdmirx_frlmodeenable(struct xhdmirx_state *xhdmi, u8 ltpthreshold,
 			if (i == 3 && !defaultltp.byte[i])
 				break;
 
-			dev_err(xhdmi->dev, "invalid ltp byte %u for lane %u",
+			dev_err(xhdmi->xvip.dev, "invalid ltp byte %u for lane %u",
 				defaultltp.byte[i], i);
 			return -EINVAL;
 		}
@@ -2236,7 +2236,7 @@ static void xhdmirx_pioint_handler(struct xhdmirx_state *xhdmi)
 	xhdmi_write(xhdmi, HDMIRX_PIO_IN_EVT_OFFSET, event);
 	data = xhdmi_read(xhdmi, HDMIRX_PIO_IN_OFFSET);
 
-	dev_dbg_ratelimited(xhdmi->dev, "pio int handler PIO IN - 0x%08x\n",
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "pio int handler PIO IN - 0x%08x\n",
 			    data);
 
 	/* handle cable connect / disconnect */
@@ -2272,20 +2272,20 @@ static void xhdmirx_pioint_handler(struct xhdmirx_state *xhdmi)
 					break;
 				default:
 					/* Link Ready Error callback */
-					dev_dbg_ratelimited(xhdmi->dev, "LNK_RDY 1 Error %d",
+					dev_dbg_ratelimited(xhdmi->xvip.dev, "LNK_RDY 1 Error %d",
 							    xhdmi->stream.frl.trainingstate);
 					break;
 				}
 			} else {
-				dev_dbg(xhdmi->dev, "LNK_RDY:0");
+				dev_dbg(xhdmi->xvip.dev, "LNK_RDY:0");
 			}
 		} else if (xhdmi->stream.isfrl) {
 			/* Link Ready Error callback */
-			dev_dbg_ratelimited(xhdmi->dev, "LNK_RDY during FRL Link");
+			dev_dbg_ratelimited(xhdmi->xvip.dev, "LNK_RDY during FRL Link");
 		} else {
-			dev_dbg_ratelimited(xhdmi->dev, "LNK_RDY TMDS");
+			dev_dbg_ratelimited(xhdmi->xvip.dev, "LNK_RDY TMDS");
 			xhdmi->stream.state = XSTREAM_IDLE;
-			dev_dbg_ratelimited(xhdmi->dev, "pio lnk rdy state = XSTREAM_IDLE");
+			dev_dbg_ratelimited(xhdmi->xvip.dev, "pio lnk rdy state = XSTREAM_IDLE");
 			/* start 10 ms timer */
 			xhdmirx_tmr1_start(xhdmi, TIME_10MS);
 		}
@@ -2305,21 +2305,21 @@ static void xhdmirx_pioint_handler(struct xhdmirx_state *xhdmi)
 					break;
 				default:
 					/* video ready error */
-					dev_dbg_ratelimited(xhdmi->dev, "VID_RDY 1 Error! %d",
+					dev_dbg_ratelimited(xhdmi->xvip.dev, "VID_RDY 1 Error! %d",
 							    xhdmi->stream.frl.trainingstate);
 					break;
 				}
 			} else {
-				dev_dbg_ratelimited(xhdmi->dev, "VID_RDY:0");
+				dev_dbg_ratelimited(xhdmi->xvip.dev, "VID_RDY:0");
 			}
 		} else if (xhdmi->stream.isfrl) {
 			/* video ready error */
-			dev_err_ratelimited(xhdmi->dev, "VID_RDY during FRL Link fail!");
+			dev_err_ratelimited(xhdmi->xvip.dev, "VID_RDY during FRL Link fail!");
 		} else {
 			/* Ready */
 			if (data & HDMIRX_PIO_IN_VID_RDY_MASK) {
 				if (xhdmi->stream.state == XSTREAM_INIT) {
-					dev_dbg_ratelimited(xhdmi->dev, "pio vid rdy state = XSTREAM_INIT\n");
+					dev_dbg_ratelimited(xhdmi->xvip.dev, "pio vid rdy state = XSTREAM_INIT\n");
 					/* Toggle Rx Core reset */
 					xhdmirx_rxcore_vrst_assert(xhdmi);
 					xhdmirx_rxcore_vrst_deassert(xhdmi);
@@ -2349,7 +2349,7 @@ static void xhdmirx_pioint_handler(struct xhdmirx_state *xhdmi)
 				xhdmirx_axi4s_disable(xhdmi);
 
 				xhdmi->stream.state = XSTREAM_DOWN;
-				dev_dbg_ratelimited(xhdmi->dev, "pio vid rdy state = XSTREAM_DOWN\n");
+				dev_dbg_ratelimited(xhdmi->xvip.dev, "pio vid rdy state = XSTREAM_DOWN\n");
 
 				xhdmi_write(xhdmi, HDMIRX_VTD_CTRL_CLR_OFFSET,
 					    HDMIRX_VTD_CTRL_SYNC_LOSS_MASK);
@@ -2361,7 +2361,7 @@ static void xhdmirx_pioint_handler(struct xhdmirx_state *xhdmi)
 	}
 
 	if (event & HDMIRX_PIO_IN_SCDC_SCRAMBLER_ENABLE_MASK) {
-		dev_dbg_ratelimited(xhdmi->dev, "scrambler intr\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "scrambler intr\n");
 		if (data & HDMIRX_PIO_IN_SCDC_SCRAMBLER_ENABLE_MASK)
 			xhdmirx_scrambler_enable(xhdmi);
 		else
@@ -2380,7 +2380,7 @@ static void xhdmirx_pioint_handler(struct xhdmirx_state *xhdmi)
 			/* up or lock state */
 			xhdmirx1_clear(xhdmi);
 			xhdmi->stream.state = XSTREAM_IDLE;
-			dev_dbg_ratelimited(xhdmi->dev, "state = XSTREAM_UP or LOCK\n");
+			dev_dbg_ratelimited(xhdmi->xvip.dev, "state = XSTREAM_UP or LOCK\n");
 			/* 10 ms timer */
 			xhdmirx_tmr1_start(xhdmi, TIME_10MS);
 		}
@@ -2388,10 +2388,10 @@ static void xhdmirx_pioint_handler(struct xhdmirx_state *xhdmi)
 	}
 
 	if (event & HDMIRX_PIO_IN_SCDC_TMDS_CLOCK_RATIO_MASK)
-		dev_dbg_ratelimited(xhdmi->dev, "scdc tmds clock ratio interrupt\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "scdc tmds clock ratio interrupt\n");
 
 	if (event & HDMIRX_PIO_IN_BRDG_OVERFLOW_MASK)
-		dev_dbg_ratelimited(xhdmi->dev, "bridge overflow interrupt\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "bridge overflow interrupt\n");
 }
 
 /**
@@ -2407,7 +2407,7 @@ static void xhdmirx_tmrint_handler(struct xhdmirx_state *xhdmi)
 
 	status = xhdmi_read(xhdmi, HDMIRX_TMR_STA_OFFSET);
 
-	dev_dbg_ratelimited(xhdmi->dev, "%s - timer int status reg = 0x%08x\n",
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "%s - timer int status reg = 0x%08x\n",
 			    __func__, status);
 
 	if (status & HDMIRX_TMR1_STA_CNT_EVT_MASK) {
@@ -2436,7 +2436,7 @@ static void xhdmirx_tmrint_handler(struct xhdmirx_state *xhdmi)
 		}
 
 		if (xhdmi->stream.state == XSTREAM_IDLE) {
-			dev_dbg_ratelimited(xhdmi->dev, "state = XSTREAM_IDLE isfrl = %d trainingstate = %d",
+			dev_dbg_ratelimited(xhdmi->xvip.dev, "state = XSTREAM_IDLE isfrl = %d trainingstate = %d",
 					    xhdmi->stream.isfrl, xhdmi->stream.frl.trainingstate);
 
 			if (!xhdmi->stream.isfrl ||
@@ -2455,7 +2455,7 @@ static void xhdmirx_tmrint_handler(struct xhdmirx_state *xhdmi)
 			xhdmirx_tmr1_start(xhdmi, TIME_200MS);
 
 		} else if (xhdmi->stream.state == XSTREAM_INIT) {
-			dev_dbg_ratelimited(xhdmi->dev, "state = XSTREAM_INIT\n");
+			dev_dbg_ratelimited(xhdmi->xvip.dev, "state = XSTREAM_INIT\n");
 			/* get video properties */
 			if (xhdmirx1_get_video_properties(xhdmi)) {
 				/* failed to get video properties */
@@ -2464,7 +2464,7 @@ static void xhdmirx_tmrint_handler(struct xhdmirx_state *xhdmi)
 				xhdmirx1_setpixelclk(xhdmi);
 
 				if (xhdmi->stream.isfrl) {
-					dev_dbg_ratelimited(xhdmi->dev, "Virtual Vid_Rdy: XSTREAM_INIT");
+					dev_dbg_ratelimited(xhdmi->xvip.dev, "Virtual Vid_Rdy: XSTREAM_INIT");
 
 					/* Toggle video reset for HDMI Rx core */
 					xhdmirx_rxcore_vrst_assert(xhdmi);
@@ -2485,7 +2485,7 @@ static void xhdmirx_tmrint_handler(struct xhdmirx_state *xhdmi)
 			}
 
 		} else if (xhdmi->stream.state == XSTREAM_ARM) {
-			dev_dbg(xhdmi->dev, "%s - state = XSTREAM_ARM\n", __func__);
+			dev_dbg(xhdmi->xvip.dev, "%s - state = XSTREAM_ARM\n", __func__);
 			xhdmirx_vtd_enable(xhdmi);
 			xhdmirx_vtdintr_enable(xhdmi);
 
@@ -2530,7 +2530,7 @@ static void xhdmirx_vtdint_handler(struct xhdmirx_state *xhdmi)
 	if (status & HDMIRX_VTD_STA_TIMEBASE_EVT_MASK) {
 		xhdmi_write(xhdmi, HDMIRX_VTD_STA_OFFSET,
 			    HDMIRX_VTD_STA_TIMEBASE_EVT_MASK);
-		dev_dbg_ratelimited(xhdmi->dev, "vtd intr\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "vtd intr\n");
 
 		if (xhdmi->stream.state == XSTATE_FRL_LINK_TRAININIG)
 			return;
@@ -2539,7 +2539,7 @@ static void xhdmirx_vtdint_handler(struct xhdmirx_state *xhdmi)
 			int ret;
 			u32 divisor, dividend;
 
-			dev_dbg_ratelimited(xhdmi->dev, "%s - state = XSTREAM_LOCK\n", __func__);
+			dev_dbg_ratelimited(xhdmi->xvip.dev, "%s - state = XSTREAM_LOCK\n", __func__);
 			/* Get video timings */
 			ret = xhdmirx1_get_vid_timing(xhdmi);
 
@@ -2558,7 +2558,7 @@ static void xhdmirx_vtdint_handler(struct xhdmirx_state *xhdmi)
 					vidclk = DIV_ROUND_CLOSEST_ULL(vidclk, totalpixfrlratio);
 					xhdmi->stream.refclk = vidclk * 100000;
 					if (xhdmirx1_get_video_properties(xhdmi))
-						dev_err_ratelimited(xhdmi->dev, "Failed get video properties!");
+						dev_err_ratelimited(xhdmi->xvip.dev, "Failed get video properties!");
 				}
 
 				xhdmirx1_setpixelclk(xhdmi);
@@ -2597,7 +2597,7 @@ static void xhdmirx_vtdint_handler(struct xhdmirx_state *xhdmi)
 		} else if (xhdmi->stream.state == XSTREAM_UP) {
 			int ret;
 
-			dev_dbg_ratelimited(xhdmi->dev, "%s - state = XSTREAM_UP\n", __func__);
+			dev_dbg_ratelimited(xhdmi->xvip.dev, "%s - state = XSTREAM_UP\n", __func__);
 			ret = xhdmirx1_get_vid_timing(xhdmi);
 			if (!ret) {
 				if (xhdmi->stream.syncstatus == XSYNCSTAT_SYNC_LOSS) {
@@ -2630,7 +2630,7 @@ static void xhdmirx_vtdint_handler(struct xhdmirx_state *xhdmi)
 
 		if (xhdmi->stream.state == XSTREAM_UP)
 			xhdmi->stream.syncstatus = XSYNCSTAT_SYNC_LOSS;
-		dev_dbg(xhdmi->dev, "%s - Sync Loss event\n", __func__);
+		dev_dbg(xhdmi->xvip.dev, "%s - Sync Loss event\n", __func__);
 	}
 }
 
@@ -2646,28 +2646,28 @@ static void xhdmirx_auxint_handler(struct xhdmirx_state *xhdmi)
 	u32 status;
 
 	status = xhdmi_read(xhdmi, HDMIRX_AUX_STA_OFFSET);
-	dev_dbg_ratelimited(xhdmi->dev, "aux intr\n");
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "aux intr\n");
 
 	if (status & HDMIRX_AUX_STA_DYN_HDR_EVT_MASK) {
-		dev_dbg_ratelimited(xhdmi->dev, "aux dyn intr\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "aux dyn intr\n");
 		xhdmi_write(xhdmi, HDMIRX_AUX_STA_OFFSET,
 			    HDMIRX_AUX_STA_DYN_HDR_EVT_MASK);
 	}
 
 	if (status & HDMIRX_AUX_STA_VRR_CD_EVT_MASK) {
-		dev_dbg_ratelimited(xhdmi->dev, "aux VRR intr\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "aux VRR intr\n");
 		xhdmi_write(xhdmi, HDMIRX_AUX_STA_OFFSET,
 			    HDMIRX_AUX_STA_VRR_CD_EVT_MASK);
 	}
 
 	if (status & HDMIRX_AUX_STA_FSYNC_CD_EVT_MASK) {
-		dev_dbg_ratelimited(xhdmi->dev, "aux fsync intr\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "aux fsync intr\n");
 		xhdmi_write(xhdmi, HDMIRX_AUX_STA_OFFSET,
 			    HDMIRX_AUX_STA_FSYNC_CD_EVT_MASK);
 	}
 
 	if (status & HDMIRX_AUX_STA_GCP_CD_EVT_MASK) {
-		dev_dbg_ratelimited(xhdmi->dev, "aux gcp intr\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "aux gcp intr\n");
 		xhdmi_write(xhdmi, HDMIRX_AUX_STA_OFFSET,
 			    HDMIRX_AUX_STA_GCP_CD_EVT_MASK);
 
@@ -2678,7 +2678,7 @@ static void xhdmirx_auxint_handler(struct xhdmirx_state *xhdmi)
 			xhdmi->stream.video.colordepth = xhdmirx1_getgcp_colordepth(xhdmi);
 
 			if (xhdmi->stream.isfrl) {
-				dev_dbg_ratelimited(xhdmi->dev, "FRL Mode Stream Down");
+				dev_dbg_ratelimited(xhdmi->xvip.dev, "FRL Mode Stream Down");
 				xhdmirx_aux_disable(xhdmi);
 				streamdown(xhdmi);
 				xhdmirx_aux_enable(xhdmi);
@@ -2691,7 +2691,7 @@ static void xhdmirx_auxint_handler(struct xhdmirx_state *xhdmi)
 	if (status & HDMIRX_AUX_STA_NEW_MASK) {
 		int i;
 
-		dev_dbg_ratelimited(xhdmi->dev, "aux new packet intr\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "aux new packet intr\n");
 		xhdmi_write(xhdmi, HDMIRX_AUX_STA_OFFSET,
 			    HDMIRX_AUX_STA_NEW_MASK);
 
@@ -2710,7 +2710,7 @@ static void xhdmirx_auxint_handler(struct xhdmirx_state *xhdmi)
 	}
 
 	if (status & HDMIRX_AUX_STA_ERR_MASK) {
-		dev_dbg_ratelimited(xhdmi->dev, "aux err intr\n");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "aux err intr\n");
 		xhdmi_write(xhdmi, HDMIRX_AUX_STA_OFFSET,  HDMIRX_AUX_STA_ERR_MASK);
 		if (xhdmi->stream.state == XSTATE_FRL_LINK_TRAININIG)
 			return;
@@ -2731,7 +2731,7 @@ static void xhdmirx_frlint_handler(struct xhdmirx_state *xhdmi)
 	u8 streamdownflag = false;
 
 	data = xhdmi_read(xhdmi, HDMIRX_FRL_STA_OFFSET);
-	dev_dbg_ratelimited(xhdmi->dev, "FRL intr");
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "FRL intr");
 
 	if (data & HDMIRX_FRL_STA_RATE_EVT_MASK) {
 		xhdmi_write(xhdmi, HDMIRX_FRL_STA_OFFSET, HDMIRX_FRL_STA_RATE_EVT_MASK);
@@ -2744,7 +2744,7 @@ static void xhdmirx_frlint_handler(struct xhdmirx_state *xhdmi)
 	if (data & HDMIRX_FRL_STA_FLT_UPD_EVT_MASK) {
 		xhdmi_write(xhdmi, HDMIRX_FRL_STA_OFFSET, HDMIRX_FRL_STA_FLT_UPD_EVT_MASK);
 		xhdmi->stream.frl.fltupdateasserted = false;
-		dev_dbg_ratelimited(xhdmi->dev, "RX: INTR FLT_UP cleared %d",
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "RX: INTR FLT_UP cleared %d",
 				    xhdmirx_tmr1_getval(xhdmi));
 		switch (xhdmi->stream.frl.trainingstate) {
 		case XFRLSTATE_LTS_P:
@@ -2767,7 +2767,7 @@ static void xhdmirx_frlint_handler(struct xhdmirx_state *xhdmi)
 	/* Link training pattern has matched for all the active lanes */
 	if (data & HDMIRX_FRL_STA_FLT_PM_EVT_MASK) {
 		xhdmi_write(xhdmi, HDMIRX_FRL_STA_OFFSET, HDMIRX_FRL_STA_FLT_PM_EVT_MASK);
-		dev_dbg_ratelimited(xhdmi->dev, "RX: INTR LTP_DET");
+		dev_dbg_ratelimited(xhdmi->xvip.dev, "RX: INTR LTP_DET");
 		if (xhdmi->stream.frl.trainingstate == XFRLSTATE_LTS_3 ||
 		    xhdmi->stream.frl.trainingstate == XFRLSTATE_LTS_3_LTP_DET) {
 			xhdmi->stream.frl.trainingstate = XFRLSTATE_LTS_3_LTP_DET;
@@ -2782,9 +2782,9 @@ static void xhdmirx_frlint_handler(struct xhdmirx_state *xhdmi)
 
 		if (((xhdmi->stream.frl.lanes == 3 ? 0x7 : 0xF) == temp) &&
 		    xhdmi->stream.frl.trainingstate == XFRLSTATE_LTS_P) {
-			dev_dbg_ratelimited(xhdmi->dev, "LTS_P_FRL_RDY");
+			dev_dbg_ratelimited(xhdmi->xvip.dev, "LTS_P_FRL_RDY");
 			xhdmi->stream.frl.trainingstate = XFRLSTATE_LTS_P_FRL_RDY;
-			dev_dbg_ratelimited(xhdmi->dev, "RX: INTR FRL_START");
+			dev_dbg_ratelimited(xhdmi->xvip.dev, "RX: INTR FRL_START");
 			xhdmi_execfrlstate(xhdmi);
 		}
 	}
@@ -2795,10 +2795,10 @@ static void xhdmirx_frlint_handler(struct xhdmirx_state *xhdmi)
 		if (xhdmi_read(xhdmi, HDMIRX_FRL_STA_OFFSET) & HDMIRX_FRL_STA_SKEW_LOCK_MASK) {
 			if (xhdmi->stream.frl.trainingstate == XFRLSTATE_LTS_P_VID_RDY) {
 				streamdownflag = true;
-				dev_dbg_ratelimited(xhdmi->dev, "skew lock err 1 occurred!");
+				dev_dbg_ratelimited(xhdmi->xvip.dev, "skew lock err 1 occurred!");
 			} else {
 				/* Skew has locked. No actions needed */
-				dev_dbg_ratelimited(xhdmi->dev, "skew lock occurred!");
+				dev_dbg_ratelimited(xhdmi->xvip.dev, "skew lock occurred!");
 			}
 
 			xhdmi->stream.frl.trainingstate = XFRLSTATE_LTS_P_VID_RDY;
@@ -2810,7 +2810,7 @@ static void xhdmirx_frlint_handler(struct xhdmirx_state *xhdmi)
 				 * unexpected skew lock event is true only when it is not caused by
 				 * rate change request.
 				 */
-				dev_dbg_ratelimited(xhdmi->dev, "skew lock err 2 occurred!");
+				dev_dbg_ratelimited(xhdmi->xvip.dev, "skew lock err 2 occurred!");
 			}
 
 			if (xhdmi->stream.frl.trainingstate == XFRLSTATE_LTS_P_VID_RDY)
@@ -2917,7 +2917,7 @@ static int xhdmirx_load_edid(struct xhdmirx_state *xhdmi, u8 *edid, int length)
 	wordcount &= 0xFFFF;
 
 	if (wordcount < length) {
-		dev_err(xhdmi->dev, "fail as length > edid wc!\n");
+		dev_err(xhdmi->xvip.dev, "fail as length > edid wc!\n");
 		return -EINVAL;
 	}
 
@@ -3161,7 +3161,7 @@ static int xhdmirx_set_edid(struct v4l2_subdev *subdev, struct v4l2_edid *edid)
 					   &xhdmi->delayed_work_enable_hotplug,
 					   HZ / 10);
 	} else {
-		dev_dbg(xhdmi->dev, "edid->blocks = 0\n");
+		dev_dbg(xhdmi->xvip.dev, "edid->blocks = 0\n");
 	}
 
 	mutex_unlock(&xhdmi->xhdmi_mutex);
@@ -3173,7 +3173,7 @@ static int xhdmirx_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xhdmirx_state *xhdmi = to_xhdmirx_state(subdev);
 
-	dev_dbg(xhdmi->dev, "s_stream : enable %d\n", enable);
+	dev_dbg(xhdmi->xvip.dev, "s_stream : enable %d\n", enable);
 	return 0;
 }
 
@@ -3197,7 +3197,7 @@ static int xhdmirx_g_input_status(struct v4l2_subdev *sd, u32 *status)
 	else
 		*status = 0;
 
-	dev_dbg_ratelimited(xhdmi->dev, "g_input_statue = 0x%08x\n", *status);
+	dev_dbg_ratelimited(xhdmi->xvip.dev, "g_input_statue = 0x%08x\n", *status);
 
 	return 0;
 }
@@ -3218,11 +3218,12 @@ static int xhdmirx_query_dv_timings(struct v4l2_subdev *subdev,
 	struct xhdmirx_state *xhdmi = to_xhdmirx_state(subdev);
 
 	if (!xhdmi->hdmi_stream_up) {
-		dev_dbg(xhdmi->dev, "failed as no link\n");
+		dev_dbg(xhdmi->xvip.dev, "failed as no link\n");
 		return -ENOLINK;
 	}
 
-	v4l2_print_dv_timings(xhdmi->sd.name, "xhdmirx_query_dv_timing: ",
+	v4l2_print_dv_timings(xhdmi->xvip.subdev.name,
+			      "xhdmirx_query_dv_timing: ",
 			      &xhdmi->dv_timings, true);
 
 	*timings = xhdmi->dv_timings;
@@ -3237,10 +3238,13 @@ __xhdmirx_get_pad_format_ptr(struct xhdmirx_state *xhdmi,
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		dev_dbg(xhdmi->dev, "%s V4L2_SUBDEV_FORMAT_TRY\n", __func__);
-		return v4l2_subdev_get_try_format(&xhdmi->sd, sd_state, pad);
+		dev_dbg(xhdmi->xvip.dev, "%s V4L2_SUBDEV_FORMAT_TRY\n",
+			__func__);
+		return v4l2_subdev_get_try_format(&xhdmi->xvip.subdev, sd_state,
+						  pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		dev_dbg(xhdmi->dev, "%s V4L2_SUBDEV_FORMAT_ACTIVE\n", __func__);
+		dev_dbg(xhdmi->xvip.dev, "%s V4L2_SUBDEV_FORMAT_ACTIVE\n",
+			__func__);
 		return &xhdmi->mbus_fmt;
 	default:
 		return NULL;
@@ -3299,7 +3303,7 @@ static int xhdmirx_get_format(struct v4l2_subdev *subdev,
 	if (!gfmt)
 		return -EINVAL;
 
-	dev_dbg(xhdmi->dev, "width %d height %d code %d\n",
+	dev_dbg(xhdmi->xvip.dev, "width %d height %d code %d\n",
 		gfmt->width, gfmt->height, gfmt->code);
 
 	fmt->format = *gfmt;
@@ -3315,10 +3319,11 @@ static int xhdmirx_subscribe_event(struct v4l2_subdev *sd, struct v4l2_fh *fh,
 	switch (sub->type) {
 	case V4L2_EVENT_SOURCE_CHANGE:
 		rc = v4l2_src_change_event_subdev_subscribe(sd, fh, sub);
-		dev_dbg(xhdmi->dev, "subscribed to V4L2_EVENT_SOURCE_CHANGE = %d\n", rc);
+		dev_dbg(xhdmi->xvip.dev,
+			"subscribed to V4L2_EVENT_SOURCE_CHANGE = %d\n", rc);
 		break;
 	default:
-		dev_dbg(xhdmi->dev, "subscribe_event() default: -EINVAL\n");
+		dev_dbg(xhdmi->xvip.dev, "subscribe_event() default: -EINVAL\n");
 		rc = -EINVAL;
 		break;
 	}
@@ -3366,7 +3371,8 @@ static void xhdmirx_phy_release(struct xhdmirx_state *xhdmi)
 	for (i = 0; i < XHDMI_MAX_LANES; i++) {
 		ret = phy_exit(xhdmi->phy[i]);
 		if (ret)
-			dev_err(xhdmi->dev, "fail to exit phy(%d) %d\n", i, ret);
+			dev_err(xhdmi->xvip.dev, "fail to exit phy(%d) %d\n", i,
+				ret);
 
 		xhdmi->phy[i] = NULL;
 	}
@@ -3380,12 +3386,13 @@ static int xhdmirx_probe_load_edid(struct xhdmirx_state *xhdmi)
 	int edidsize = sizeof(xilinx_frl_edid);
 
 	/* retrieve EDID */
-	if (!request_firmware(&fw_edid, fw_edid_name, xhdmi->dev)) {
+	if (!request_firmware(&fw_edid, fw_edid_name, xhdmi->xvip.dev)) {
 		int blocks = fw_edid->size / 128;
 
 		if (blocks == 0 || blocks > xhdmi->edid_blocks_max ||
 		    (fw_edid->size % 128)) {
-			dev_err(xhdmi->dev, "%s must be n * 128 bytes, with 1 <= n <= %d, using Xilinx built-in EDID instead.\n",
+			dev_err(xhdmi->xvip.dev,
+				"%s must be n * 128 bytes, with 1 <= n <= %d, using Xilinx built-in EDID instead.\n",
 				fw_edid_name, xhdmi->edid_blocks_max);
 		} else {
 			memcpy(xhdmi->edid_user, fw_edid->data, 128 * blocks);
@@ -3397,23 +3404,23 @@ static int xhdmirx_probe_load_edid(struct xhdmirx_state *xhdmi)
 	}
 
 	if (edidbufptr == xhdmi->edid_user)
-		dev_info(xhdmi->dev, "Loading firmware edid\n");
+		dev_info(xhdmi->xvip.dev, "Loading firmware edid\n");
 	else
-		dev_info(xhdmi->dev, "Loading Xilinx default edid\n");
+		dev_info(xhdmi->xvip.dev, "Loading Xilinx default edid\n");
 
 	return xhdmirx_load_edid(xhdmi, edidbufptr, edidsize);
 }
 
 static void print_dt_clk_err_msg(struct xhdmirx_state *xhdmi, u8 isfrlclk, const char *range)
 {
-	dev_err(xhdmi->dev, "The %s port is driven by a clock outside the valid range (%s MHz)",
+	dev_err(xhdmi->xvip.dev, "The %s port is driven by a clock outside the valid range (%s MHz)",
 		isfrlclk ? "frl_clk" : "vid_clk", range);
 }
 
 static int xhdmirx_parse_of(struct xhdmirx_state *xhdmi)
 {
-	struct device_node *node = xhdmi->dev->of_node;
-	struct device *dev = xhdmi->dev;
+	struct device_node *node = xhdmi->xvip.dev->of_node;
+	struct device *dev = xhdmi->xvip.dev;
 	int ret;
 
 	ret = of_property_read_u16(node, "xlnx,edid-ram-size",
@@ -3568,11 +3575,16 @@ static int xhdmirx_parse_of(struct xhdmirx_state *xhdmi)
 	return ret;
 }
 
+static const struct xvip_device_info xhdmirx_info = {
+	.has_axi_lite = true,
+	.num_sinks = 0,
+	.num_sources = 1,
+};
+
 static int xhdmirx_probe(struct platform_device *pdev)
 {
 	struct xhdmirx_state *xhdmi;
 	struct v4l2_subdev *sd;
-	struct resource *res;
 	union phy_configure_opts phy_cfg = {0};
 	int i, ret, irq, num_clks;
 
@@ -3580,42 +3592,45 @@ static int xhdmirx_probe(struct platform_device *pdev)
 	if (!xhdmi)
 		return -ENOMEM;
 
-	xhdmi->dev = &pdev->dev;
+	xhdmi->xvip.dev = &pdev->dev;
+
+	ret = xvip_device_init(&xhdmi->xvip, &xhdmirx_info);
+	if (ret < 0)
+		return ret;
 
 	platform_set_drvdata(pdev, xhdmi);
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	xhdmi->regs = devm_ioremap_resource(xhdmi->dev, res);
-	if (IS_ERR(xhdmi->regs))
-		return PTR_ERR(xhdmi->regs);
-
-	xhdmi->edid_user = devm_kzalloc(xhdmi->dev,
+	xhdmi->edid_user = devm_kzalloc(xhdmi->xvip.dev,
 					XEDID_BLOCKS_MAX * XEDID_BLOCK_SIZE,
 					GFP_KERNEL);
-	if (!xhdmi->edid_user)
-		return -ENOMEM;
+	if (!xhdmi->edid_user) {
+		ret =-ENOMEM;
+		goto xvip_err;
+	}
 
 	num_clks = ARRAY_SIZE(xhdmirx_clks);
-	xhdmi->clks = devm_kcalloc(xhdmi->dev, num_clks,
+	xhdmi->clks = devm_kcalloc(xhdmi->xvip.dev, num_clks,
 				   sizeof(*xhdmi->clks), GFP_KERNEL);
-	if (!xhdmi->clks)
-		return -ENOMEM;
+	if (!xhdmi->clks) {
+		ret = -ENOMEM;
+		goto xvip_err;
+	}
 
 	for (i = 0; i < num_clks; i++)
 		xhdmi->clks[i].id = xhdmirx_clks[i];
 
-	ret = devm_clk_bulk_get(xhdmi->dev, num_clks, xhdmi->clks);
+	ret = devm_clk_bulk_get(xhdmi->xvip.dev, num_clks, xhdmi->clks);
 	if (ret)
-		return ret;
+		goto xvip_err;
 
 	ret = clk_bulk_prepare_enable(num_clks, xhdmi->clks);
 	if (ret)
-		return ret;
+		goto xvip_err;
 
 	mutex_init(&xhdmi->xhdmi_mutex);
 	xhdmi->work_queue = create_singlethread_workqueue("xilinx-hdmi-rx-wq");
 	if (!xhdmi->work_queue) {
-		dev_err(xhdmi->dev, "fail to create work queue!\n");
+		dev_err(xhdmi->xvip.dev, "fail to create work queue!\n");
 		ret = -EINVAL;
 		goto mutex_err;
 	}
@@ -3628,22 +3643,22 @@ static int xhdmirx_probe(struct platform_device *pdev)
 	ret = xhdmirx_frlmodeenable(xhdmi, DEFAULT_LTPTHRESHOLD,
 				    xhdmi->stream.frl.defaultltp, true);
 	if (ret) {
-		dev_err(xhdmi->dev, "Failed to enable FRL mode %d", ret);
+		dev_err(xhdmi->xvip.dev, "Failed to enable FRL mode %d", ret);
 		goto wrkq_err;
 	}
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
-		dev_err(xhdmi->dev, "get irq failed %d\n", irq);
+		dev_err(xhdmi->xvip.dev, "get irq failed %d\n", irq);
 		ret = -EINVAL;
 		goto wrkq_err;
 	}
 
-	ret = devm_request_threaded_irq(xhdmi->dev, irq, xhdmirx_irq_handler,
+	ret = devm_request_threaded_irq(xhdmi->xvip.dev, irq, xhdmirx_irq_handler,
 					xhdmirx_irq_thread, IRQF_ONESHOT,
-					dev_name(xhdmi->dev), xhdmi);
+					dev_name(xhdmi->xvip.dev), xhdmi);
 	if (ret) {
-		dev_err(xhdmi->dev, "failed to register irq handler %d\n", ret);
+		dev_err(xhdmi->xvip.dev, "failed to register irq handler %d\n", ret);
 		goto wrkq_err;
 	}
 
@@ -3655,45 +3670,44 @@ static int xhdmirx_probe(struct platform_device *pdev)
 		char phy_name[16];
 
 		snprintf(phy_name, sizeof(phy_name), "hdmi-phy%d", i);
-		xhdmi->phy[i] = devm_phy_get(xhdmi->dev, phy_name);
+		xhdmi->phy[i] = devm_phy_get(xhdmi->xvip.dev, phy_name);
 		if (IS_ERR(xhdmi->phy[i])) {
 			ret = PTR_ERR(xhdmi->phy[i]);
 			xhdmi->phy[i] = NULL;
-			dev_err_probe(xhdmi->dev, ret, "failed to get phy lane %s index %d\n",
+			dev_err_probe(xhdmi->xvip.dev, ret, "failed to get phy lane %s index %d\n",
 				      phy_name, i);
 			goto phy_err;
 		}
 
 		ret = phy_init(xhdmi->phy[i]);
 		if (ret) {
-			dev_err(xhdmi->dev, "failed to init phy lane %d\n", i);
+			dev_err(xhdmi->xvip.dev, "failed to init phy lane %d\n", i);
 			goto phy_err;
 		}
 	}
 
-	sd = &xhdmi->sd;
+	sd = &xhdmi->xvip.subdev;
 	v4l2_subdev_init(sd, &xhdmirx_ops);
-	sd->dev = xhdmi->dev;
-	strscpy(sd->name, dev_name(xhdmi->dev), sizeof(sd->name));
+	sd->dev = xhdmi->xvip.dev;
+	strscpy(sd->name, dev_name(xhdmi->xvip.dev), sizeof(sd->name));
 	sd->flags = V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS;
 	sd->entity.ops = &xmedia_ops;
 	v4l2_set_subdevdata(sd, xhdmi);
-	xhdmi->pad.flags = MEDIA_PAD_FL_SOURCE;
-	ret = media_entity_pads_init(&sd->entity, 1, &xhdmi->pad);
+	ret = media_entity_pads_init(&sd->entity, 1, xhdmi->xvip.pads);
 	if (ret < 0) {
-		dev_err(xhdmi->dev, "failed to init media %d\n", ret);
+		dev_err(xhdmi->xvip.dev, "failed to init media %d\n", ret);
 		goto phy_err;
 	}
 
 	ret = v4l2_async_register_subdev(sd);
 	if (ret < 0) {
-		dev_err(xhdmi->dev, "failed to register v4l subdev %d\n", ret);
+		dev_err(xhdmi->xvip.dev, "failed to register v4l subdev %d\n", ret);
 		goto media_err;
 	}
 
 	ret = xhdmirx_probe_load_edid(xhdmi);
 	if (ret) {
-		dev_err(xhdmi->dev, "failed to load edid\n");
+		dev_err(xhdmi->xvip.dev, "failed to load edid\n");
 		goto v4lsd_reg_err;
 	}
 
@@ -3702,25 +3716,25 @@ static int xhdmirx_probe(struct platform_device *pdev)
 	phy_cfg.hdmi.hdmiphycb.cb = phy_rxinit_cb;
 	phy_cfg.hdmi.hdmiphycb.data = (void *)xhdmi;
 	phy_cfg.hdmi.hdmiphycb.type = RX_INIT_CB;
-	dev_dbg(xhdmi->dev, "config phy rxinit cb\n");
+	dev_dbg(xhdmi->xvip.dev, "config phy rxinit cb\n");
 	xhdmirx_phy_configure(xhdmi, &phy_cfg);
 
 	phy_cfg.hdmi.phycb = 1;
 	phy_cfg.hdmi.hdmiphycb.cb = phy_rxready_cb;
 	phy_cfg.hdmi.hdmiphycb.data = (void *)xhdmi;
 	phy_cfg.hdmi.hdmiphycb.type = RX_READY_CB;
-	dev_dbg(xhdmi->dev, "config phy rxready cb\n");
+	dev_dbg(xhdmi->xvip.dev, "config phy rxready cb\n");
 	xhdmirx_phy_configure(xhdmi, &phy_cfg);
 
 	phy_cfg.hdmi.config_hdmi20 = 1;
-	dev_dbg(xhdmi->dev, "set phy to hdmi20\n");
+	dev_dbg(xhdmi->xvip.dev, "set phy to hdmi20\n");
 	xhdmirx_phy_configure(xhdmi, &phy_cfg);
 
 	xhdmirx_enable_allintr(xhdmi);
 
 	xhdmirx1_start(xhdmi);
 
-	dev_info(xhdmi->dev, "driver probe successful\n");
+	dev_info(xhdmi->xvip.dev, "driver probe successful\n");
 
 	return 0;
 
@@ -3736,14 +3750,15 @@ wrkq_err:
 mutex_err:
 	mutex_destroy(&xhdmi->xhdmi_mutex);
 	clk_bulk_disable_unprepare(num_clks, xhdmi->clks);
-
+xvip_err:
+	xvip_device_cleanup(&xhdmi->xvip);
 	return ret;
 }
 
 static int xhdmirx_remove(struct platform_device *pdev)
 {
 	struct xhdmirx_state *xhdmi = platform_get_drvdata(pdev);
-	struct v4l2_subdev *sd = &xhdmi->sd;
+	struct v4l2_subdev *sd = &xhdmi->xvip.subdev;
 	int num_clks = ARRAY_SIZE(xhdmirx_clks);
 
 	v4l2_async_unregister_subdev(sd);
@@ -3754,7 +3769,9 @@ static int xhdmirx_remove(struct platform_device *pdev)
 	mutex_destroy(&xhdmi->xhdmi_mutex);
 	clk_bulk_disable_unprepare(num_clks, xhdmi->clks);
 
-	dev_info(xhdmi->dev, "driver removed successfully\n");
+	xvip_device_cleanup(&xhdmi->xvip);
+
+	dev_info(xhdmi->xvip.dev, "driver removed successfully\n");
 	return 0;
 }
 

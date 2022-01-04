@@ -342,7 +342,8 @@ EXPORT_SYMBOL_GPL(xvip_set_format_size);
  * Video IP device operations
  */
 
-static int xvip_device_parse_dt(struct xvip_device *xvip)
+static int xvip_device_parse_dt(struct xvip_device *xvip,
+				const struct xvip_device_info *info)
 {
 	const unsigned int num_pads = xvip->num_sinks + xvip->num_sources;
 	struct device_node *node = xvip->dev->of_node;
@@ -357,6 +358,7 @@ static int xvip_device_parse_dt(struct xvip_device *xvip)
 		ports = of_node_get(node);
 
 	for_each_child_of_node(ports, port) {
+		const struct xvip_video_format *format;
 		u32 index;
 
 		if (!of_node_name_eq(port, "port"))
@@ -383,6 +385,20 @@ static int xvip_device_parse_dt(struct xvip_device *xvip)
 			of_node_put(port);
 			ret = -EINVAL;
 			break;
+		}
+
+		if (info->has_port_formats) {
+			format = xvip_of_get_format(port);
+			if (IS_ERR(format)) {
+				dev_err(xvip->dev,
+					"Failed to retrieve format for port %pOF\n",
+					port);
+				of_node_put(port);
+				ret = PTR_ERR(format);
+				break;
+			}
+
+			xvip->ports[index].format = format;
 		}
 
 		found_ports |= BIT(index);
@@ -434,6 +450,18 @@ int xvip_device_init(struct xvip_device *xvip,
 	xvip->num_sources = info->num_sources;
 
 	num_pads = info->num_sinks + info->num_sources;
+
+	if (num_pads) {
+		xvip->ports = devm_kcalloc(xvip->dev, num_pads,
+					   sizeof(*xvip->ports), GFP_KERNEL);
+		if (!xvip->ports)
+			return -ENOMEM;
+	}
+
+	ret = xvip_device_parse_dt(xvip, info);
+	if (ret < 0)
+		return ret;
+
 	if (num_pads) {
 		xvip->pads = devm_kcalloc(xvip->dev, num_pads,
 					  sizeof(*xvip->pads), GFP_KERNEL);
@@ -445,10 +473,6 @@ int xvip_device_init(struct xvip_device *xvip,
 		for (; i < num_pads; ++i)
 			xvip->pads[i].flags = MEDIA_PAD_FL_SOURCE;
 	}
-
-	ret = xvip_device_parse_dt(xvip);
-	if (ret < 0)
-		return ret;
 
 	if (info->has_axi_lite) {
 		xvip->iomem = devm_platform_ioremap_resource(pdev, 0);

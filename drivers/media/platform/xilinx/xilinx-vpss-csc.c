@@ -136,10 +136,8 @@ rgb_to_ycrcb_unity[XV_CSC_K_MAX_ROWS][XV_CSC_K_MAX_COLUMNS + 1] = {
 /**
  * struct xcsc_dev - xilinx vpss csc device structure
  * @xvip: Xilinx Video IP core struct
- * @pads: Media bus pads for VPSS CSC
  * @formats: Current media bus formats
  * @default_formats: Default media bus formats for VPSS CSC
- * @vip_formats: Pointer to DT specified media bus code info
  * @ctrl_handler: V4L2 Control Handler struct
  * @custom_ctrls: Array of pointers to various custom controls
  * @cft_in: IP or Hardware specific input video format
@@ -165,10 +163,8 @@ rgb_to_ycrcb_unity[XV_CSC_K_MAX_ROWS][XV_CSC_K_MAX_COLUMNS + 1] = {
  */
 struct xcsc_dev {
 	struct xvip_device xvip;
-	struct media_pad pads[2];
 	struct v4l2_mbus_framefmt formats[2];
 	struct v4l2_mbus_framefmt default_formats[2];
-	const struct xvip_video_format *vip_formats[2];
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_ctrl *custom_ctrls[XCSC_COLOR_CTRL_COUNT];
 
@@ -994,7 +990,6 @@ static int xcsc_parse_of(struct xcsc_dev *xcsc)
 {
 	struct device *dev = xcsc->xvip.dev;
 	struct device_node *node = xcsc->xvip.dev->of_node;
-	const struct xvip_video_format *vip_format;
 	struct device_node *ports, *port;
 	int rval;
 	u32 port_id = 0;
@@ -1027,12 +1022,6 @@ static int xcsc_parse_of(struct xcsc_dev *xcsc)
 	/* Get the format description for each pad */
 	for_each_child_of_node(ports, port) {
 		if (port->name && (of_node_cmp(port->name, "port") == 0)) {
-			vip_format = xvip_of_get_format(port);
-			if (IS_ERR(vip_format)) {
-				dev_err(dev, "Invalid media pad format in DT");
-				return PTR_ERR(vip_format);
-			}
-
 			rval = of_property_read_u32(port, "reg", &port_id);
 			if (rval < 0) {
 				dev_err(dev, "No reg in DT to specify pad");
@@ -1043,7 +1032,6 @@ static int xcsc_parse_of(struct xcsc_dev *xcsc)
 				dev_err(dev, "Invalid reg in DT");
 				return -EINVAL;
 			}
-			xcsc->vip_formats[port_id] = vip_format;
 
 			rval = of_property_read_u32(port, "xlnx,video-width",
 						    &video_width[port_id]);
@@ -1082,6 +1070,9 @@ static int xcsc_parse_of(struct xcsc_dev *xcsc)
 
 static const struct xvip_device_info xcsc_info = {
 	.has_axi_lite = true,
+	.has_port_formats = true,
+	.num_sinks = 1,
+	.num_sources = 1,
 };
 
 static int xcsc_probe(struct platform_device *pdev)
@@ -1119,7 +1110,7 @@ static int xcsc_probe(struct platform_device *pdev)
 	/* Default Formats Initialization */
 	xcsc_set_default_state(xcsc);
 	def_fmt = &xcsc->default_formats[XVIP_PAD_SINK];
-	def_fmt->code = xcsc->vip_formats[XVIP_PAD_SINK]->code;
+	def_fmt->code = xcsc->xvip.ports[XVIP_PAD_SINK].format->code;
 	def_fmt->field = V4L2_FIELD_NONE;
 	def_fmt->colorspace = V4L2_COLORSPACE_REC709;
 	def_fmt->width = XV_CSC_DEFAULT_WIDTH;
@@ -1128,16 +1119,14 @@ static int xcsc_probe(struct platform_device *pdev)
 	/* Source supports only YUV 444, YUV 422, and RGB */
 	def_fmt = &xcsc->default_formats[XVIP_PAD_SOURCE];
 	*def_fmt = xcsc->default_formats[XVIP_PAD_SINK];
-	def_fmt->code = xcsc->vip_formats[XVIP_PAD_SOURCE]->code;
+	def_fmt->code = xcsc->xvip.ports[XVIP_PAD_SOURCE].format->code;
 	def_fmt->width = XV_CSC_DEFAULT_WIDTH;
 	def_fmt->height = XV_CSC_DEFAULT_HEIGHT;
 	xcsc->formats[XVIP_PAD_SOURCE] = *def_fmt;
-	xcsc->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	xcsc->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 
 	/* Init Media Entity */
 	subdev->entity.ops = &xcsc_media_ops;
-	rval = media_entity_pads_init(&subdev->entity, 2, xcsc->pads);
+	rval = media_entity_pads_init(&subdev->entity, 2, xcsc->xvip.pads);
 	if (rval < 0)
 		goto media_error;
 	/* V4L2 Control Setup */

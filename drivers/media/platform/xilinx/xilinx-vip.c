@@ -24,117 +24,137 @@
  */
 
 static const struct xvip_video_format xvip_video_formats[] = {
-	{ XVIP_VF_YUV_420, 8, NULL, MEDIA_BUS_FMT_VYYUYY8_1X24,
+	{ XVIP_VF_YUV_420, 8, NULL, MEDIA_BUS_FMT_VYYUYY8_1X24, 0,
 	  1, 12, V4L2_PIX_FMT_NV12, 2, 1, 1, 2 },
-	{ XVIP_VF_YUV_420, 8, NULL, MEDIA_BUS_FMT_VYYUYY8_1X24,
+	{ XVIP_VF_YUV_420, 8, NULL, MEDIA_BUS_FMT_VYYUYY8_1X24, 0,
 	  1, 12, V4L2_PIX_FMT_NV12M, 2, 2, 1, 2 },
-	{ XVIP_VF_YUV_420, 10, NULL, MEDIA_BUS_FMT_VYYUYY10_4X20,
+	{ XVIP_VF_YUV_420, 10, NULL, MEDIA_BUS_FMT_VYYUYY10_4X20, 0,
 	  1, 12, V4L2_PIX_FMT_XV15, 2, 1, 2, 2 },
-	{ XVIP_VF_YUV_420, 10, NULL, MEDIA_BUS_FMT_VYYUYY10_4X20,
+	{ XVIP_VF_YUV_420, 10, NULL, MEDIA_BUS_FMT_VYYUYY10_4X20, 0,
 	  1, 12, V4L2_PIX_FMT_XV15M, 2, 2, 1, 2 },
-	{ XVIP_VF_YUV_420, 12, NULL, MEDIA_BUS_FMT_UYYVYY12_4X24,
+	{ XVIP_VF_YUV_420, 12, NULL, MEDIA_BUS_FMT_UYYVYY12_4X24, 0,
 	  1, 12, V4L2_PIX_FMT_X012, 2, 1, 2, 2 },
-	{ XVIP_VF_YUV_420, 12, NULL, MEDIA_BUS_FMT_UYYVYY12_4X24,
+	{ XVIP_VF_YUV_420, 12, NULL, MEDIA_BUS_FMT_UYYVYY12_4X24, 0,
 	  1, 12, V4L2_PIX_FMT_X012M, 2, 2, 1, 2 },
-	{ XVIP_VF_YUV_420, 16, NULL, MEDIA_BUS_FMT_UYYVYY16_4X32,
+	{ XVIP_VF_YUV_420, 16, NULL, MEDIA_BUS_FMT_UYYVYY16_4X32, 0,
 	  2, 12, V4L2_PIX_FMT_X016, 2, 1, 2, 2 },
-	{ XVIP_VF_YUV_420, 16, NULL, MEDIA_BUS_FMT_UYYVYY16_4X32,
+	{ XVIP_VF_YUV_420, 16, NULL, MEDIA_BUS_FMT_UYYVYY16_4X32, 0,
 	  2, 12, V4L2_PIX_FMT_X016M, 2, 2, 1, 2 },
-	{ XVIP_VF_YUV_422, 8, NULL, MEDIA_BUS_FMT_UYVY8_1X16,
+	{ XVIP_VF_YUV_422, 8, NULL, MEDIA_BUS_FMT_UYVY8_1X16, 0,
 	  1, 16, V4L2_PIX_FMT_NV16, 2, 1, 1, 1 },
-	{ XVIP_VF_YUV_422, 8, NULL, MEDIA_BUS_FMT_UYVY8_1X16,
+	{ XVIP_VF_YUV_422, 8, NULL, MEDIA_BUS_FMT_UYVY8_1X16, 0,
 	  1, 16, V4L2_PIX_FMT_NV16M, 2, 2, 1, 1 },
-	{ XVIP_VF_YUV_422, 8, NULL, MEDIA_BUS_FMT_UYVY8_1X16,
+	{ XVIP_VF_YUV_422, 8, NULL, MEDIA_BUS_FMT_UYVY8_1X16, 0,
 	  2, 16, V4L2_PIX_FMT_YUYV, 1, 1, 2, 1 },
-	{ XVIP_VF_VUY_422, 8, NULL, MEDIA_BUS_FMT_UYVY8_1X16,
+	{ XVIP_VF_VUY_422, 8, NULL, MEDIA_BUS_FMT_UYVY8_1X16, 0,
 	  2, 16, V4L2_PIX_FMT_UYVY, 1, 1, 2, 1 },
-	{ XVIP_VF_YUV_422, 10, NULL, MEDIA_BUS_FMT_UYVY10_1X20,
+	{ XVIP_VF_YUV_422, 10, NULL, MEDIA_BUS_FMT_UYVY10_1X20, 0,
 	  1, 16, V4L2_PIX_FMT_XV20, 2, 1, 2, 1 },
-	{ XVIP_VF_YUV_422, 10, NULL, MEDIA_BUS_FMT_UYVY10_1X20,
+	{ XVIP_VF_YUV_422, 10, NULL, MEDIA_BUS_FMT_UYVY10_1X20, 0,
 	  1, 16, V4L2_PIX_FMT_XV20M, 2, 2, 1, 1 },
-	{ XVIP_VF_YUV_422, 12, NULL, MEDIA_BUS_FMT_UYVY12_1X24,
+	{ XVIP_VF_YUV_422, 12, NULL, MEDIA_BUS_FMT_UYVY12_1X24, 0,
 	  1, 16, V4L2_PIX_FMT_X212, 2, 1, 2, 1 },
-	{ XVIP_VF_YUV_422, 12, NULL, MEDIA_BUS_FMT_UYVY12_1X24,
+	{ XVIP_VF_YUV_422, 12, NULL, MEDIA_BUS_FMT_UYVY12_1X24, 0,
 	  1, 16, V4L2_PIX_FMT_X212M, 2, 2, 1, 1 },
-	{ XVIP_VF_YUV_422, 16, NULL, MEDIA_BUS_FMT_UYVY16_2X32,
+	{ XVIP_VF_YUV_422, 16, NULL, MEDIA_BUS_FMT_UYVY16_2X32, 0,
 	  2, 16, V4L2_PIX_FMT_X216, 2, 1, 2, 1 },
-	{ XVIP_VF_YUV_422, 16, NULL, MEDIA_BUS_FMT_UYVY16_2X32,
+	{ XVIP_VF_YUV_422, 16, NULL, MEDIA_BUS_FMT_UYVY16_2X32, 0,
 	  2, 16, V4L2_PIX_FMT_X216M, 2, 2, 1, 1 },
-	{ XVIP_VF_YUV_444, 8, NULL, MEDIA_BUS_FMT_VUY8_1X24,
+	{ XVIP_VF_YUV_444, 8, NULL, MEDIA_BUS_FMT_VUY8_1X24, 0,
 	  3, 24, V4L2_PIX_FMT_VUY24, 1, 1, 1, 1 },
-	{ XVIP_VF_YUV_444, 10, NULL, MEDIA_BUS_FMT_VUY10_1X30,
+	{ XVIP_VF_YUV_444, 10, NULL, MEDIA_BUS_FMT_VUY10_1X30, 0,
 	  1, 24, V4L2_PIX_FMT_X403, 3, 1, 1, 1 },
-	{ XVIP_VF_YUV_444, 8, NULL, MEDIA_BUS_FMT_VUY8_1X24,
+	{ XVIP_VF_YUV_444, 8, NULL, MEDIA_BUS_FMT_VUY8_1X24, 0,
 	  1, 24, V4L2_PIX_FMT_YUV444P, 3, 1, 1, 1 },
-	{ XVIP_VF_YUV_444, 8, NULL, MEDIA_BUS_FMT_VUY8_1X24,
+	{ XVIP_VF_YUV_444, 8, NULL, MEDIA_BUS_FMT_VUY8_1X24, 0,
 	  1, 8, V4L2_PIX_FMT_YUV444M, 3, 3, 1, 1 },
-	{ XVIP_VF_YUVX, 8, NULL, MEDIA_BUS_FMT_VUY8_1X24,
+	{ XVIP_VF_YUVX, 8, NULL, MEDIA_BUS_FMT_VUY8_1X24, 0,
 	  4, 32, V4L2_PIX_FMT_XVUY32, 1, 1, 1, 1 },
-	{ XVIP_VF_YUVX, 10, NULL, MEDIA_BUS_FMT_VUY10_1X30,
+	{ XVIP_VF_YUVX, 10, NULL, MEDIA_BUS_FMT_VUY10_1X30, 0,
 	  3, 32, V4L2_PIX_FMT_XVUY10, 1, 1, 1, 1 },
-	{ XVIP_VF_YUV_444, 12, NULL, MEDIA_BUS_FMT_VUY12_1X36,
+	{ XVIP_VF_YUV_444, 12, NULL, MEDIA_BUS_FMT_VUY12_1X36, 0,
 	  1, 24, V4L2_PIX_FMT_X412, 1, 1, 1, 1 },
-	{ XVIP_VF_YUV_444, 12, NULL, MEDIA_BUS_FMT_VUY12_1X36,
+	{ XVIP_VF_YUV_444, 12, NULL, MEDIA_BUS_FMT_VUY12_1X36, 0,
 	  1, 24, V4L2_PIX_FMT_X412M, 1, 1, 1, 1 },
-	{ XVIP_VF_YUV_444, 16, NULL, MEDIA_BUS_FMT_VUY16_1X48,
+	{ XVIP_VF_YUV_444, 16, NULL, MEDIA_BUS_FMT_VUY16_1X48, 0,
 	  2, 24, V4L2_PIX_FMT_X416, 1, 1, 1, 1 },
-	{ XVIP_VF_YUV_444, 16, NULL, MEDIA_BUS_FMT_VUY16_1X48,
+	{ XVIP_VF_YUV_444, 16, NULL, MEDIA_BUS_FMT_VUY16_1X48, 0,
 	  2, 24, V4L2_PIX_FMT_X416M, 1, 1, 1, 1 },
-	{ XVIP_VF_RBG, 8, NULL, MEDIA_BUS_FMT_RBG888_1X24,
+	{ XVIP_VF_RBG, 8, NULL, MEDIA_BUS_FMT_RBG888_1X24, 0,
 	  3, 24, V4L2_PIX_FMT_BGR24, 1, 1, 1, 1 },
-	{ XVIP_VF_RBG, 8, NULL, MEDIA_BUS_FMT_RBG888_1X24,
+	{ XVIP_VF_RBG, 8, NULL, MEDIA_BUS_FMT_RBG888_1X24, 0,
 	  3, 24, V4L2_PIX_FMT_RGB24, 1, 1, 1, 1 },
-	{ XVIP_VF_BGRX, 8, NULL, MEDIA_BUS_FMT_RBG888_1X24,
+	{ XVIP_VF_BGRX, 8, NULL, MEDIA_BUS_FMT_RBG888_1X24, 0,
 	  4, 32, V4L2_PIX_FMT_BGRX32, 1, 1, 1, 1 },
-	{ XVIP_VF_XRGB, 8, NULL, MEDIA_BUS_FMT_RBG888_1X24,
+	{ XVIP_VF_XRGB, 8, NULL, MEDIA_BUS_FMT_RBG888_1X24, 0,
 	  4, 32, V4L2_PIX_FMT_XBGR32, 1, 1, 1, 1 },
-	{ XVIP_VF_XBGR, 10, NULL, MEDIA_BUS_FMT_RBG101010_1X30,
+	{ XVIP_VF_XBGR, 10, NULL, MEDIA_BUS_FMT_RBG101010_1X30, 0,
 	  3, 32, V4L2_PIX_FMT_XBGR30, 1, 1, 1, 1 },
-	{ XVIP_VF_XBGR, 12, NULL, MEDIA_BUS_FMT_RBG121212_1X36,
+	{ XVIP_VF_XBGR, 12, NULL, MEDIA_BUS_FMT_RBG121212_1X36, 0,
 	  3, 40, V4L2_PIX_FMT_XBGR40, 1, 1, 1, 1 },
-	{ XVIP_VF_RBG, 16, NULL, MEDIA_BUS_FMT_RBG161616_1X48,
+	{ XVIP_VF_RBG, 16, NULL, MEDIA_BUS_FMT_RBG161616_1X48, 0,
 	  6, 48, V4L2_PIX_FMT_BGR48, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 8, "mono", MEDIA_BUS_FMT_Y8_1X8,
+	  MEDIA_BUS_FMT_Y8_1X8,
 	  1, 8, V4L2_PIX_FMT_GREY, 1, 1, 1, 1 },
 	{ XVIP_VF_Y_GREY, 10, NULL, MEDIA_BUS_FMT_Y10_1X10,
+	  MEDIA_BUS_FMT_Y8_1X8,
 	  1, 32, V4L2_PIX_FMT_XY10, 1, 1, 1, 1 },
 	{ XVIP_VF_Y_GREY, 12, NULL, MEDIA_BUS_FMT_Y12_1X12,
+	  MEDIA_BUS_FMT_Y8_1X8,
 	  1, 12, V4L2_PIX_FMT_XY12, 1, 1, 1, 1 },
 	{ XVIP_VF_Y_GREY, 16, NULL, MEDIA_BUS_FMT_Y16_1X16,
+	  MEDIA_BUS_FMT_Y8_1X8,
 	  2, 16, V4L2_PIX_FMT_Y16, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 8, "rggb", MEDIA_BUS_FMT_SRGGB8_1X8,
+	  MEDIA_BUS_FMT_SRGGB8_1X8,
 	  1, 8, V4L2_PIX_FMT_SGRBG8, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 8, "grbg", MEDIA_BUS_FMT_SGRBG8_1X8,
+	  MEDIA_BUS_FMT_SGRBG8_1X8,
 	  1, 8, V4L2_PIX_FMT_SGRBG8, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 8, "gbrg", MEDIA_BUS_FMT_SGBRG8_1X8,
+	  MEDIA_BUS_FMT_SGBRG8_1X8,
 	  1, 8, V4L2_PIX_FMT_SGBRG8, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 8, "bggr", MEDIA_BUS_FMT_SBGGR8_1X8,
+	  MEDIA_BUS_FMT_SBGGR8_1X8,
 	  1, 8, V4L2_PIX_FMT_SBGGR8, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 12, "mono", MEDIA_BUS_FMT_Y12_1X12,
 	  2, 12, V4L2_PIX_FMT_Y12, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 10, "rggb", MEDIA_BUS_FMT_SRGGB10_1X10,
+	  MEDIA_BUS_FMT_SRGGB8_1X8,
 	  2, 10, V4L2_PIX_FMT_SRGGB10, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 10, "grbg", MEDIA_BUS_FMT_SGRBG10_1X10,
+	  MEDIA_BUS_FMT_SGRBG8_1X8,
 	  2, 10, V4L2_PIX_FMT_SGRBG10, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 10, "gbrg", MEDIA_BUS_FMT_SGBRG10_1X10,
+	  MEDIA_BUS_FMT_SGBRG8_1X8,
 	  2, 10, V4L2_PIX_FMT_SGBRG10, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 10, "bggr", MEDIA_BUS_FMT_SBGGR10_1X10,
+	  MEDIA_BUS_FMT_SBGGR8_1X8,
 	  2, 10, V4L2_PIX_FMT_SBGGR10, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 12, "rggb", MEDIA_BUS_FMT_SRGGB12_1X12,
+	  MEDIA_BUS_FMT_SRGGB8_1X8,
 	  2, 12, V4L2_PIX_FMT_SRGGB12, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 12, "grbg", MEDIA_BUS_FMT_SGRBG12_1X12,
+	  MEDIA_BUS_FMT_SGRBG8_1X8,
 	  2, 12, V4L2_PIX_FMT_SGRBG12, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 12, "gbrg", MEDIA_BUS_FMT_SGBRG12_1X12,
+	  MEDIA_BUS_FMT_SGBRG8_1X8,
 	  2, 12, V4L2_PIX_FMT_SGBRG12, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 12, "bggr", MEDIA_BUS_FMT_SBGGR12_1X12,
+	  MEDIA_BUS_FMT_SBGGR8_1X8,
 	  2, 12, V4L2_PIX_FMT_SBGGR12, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 16, "rggb", MEDIA_BUS_FMT_SRGGB16_1X16,
+	  MEDIA_BUS_FMT_SRGGB8_1X8,
 	  2, 16, V4L2_PIX_FMT_SRGGB16, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 16, "grbg", MEDIA_BUS_FMT_SGRBG16_1X16,
+	  MEDIA_BUS_FMT_SGRBG8_1X8,
 	  2, 16, V4L2_PIX_FMT_SGRBG16, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 16, "gbrg", MEDIA_BUS_FMT_SGBRG16_1X16,
+	  MEDIA_BUS_FMT_SGBRG8_1X8,
 	  2, 16, V4L2_PIX_FMT_SGBRG16, 1, 1, 1, 1 },
 	{ XVIP_VF_MONO_SENSOR, 16, "bggr", MEDIA_BUS_FMT_SBGGR16_1X16,
+	  MEDIA_BUS_FMT_SBGGR8_1X8,
 	  2, 16, V4L2_PIX_FMT_SBGGR16, 1, 1, 1, 1 },
 };
 
@@ -401,6 +421,9 @@ static int xvip_device_parse_dt(struct xvip_device *xvip,
 			xvip->ports[index].format = format;
 		}
 
+		of_property_read_u32(port, "data-shift",
+				     &xvip->ports[index].data_shift);
+
 		found_ports |= BIT(index);
 		num_ports++;
 	}
@@ -640,3 +663,101 @@ int xvip_enum_frame_size(struct v4l2_subdev *subdev,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(xvip_enum_frame_size);
+
+/**
+ * xvip_link_validate - Validate a link between subdevs
+ * @sd: The V4L2 subdevice on the sink side
+ * @link: The link
+ * @source_fmt: The format on the source pad
+ * @sink_fmt: The format on the sink pad
+ *
+ * This function is a drop-in implementation of the subdev link_validate pad
+ * operation. It is similar to v4l2_subdev_link_validate_default(), but takes
+ * into account any data shift caused by an AXI stream subset converter.
+ *
+ * Return: 0 if the link configuratiion is valid, or a negative error code
+ * otherwise.
+ */
+int xvip_link_validate(struct v4l2_subdev *sd, struct media_link *link,
+		       struct v4l2_subdev_format *source_fmt,
+		       struct v4l2_subdev_format *sink_fmt)
+{
+	struct v4l2_mbus_config mbus_config = { 0 };
+	const struct xvip_video_format *source_info;
+	const struct xvip_video_format *sink_info;
+	unsigned int shift;
+	int ret;
+
+	/* The width and height must match. */
+	if (source_fmt->format.width != sink_fmt->format.width
+	    || source_fmt->format.height != sink_fmt->format.height)
+		return -EPIPE;
+
+	/*
+	 * The field order must match, or the sink field order must be NONE
+	 * to support interlaced hardware connected to bridges that support
+	 * progressive formats only.
+	 */
+	if (source_fmt->format.field != sink_fmt->format.field &&
+	    sink_fmt->format.field != V4L2_FIELD_NONE)
+		return -EPIPE;
+
+	/*
+	 * Validate the media bus code. An AXI stream subset converter may be
+	 * present on the link. It will be modelled, by convention, on the sink
+	 * subdev.
+	 */
+	source_info = xvip_get_format_by_code(source_fmt->format.code);
+	sink_info = xvip_get_format_by_code(sink_fmt->format.code);
+	if (IS_ERR(source_info) || IS_ERR(sink_info))
+		return -EPIPE;
+
+	ret = v4l2_subdev_call(sd, pad, get_mbus_config,
+			       link->sink->index, &mbus_config);
+	switch (ret) {
+	case 0:
+		shift = mbus_config.bus.parallel.data_shift;
+		break;
+	case -ENOIOCTLCMD:
+		shift = 0;
+		break;
+	default:
+		return ret;
+	}
+
+	if ((source_info->flavor == 0 || sink_info->flavor == 0 ||
+	     source_info->flavor != sink_info->flavor) && shift != 0)
+		return -EPIPE;
+
+	if (source_info->width - sink_info->width != shift)
+		return -EPIPE;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(xvip_link_validate);
+
+/**
+ * xvip_get_mbus_config - Retrieve the bus configuration for a pad
+ * @sd: The V4L2 subdevice on the sink side
+ * @pad: The pad
+ * @config: The bus configuration
+ *
+ * This function is a drop-in implementation of the subdev get_mbus_config pad
+ * operation.
+ *
+ * Return: 0 if the pad is valid, or a negative error code otherwise.
+ */
+int xvip_get_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
+			 struct v4l2_mbus_config *config)
+{
+	struct xvip_device *xvip = container_of(sd, struct xvip_device, subdev);
+
+	if (pad >= xvip->num_sinks + xvip->num_sources)
+		return -EINVAL;
+
+	config->type = V4L2_MBUS_PARALLEL;
+	config->bus.parallel.data_shift = xvip->ports[pad].data_shift;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(xvip_get_mbus_config);

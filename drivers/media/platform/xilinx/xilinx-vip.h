@@ -86,46 +86,6 @@ struct clk;
 #define XVIP_ENCODING_VIDEO_FORMAT_SHIFT	0
 
 /**
- * struct xvip_device_info - Information about a video IP core
- * @has_axi_lite: The IP has an AXI Lite (register) interface
- * @num_sinks: Number of sink pads
- * @num_sources: Number of source pads
- *
- * The xvip_device_info structure contains data that statically describe the
- * features of a Xilinx video IP core. It enables the xvip_device helpers to
- * handle differences between video IP cores.
- */
-struct xvip_device_info {
-	bool has_axi_lite;
-	unsigned int num_sinks;
-	unsigned int num_sources;
-};
-
-/**
- * struct xvip_device - Xilinx Video IP device structure
- * @dev: (OF) device
- * @iomem: device I/O register space remapped to kernel virtual memory
- * @clk: video core clock
- * @subdev: V4L2 subdevice
- * @num_sinks: Number of sink pads
- * @num_sources: Number of source pads
- * @pads: Pads for the subdev's media entity
- * @saved_ctrl: saved control register for resume / suspend
- */
-struct xvip_device {
-	struct device *dev;
-	void __iomem *iomem;
-	struct clk *clk;
-
-	struct v4l2_subdev subdev;
-	unsigned int num_sinks;
-	unsigned int num_sources;
-	struct media_pad *pads;
-
-	u32 saved_ctrl;
-};
-
-/**
  * struct xvip_video_format - Xilinx Video IP video format description
  * @vf_code: AXI4 video format code
  * @width: AXI4 format width in bits per component
@@ -151,6 +111,61 @@ struct xvip_video_format {
 	u8 buffers;
 	u8 hsub;
 	u8 vsub;
+};
+
+/**
+ * struct xvip_device_info - Information about a video IP core
+ * @has_axi_lite: The IP has an AXI Lite (register) interface
+ * @has_port_formats: The device tree specifies per-port formats
+ * @num_sinks: Number of sink pads
+ * @num_sources: Number of source pads
+ *
+ * The xvip_device_info structure contains data that statically describe the
+ * features of a Xilinx video IP core. It enables the xvip_device helpers to
+ * handle differences between video IP cores.
+ *
+ * If @has_port_formats is set, the &xvip_video.formats field will point to an
+ * array populated with the xvip_video_format corresponding to each port.
+ */
+struct xvip_device_info {
+	bool has_axi_lite;
+	bool has_port_formats;
+	unsigned int num_sinks;
+	unsigned int num_sources;
+};
+
+/**
+ * struct xvip_device_port - Data for a DT port
+ * @format: Video format
+ */
+struct xvip_device_port {
+	const struct xvip_video_format *format;
+};
+
+/**
+ * struct xvip_device - Xilinx Video IP device structure
+ * @dev: (OF) device
+ * @iomem: device I/O register space remapped to kernel virtual memory
+ * @clk: video core clock
+ * @subdev: V4L2 subdevice
+ * @num_sinks: Number of sink pads
+ * @num_sources: Number of source pads
+ * @pads: Pads for the subdev's media entity
+ * @ports: Data for each DT port
+ * @saved_ctrl: saved control register for resume / suspend
+ */
+struct xvip_device {
+	struct device *dev;
+	void __iomem *iomem;
+	struct clk *clk;
+
+	struct v4l2_subdev subdev;
+	unsigned int num_sinks;
+	unsigned int num_sources;
+	struct media_pad *pads;
+	struct xvip_device_port *ports;
+
+	u32 saved_ctrl;
 };
 
 const struct xvip_video_format *xvip_get_format_by_code(unsigned int code);

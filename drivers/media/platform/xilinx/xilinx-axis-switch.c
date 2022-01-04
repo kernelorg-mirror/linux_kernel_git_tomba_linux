@@ -323,8 +323,10 @@ static const struct v4l2_subdev_pad_ops xvsw_pad_ops = {
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = xvsw_get_format,
 	.set_fmt = xvsw_set_format,
+	.link_validate = xvip_link_validate,
 	.get_routing = xvsw_get_routing,
 	.set_routing = xvsw_set_routing,
+	.get_mbus_config = xvip_get_mbus_config,
 };
 
 static const struct v4l2_subdev_ops xvsw_ops = {

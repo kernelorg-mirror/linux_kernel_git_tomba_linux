@@ -29,11 +29,9 @@
 /**
  * struct xhls_device - Xilinx HLS Core device structure
  * @xvip: Xilinx Video IP device
- * @pads: media pads
  * @compatible: first DT compatible string for the device
  * @formats: active V4L2 media bus formats at the sink and source pads
  * @default_formats: default V4L2 media bus formats
- * @vip_formats: format information corresponding to the pads active formats
  * @model: additional description of IP implementation if available
  * @ctrl_handler: control handler
  * @user_mem: user portion of the register space
@@ -41,13 +39,11 @@
  */
 struct xhls_device {
 	struct xvip_device xvip;
-	struct media_pad pads[2];
 
 	const char *compatible;
 
 	struct v4l2_mbus_framefmt formats[2];
 	struct v4l2_mbus_framefmt default_formats[2];
-	const struct xvip_video_format *vip_formats[2];
 
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_ctrl *model;
@@ -336,7 +332,7 @@ static void xhls_init_formats(struct xhls_device *xhls)
 
 	/* Initialize default and active formats */
 	format = &xhls->default_formats[XVIP_PAD_SINK];
-	format->code = xhls->vip_formats[XVIP_PAD_SINK]->code;
+	format->code = xhls->xvip.ports[XVIP_PAD_SINK].format->code;
 	format->field = V4L2_FIELD_NONE;
 	format->colorspace = V4L2_COLORSPACE_SRGB;
 
@@ -347,59 +343,28 @@ static void xhls_init_formats(struct xhls_device *xhls)
 
 	format = &xhls->default_formats[XVIP_PAD_SOURCE];
 	*format = xhls->default_formats[XVIP_PAD_SINK];
-	format->code = xhls->vip_formats[XVIP_PAD_SOURCE]->code;
+	format->code = xhls->xvip.ports[XVIP_PAD_SOURCE].format->code;
 
 	xhls->formats[XVIP_PAD_SOURCE] = *format;
 }
 
 static int xhls_parse_of(struct xhls_device *xhls)
 {
-	struct device *dev = xhls->xvip.dev;
 	struct device_node *node = xhls->xvip.dev->of_node;
-	struct device_node *ports;
-	struct device_node *port;
-	u32 port_id;
 	int ret;
 
 	ret = of_property_read_string(node, "compatible", &xhls->compatible);
 	if (ret < 0)
 		return -EINVAL;
 
-	ports = of_get_child_by_name(node, "ports");
-	if (ports == NULL)
-		ports = node;
-
-	/* Get the format description for each pad */
-	for_each_child_of_node(ports, port) {
-		if (port->name && (of_node_cmp(port->name, "port") == 0)) {
-			const struct xvip_video_format *vip_format;
-
-			vip_format = xvip_of_get_format(port);
-			if (IS_ERR(vip_format)) {
-				dev_err(dev, "invalid format in DT");
-				return PTR_ERR(vip_format);
-			}
-
-			ret = of_property_read_u32(port, "reg", &port_id);
-			if (ret < 0) {
-				dev_err(dev, "no reg in DT");
-				return ret;
-			}
-
-			if (port_id != 0 && port_id != 1) {
-				dev_err(dev, "invalid reg in DT");
-				return -EINVAL;
-			}
-
-			xhls->vip_formats[port_id] = vip_format;
-		}
-	}
-
 	return 0;
 }
 
 static const struct xvip_device_info xhls_info = {
 	.has_axi_lite = true,
+	.has_port_formats = true,
+	.num_sinks = 1,
+	.num_sources = 1,
 };
 
 static int xhls_probe(struct platform_device *pdev)
@@ -443,10 +408,8 @@ static int xhls_probe(struct platform_device *pdev)
 
 	xhls_init_formats(xhls);
 
-	xhls->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	xhls->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 	subdev->entity.ops = &xhls_media_ops;
-	ret = media_entity_pads_init(&subdev->entity, 2, xhls->pads);
+	ret = media_entity_pads_init(&subdev->entity, 2, xhls->xvip.pads);
 	if (ret < 0)
 		goto error;
 

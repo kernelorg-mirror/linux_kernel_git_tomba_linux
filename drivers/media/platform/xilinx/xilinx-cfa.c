@@ -300,6 +300,10 @@ static int xcfa_parse_of(struct xcfa_device *xcfa)
 	return 0;
 }
 
+static const struct xvip_device_info xcfa_info = {
+	.has_axi_lite = true,
+};
+
 static int xcfa_probe(struct platform_device *pdev)
 {
 	struct xcfa_device *xcfa;
@@ -317,7 +321,7 @@ static int xcfa_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_device_init(&xcfa->xvip);
+	ret = xvip_device_init(&xcfa->xvip, &xcfa_info);
 	if (ret < 0)
 		return ret;
 

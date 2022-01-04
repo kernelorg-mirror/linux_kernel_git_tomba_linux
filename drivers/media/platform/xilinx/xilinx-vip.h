@@ -86,6 +86,18 @@ struct clk;
 #define XVIP_ENCODING_VIDEO_FORMAT_SHIFT	0
 
 /**
+ * struct xvip_device_info - Information about a video IP core
+ * @has_axi_lite: The IP has an AXI Lite (register) interface
+ *
+ * The xvip_device_info structure contains data that statically describe the
+ * features of a Xilinx video IP core. It enables the xvip_device helpers to
+ * handle differences between video IP cores.
+ */
+struct xvip_device_info {
+	bool has_axi_lite;
+};
+
+/**
  * struct xvip_device - Xilinx Video IP device structure
  * @subdev: V4L2 subdevice
  * @dev: (OF) device
@@ -166,7 +178,8 @@ static inline void xvip_set(struct xvip_device *xvip, u32 addr, u32 set)
 void xvip_clr_or_set(struct xvip_device *xvip, u32 addr, u32 mask, bool set);
 void xvip_clr_and_set(struct xvip_device *xvip, u32 addr, u32 clr, u32 set);
 
-int xvip_device_init(struct xvip_device *xvip);
+int xvip_device_init(struct xvip_device *xvip,
+		     const struct xvip_device_info *info);
 void xvip_device_cleanup(struct xvip_device *xvip);
 
 static inline void xvip_reset(struct xvip_device *xvip)

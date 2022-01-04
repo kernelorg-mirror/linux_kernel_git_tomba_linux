@@ -1080,6 +1080,10 @@ static int xcsc_parse_of(struct xcsc_dev *xcsc)
 	return 0;
 }
 
+static const struct xvip_device_info xcsc_info = {
+	.has_axi_lite = true,
+};
+
 static int xcsc_probe(struct platform_device *pdev)
 {
 	struct xcsc_dev *xcsc;
@@ -1099,7 +1103,7 @@ static int xcsc_probe(struct platform_device *pdev)
 
 	/* Reset and initialize the core */
 	gpiod_set_value_cansleep(xcsc->rst_gpio, XCSC_RESET_DEASSERT);
-	rval = xvip_device_init(&xcsc->xvip);
+	rval = xvip_device_init(&xcsc->xvip, &xcsc_info);
 	if (rval < 0)
 		return rval;
 

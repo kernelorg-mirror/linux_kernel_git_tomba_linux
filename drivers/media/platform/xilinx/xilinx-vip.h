@@ -91,6 +91,8 @@ struct clk;
  * @width: AXI4 format width in bits per component
  * @pattern: CFA pattern for Mono/Sensor formats
  * @code: media bus format code
+ * @flavor:  media bus format code for the same pixel layout but
+ *	shifted to be 8 bits per pixel. =0 if format is not shiftable.
  * @bpl_factor: Bytes per line factor
  * @bpp: bits per pixel
  * @fourcc: V4L2 pixel format FCC identifier
@@ -104,6 +106,7 @@ struct xvip_video_format {
 	unsigned int width;
 	const char *pattern;
 	unsigned int code;
+	unsigned int flavor;
 	unsigned int bpl_factor;
 	unsigned int bpp;
 	u32 fourcc;
@@ -137,9 +140,11 @@ struct xvip_device_info {
 /**
  * struct xvip_device_port - Data for a DT port
  * @format: Video format
+ * @data_shift: Value of the data-shift property (0 if absent)
  */
 struct xvip_device_port {
 	const struct xvip_video_format *format;
+	unsigned int data_shift;
 };
 
 /**
@@ -181,6 +186,11 @@ int xvip_enum_mbus_code(struct v4l2_subdev *subdev,
 int xvip_enum_frame_size(struct v4l2_subdev *subdev,
 			 struct v4l2_subdev_state *sd_state,
 			 struct v4l2_subdev_frame_size_enum *fse);
+int xvip_link_validate(struct v4l2_subdev *sd, struct media_link *link,
+		       struct v4l2_subdev_format *source_fmt,
+		       struct v4l2_subdev_format *sink_fmt);
+int xvip_get_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
+			 struct v4l2_mbus_config *config);
 
 static inline u32 xvip_read(struct xvip_device *xvip, u32 addr)
 {

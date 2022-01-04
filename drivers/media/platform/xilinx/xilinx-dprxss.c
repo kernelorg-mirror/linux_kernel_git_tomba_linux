@@ -429,19 +429,16 @@ struct vidphy_cfg {
 
 /**
  * struct xdprxss_state - DP Rx Subsystem device structure
- * @dev: Platform structure
- * @subdev: The v4l2 subdev structure
+ * @xvip: Xilinx Video IP device
  * @ctrl_handler: control handler
  * @drm_infoframe: DRM infoframe data
  * @infoframe: IP infoframe data
  * @event: Holds the video unlock event
  * @detected_timings: Detected Video timings
  * @phy: pointer to phy instance
- * @pad: media pad
  * @axi_clk: Axi lite interface clock
  * @rx_lnk_clk: DP Rx GT clock
  * @rx_vid_clk: DP RX Video clock
- * @dp_base: Base address of DP Rx Subsystem
  * @edid_base: Bare Address of EDID block
  * @hdcp1x_keymgmt_base: regmap of HDCP1X Key Management block
  * @prvdata: Pointer to device private data
@@ -470,19 +467,17 @@ struct vidphy_cfg {
  * This structure contains the device driver related parameters
  */
 struct xdprxss_state {
-	struct device *dev;
-	struct v4l2_subdev subdev;
+	struct xvip_device xvip;
+
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_hdr10_payload drm_infoframe;
 	struct xdprxss_infoframe infoframe;
 	struct v4l2_event event;
 	struct v4l2_dv_timings detected_timings;
 	struct phy *phy[XDPRX_MAX_LANE_COUNT];
-	struct media_pad pad;
 	struct clk *axi_clk;
 	struct clk *rx_lnk_clk;
 	struct clk *rx_vid_clk;
-	void __iomem *dp_base;
 	void __iomem *edid_base;
 	struct regmap *hdcp1x_keymgmt_base;
 	void *prvdata;
@@ -642,7 +637,7 @@ static const struct v4l2_dv_timings fmt_cap[] = {
 static inline struct xdprxss_state *
 to_xdprxssstate(struct v4l2_subdev *subdev)
 {
-	return container_of(subdev, struct xdprxss_state, subdev);
+	return container_of(subdev, struct xdprxss_state, xvip.subdev);
 }
 
 /* Register related operations */
@@ -694,26 +689,15 @@ static inline void xdprxss_hdcp1x_keymgmt_disable(struct xdprxss_state *state)
 	regmap_write(state->hdcp1x_keymgmt_base, HDCP1X_KEYMGMT_REG_CTRL, data);
 }
 
-static inline u32 xdprxss_mmcm_read(struct xdprxss_state *xdprxss, u32 addr)
-{
-	return ioread32(xdprxss->dp_base + XDPRXSS_MMCM_OFFSET + addr);
-}
-
-static inline void xdprxss_mmcm_write(struct xdprxss_state *xdprxss, u32 addr,
-				      u32 value)
-{
-	iowrite32(value, xdprxss->dp_base + XDPRXSS_MMCM_OFFSET + addr);
-}
-
 static inline u32 xdprxss_read(struct xdprxss_state *xdprxss, u32 addr)
 {
-	return ioread32(xdprxss->dp_base + addr);
+	return xvip_read(&xdprxss->xvip, addr);
 }
 
 static inline void xdprxss_write(struct xdprxss_state *xdprxss, u32 addr,
 				 u32 value)
 {
-	iowrite32(value, xdprxss->dp_base + addr);
+	xvip_write(&xdprxss->xvip, addr, value);
 }
 
 static inline void xdprxss_clr(struct xdprxss_state *xdprxss, u32 addr,
@@ -739,14 +723,25 @@ static void xdprxss_clrset(struct xdprxss_state *dp, u32 addr,
 	xdprxss_write(dp, addr, regval);
 }
 
+static inline u32 xdprxss_mmcm_read(struct xdprxss_state *xdprxss, u32 addr)
+{
+	return xdprxss_read(xdprxss, XDPRXSS_MMCM_OFFSET + addr);
+}
+
+static inline void xdprxss_mmcm_write(struct xdprxss_state *xdprxss, u32 addr,
+				      u32 value)
+{
+	xdprxss_write(xdprxss, XDPRXSS_MMCM_OFFSET + addr, value);
+}
+
 static inline void xdprxss_dpcd_update_start(struct xdprxss_state *xdprxss)
 {
-	iowrite32(0x1, xdprxss->dp_base + XDPRX_CTRL_DPCD_REG);
+	xvip_write(&xdprxss->xvip, XDPRX_CTRL_DPCD_REG, 1);
 }
 
 static inline void xdprxss_dpcd_update_end(struct xdprxss_state *xdprxss)
 {
-	iowrite32(0x0, xdprxss->dp_base + XDPRX_CTRL_DPCD_REG);
+	xvip_write(&xdprxss->xvip, XDPRX_CTRL_DPCD_REG, 0);
 }
 
 static inline int xdprxss_get_lane01_reqval(struct xdprxss_state *xdprxss)
@@ -802,7 +797,7 @@ static int xlnx_dp_phy_ready(struct xdprxss_state *dp)
 	}
 
 	if (i == XDPRX_PHYSTATUS_READ_COUNT) {
-		dev_err(dp->dev, "PHY isn't ready\n");
+		dev_err(dp->xvip.dev, "PHY isn't ready\n");
 		return -ENODEV;
 	}
 
@@ -951,7 +946,7 @@ static int xlnx_dp_rx_gt_control_init(struct xdprxss_state *dp)
 	/* Setting initial link rate */
 	ret = config_gt_control_linerate(dp, DP_LINK_BW_8_1);
 	if (ret) {
-		dev_err(dp->dev, "Default Line Rate setting Failed\n");
+		dev_err(dp->xvip.dev, "Default Line Rate setting Failed\n");
 		return ret;
 	}
 
@@ -1039,7 +1034,7 @@ static int xdprxss_get_stream_properties(struct xdprxss_state *state)
 			format->code = MEDIA_BUS_FMT_RBG888_1X24;
 		break;
 	default:
-		dev_err(state->dev, "Unsupported color format\n");
+		dev_err(state->xvip.dev, "Unsupported color format\n");
 
 		return -EINVAL;
 	}
@@ -1081,7 +1076,7 @@ static int xdprxss_get_stream_properties(struct xdprxss_state *state)
 	state->frame_interval = framerate;
 	spin_unlock(&state->lock);
 
-	dev_dbg(state->dev, "detected properties : width %d height %d\n",
+	dev_dbg(state->xvip.dev, "detected properties : width %d height %d\n",
 		dv_timings->bt.width, dv_timings->bt.height);
 
 	return 0;
@@ -1175,7 +1170,7 @@ static void xdprxss_core_init(struct xdprxss_state *xdprxss)
 
 static void xdprxss_irq_unplug(struct xdprxss_state *state)
 {
-	dev_dbg(state->dev, "Asserted cable unplug interrupt\n");
+	dev_dbg(state->xvip.dev, "Asserted cable unplug interrupt\n");
 
 	if (state->hdcp_enable)
 		xhdcp1x_rx_disable(state->hdcp1x);
@@ -1216,7 +1211,7 @@ static void xdprxss_irq_tp1(struct xdprxss_state *state)
 	u32 linkrate;
 	unsigned int i;
 
-	dev_dbg(state->dev, "Asserted traning pattern 1\n");
+	dev_dbg(state->xvip.dev, "Asserted traning pattern 1\n");
 
 	linkrate = xdprxss_read(state, XDPRX_LINK_BW_REG);
 
@@ -1228,7 +1223,7 @@ static void xdprxss_irq_tp1(struct xdprxss_state *state)
 		phy_cfg->link_rate = linkrate * 270;
 		break;
 	default:
-		dev_err(state->dev, "invalid link rate\n");
+		dev_err(state->xvip.dev, "invalid link rate\n");
 		break;
 	}
 
@@ -1250,7 +1245,8 @@ static void xdprxss_irq_tp1(struct xdprxss_state *state)
 		config_gt_control_linerate(state, linkrate);
 
 		if (get_rx_dec_clk_lock(state))
-			dev_info(state->dev, "rx decryption clock failed to lock\n");
+			dev_info(state->xvip.dev,
+				 "rx decryption clock failed to lock\n");
 
 		/* Initialize phy logic of DP-RX core */
 		xdprxss_write(state, XDPRX_PHY_REG, XDPRX_PHY_INIT_MASK);
@@ -1261,13 +1257,13 @@ static void xdprxss_irq_tp1(struct xdprxss_state *state)
 
 static void xdprxss_irq_tp2(struct xdprxss_state *state)
 {
-	dev_dbg(state->dev, "Asserted traning pattern 2\n");
+	dev_dbg(state->xvip.dev, "Asserted traning pattern 2\n");
 	state->ltstate = 2;
 }
 
 static void xdprxss_training_failure(struct xdprxss_state *state)
 {
-	dev_dbg(state->dev, "Traning Lost !!\n");
+	dev_dbg(state->xvip.dev, "Traning Lost !!\n");
 	state->valid_stream = false;
 
 	if (state->hdcp_enable)
@@ -1285,7 +1281,7 @@ static void xdprxss_training_failure(struct xdprxss_state *state)
 
 static void xdprxss_irq_no_video(struct xdprxss_state *state)
 {
-	dev_dbg(state->dev, "No Valid video received !!\n");
+	dev_dbg(state->xvip.dev, "No Valid video received !!\n");
 
 	xdprxss_write(state, XDPRX_VIDEO_UNSUPPORTED_REG, 0x1);
 	xdprxss_clr(state, XDPRX_INTR_MASK_REG, XDPRX_INTR_VBLANK_MASK);
@@ -1300,13 +1296,13 @@ static void xdprxss_irq_no_video(struct xdprxss_state *state)
 	memset(&state->event, 0, sizeof(state->event));
 	state->event.type = V4L2_EVENT_SOURCE_CHANGE;
 	state->event.u.src_change.changes = V4L2_EVENT_SRC_CH_RESOLUTION;
-	v4l2_subdev_notify_event(&state->subdev, &state->event);
+	v4l2_subdev_notify_event(&state->xvip.subdev, &state->event);
 	state->valid_stream = false;
 }
 
 static void xdprxss_irq_valid_video(struct xdprxss_state *state)
 {
-	dev_dbg(state->dev, "Valid Video received !!\n");
+	dev_dbg(state->xvip.dev, "Valid Video received !!\n");
 	xdprxss_write(state, XDPRX_VIDEO_UNSUPPORTED_REG, 0x0);
 
 	if (!xdprxss_get_stream_properties(state)) {
@@ -1314,10 +1310,10 @@ static void xdprxss_irq_valid_video(struct xdprxss_state *state)
 		state->event.type = V4L2_EVENT_SOURCE_CHANGE;
 		state->event.u.src_change.changes =
 				V4L2_EVENT_SRC_CH_RESOLUTION;
-		v4l2_subdev_notify_event(&state->subdev, &state->event);
+		v4l2_subdev_notify_event(&state->xvip.subdev, &state->event);
 		state->valid_stream = true;
 	} else {
-		dev_err(state->dev, "Unable to get stream properties!\n");
+		dev_err(state->xvip.dev, "Unable to get stream properties!\n");
 		state->valid_stream = false;
 	}
 
@@ -1478,7 +1474,7 @@ static irqreturn_t xdprxss_irq_handler(int irq, void *dev_id)
 		lane_count = xdprxss_read(state, XDPRX_LANE_COUNT_REG);
 		if (state->hdcp_enable && state->hdcp1x_key_available)
 			xhdcp1x_rx_enable(state->hdcp1x, lane_count);
-		dev_dbg(state->dev, "DP Link training is done !!\n");
+		dev_dbg(state->xvip.dev, "DP Link training is done !!\n");
 	}
 	if (status & XDPRX_INTR_HDCP1X_AKSV_WRITE_MASK)
 		xhdcp1x_rx_push_events(state->hdcp1x, XHDCP1X_RX_AKSV_RCVD);
@@ -1504,7 +1500,7 @@ static int xdprxss_subscribe_event(struct v4l2_subdev *sd,
 	int ret;
 	struct xdprxss_state *xdprxss = to_xdprxssstate(sd);
 
-	dev_dbg(xdprxss->dev, "Event subscribed : 0x%08x\n", sub->type);
+	dev_dbg(xdprxss->xvip.dev, "Event subscribed : 0x%08x\n", sub->type);
 
 	switch (sub->type) {
 	case V4L2_EVENT_SOURCE_CHANGE:
@@ -1566,7 +1562,7 @@ __xdprxss_get_pad_format(struct xdprxss_state *xdprxss,
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xdprxss->subdev,
+		format = v4l2_subdev_get_try_format(&xdprxss->xvip.subdev,
 						    sd_state, pad);
 		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
@@ -1624,11 +1620,11 @@ static int xdprxss_getset_format(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *format;
 
 	if (!xdprxss->valid_stream) {
-		dev_err(xdprxss->dev, "Video not locked!\n");
+		dev_err(xdprxss->xvip.dev, "Video not locked!\n");
 		return -EINVAL;
 	}
 
-	dev_dbg(xdprxss->dev,
+	dev_dbg(xdprxss->xvip.dev,
 		"set width %d height %d code %d field %d colorspace %d\n",
 		fmt->format.width, fmt->format.height,
 		fmt->format.code, fmt->format.field,
@@ -1755,7 +1751,8 @@ static int xdprxss_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 	switch (ctrl->id) {
 	case V4L2_CID_METADATA_HDR:
 		if (!state->valid_stream) {
-			dev_err(state->dev, "Can't get values when video not locked!\n");
+			dev_err(state->xvip.dev,
+				"Can't get values when video not locked!\n");
 			return -EINVAL;
 		}
 		hdr_ptr = (struct v4l2_metadata_hdr *)ctrl->p_new.p;
@@ -1765,11 +1762,12 @@ static int xdprxss_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 		       hdr_ptr->size);
 		break;
 	default:
-		dev_err(state->dev, "Get Invalid control id 0x%08x\n", ctrl->id);
+		dev_err(state->xvip.dev, "Get Invalid control id 0x%08x\n",
+			ctrl->id);
 		ret = -EINVAL;
 	}
 
-	dev_dbg(state->dev, "Get ctrl id = 0x%08x val = 0x%08x\n",
+	dev_dbg(state->xvip.dev, "Get ctrl id = 0x%08x val = 0x%08x\n",
 		ctrl->id, ctrl->val);
 	return ret;
 }
@@ -1972,7 +1970,7 @@ static int xdprxss_hdcp1x_keymgmt_set_key(struct xdprxss_state *state)
 			HDCP1X_KEYMGMT_REG_TYPE, &type))
 		return -EIO;
 	if (!version && !type) {
-		dev_err(state->dev, "hdcp1x keymgmt core is not present\n");
+		dev_err(state->xvip.dev, "hdcp1x keymgmt core is not present\n");
 		return -ENODEV;
 	}
 
@@ -2037,12 +2035,12 @@ static long xdprxss_ioctl(struct v4l2_subdev *sd, u32 cmd, void *arg)
 	struct xdprxss_state *xdprxss = to_xdprxssstate(sd);
 
 	if (!xdprxss->hdcp_enable) {
-		dev_err(xdprxss->dev, "hdcp is not enabled in the system");
+		dev_err(xdprxss->xvip.dev, "hdcp is not enabled in the system");
 		return -ENODEV;
 	}
 
 	if (xdprxss->hdcp1x_key_available) {
-		dev_info(xdprxss->dev, "hdcp1x keys are already loaded");
+		dev_info(xdprxss->xvip.dev, "hdcp1x keys are already loaded");
 		return -EPERM;
 	}
 
@@ -2204,14 +2202,14 @@ static void dprx_unregister_aud_dev(struct device *dev)
  */
 static int xdprxss_parse_of(struct xdprxss_state *xdprxss)
 {
-	struct device_node *node = xdprxss->dev->of_node;
+	struct device_node *node = xdprxss->xvip.dev->of_node;
 	u32 val = 0;
 	int ret;
 
 	ret = of_property_read_u32(node, "xlnx,bpc", &xdprxss->bpc);
 	if (ret < 0) {
 		if (ret != -EINVAL) {
-			dev_err(xdprxss->dev, "failed to get xlnx,bpp\n");
+			dev_err(xdprxss->xvip.dev, "failed to get xlnx,bpp\n");
 			return ret;
 		}
 	}
@@ -2220,54 +2218,54 @@ static int xdprxss_parse_of(struct xdprxss_state *xdprxss)
 	 * In future, driver may add with other bpc support
 	 */
 	if (xdprxss->bpc != 8 && xdprxss->bpc != 10) {
-		dev_err(xdprxss->dev, "unsupported bpc = %u\n", xdprxss->bpc);
+		dev_err(xdprxss->xvip.dev, "unsupported bpc = %u\n", xdprxss->bpc);
 		return -EINVAL;
 	}
 
 	xdprxss->hdcp_enable = of_property_read_bool(node, "xlnx,hdcp-enable");
 	if (!xdprxss->hdcp_enable)
-		dev_info(xdprxss->dev, "hdcp is not enabled\n");
+		dev_info(xdprxss->xvip.dev, "hdcp is not enabled\n");
 
 	xdprxss->audio_enable = of_property_read_bool(node,
 						      "xlnx,audio-enable");
 	if (!xdprxss->audio_enable)
-		dev_info(xdprxss->dev, "audio not enabled\n");
+		dev_info(xdprxss->xvip.dev, "audio not enabled\n");
 
 	xdprxss->versal_gt_present =
 		of_property_read_bool(node, "xlnx,versal-gt");
 
 	ret = of_property_read_u32(node, "xlnx,link-rate", &val);
 	if (ret < 0) {
-		dev_err(xdprxss->dev, "xlnx,link-rate property not found\n");
+		dev_err(xdprxss->xvip.dev, "xlnx,link-rate property not found\n");
 		return ret;
 	}
 	if (!(val == DP_LINK_BW_1_62 ||
 	      val == DP_LINK_BW_2_7 ||
 	      val == DP_LINK_BW_5_4 ||
 	      val == DP_LINK_BW_8_1)) {
-		dev_err(xdprxss->dev, "invalid link rate\n");
+		dev_err(xdprxss->xvip.dev, "invalid link rate\n");
 		return -EINVAL;
 	}
 	xdprxss->max_linkrate = val;
 
 	ret = of_property_read_u32(node, "xlnx,lane-count", &val);
 	if (ret < 0) {
-		dev_err(xdprxss->dev, "xlnx,lane-count property not found\n");
+		dev_err(xdprxss->xvip.dev, "xlnx,lane-count property not found\n");
 		return ret;
 	}
 	if (val < 1 && val > 4) {
-		dev_err(xdprxss->dev, "invalid lane count\n");
+		dev_err(xdprxss->xvip.dev, "invalid lane count\n");
 		return -EINVAL;
 	}
 	xdprxss->max_lanecount = val;
 
 	ret = of_property_read_u32(node, "xlnx,mode", &val);
 	if (ret < 0) {
-		dev_err(xdprxss->dev, "xlnx,mode property not found\n");
+		dev_err(xdprxss->xvip.dev, "xlnx,mode property not found\n");
 		return ret;
 	}
 	if (val > 0) {
-		dev_err(xdprxss->dev, "driver does't support MST mode\n");
+		dev_err(xdprxss->xvip.dev, "driver does't support MST mode\n");
 		return -EINVAL;
 	}
 
@@ -2444,13 +2442,13 @@ static void dprx_hdcp1x_notification_handler(void *ref, u32 notification)
 
 	switch (notification) {
 	case XHDCP1X_RX_NOTIFY_AUTHENTICATED:
-		dev_info(xdprxss->dev, "HDCP1X Rx Authenticated\n");
+		dev_info(xdprxss->xvip.dev, "HDCP1X Rx Authenticated\n");
 		break;
 	case XHDCP1X_RX_NOTIFY_UN_AUTHENTICATED:
-		dev_info(xdprxss->dev, "HDCP1X Rx Un-Authenticated\n");
+		dev_info(xdprxss->xvip.dev, "HDCP1X Rx Un-Authenticated\n");
 		break;
 	case XHDCP1X_RX_NOTIFY_SET_CP_IRQ:
-		dev_dbg(xdprxss->dev,
+		dev_dbg(xdprxss->xvip.dev,
 			"HDCP1X Rx Requested for CP_IRQ generation\n");
 		break;
 	}
@@ -2458,15 +2456,15 @@ static void dprx_hdcp1x_notification_handler(void *ref, u32 notification)
 
 static int dprx_register_hdcp1x_dev(struct xdprxss_state *xdprxss)
 {
-	xdprxss->hdcp1x = xhdcp1x_rx_init(xdprxss->dev, xdprxss,
-					  xdprxss->dp_base + XDPRX_HDCP1X_REG_OFFSET,
+	xdprxss->hdcp1x = xhdcp1x_rx_init(xdprxss->xvip.dev, xdprxss,
+					  xdprxss->xvip.iomem + XDPRX_HDCP1X_REG_OFFSET,
 					  0);
 	if (IS_ERR(xdprxss->hdcp1x)) {
-		dev_err(xdprxss->dev, "failed to initialize hdcp1x\n");
+		dev_err(xdprxss->xvip.dev, "failed to initialize hdcp1x\n");
 		return PTR_ERR(xdprxss->hdcp1x);
 	}
 
-	xdprxss->hdcp1x_key = devm_kzalloc(xdprxss->dev, HDCP1X_KEYS_SIZE,
+	xdprxss->hdcp1x_key = devm_kzalloc(xdprxss->xvip.dev, HDCP1X_KEYS_SIZE,
 					   GFP_KERNEL);
 	if (!xdprxss->hdcp1x_key)
 		return -ENOMEM;
@@ -2482,12 +2480,18 @@ static int dprx_register_hdcp1x_dev(struct xdprxss_state *xdprxss)
 	return 0;
 }
 
+static const struct xvip_device_info xdprxss_info = {
+	.has_axi_lite = true,
+	.num_sinks = 0,
+	.num_sources = 1,
+};
+
 static int xdprxss_probe(struct platform_device *pdev)
 {
 	struct v4l2_subdev *subdev;
 	struct xdprxss_state *xdprxss;
-	struct device_node *node;
 	struct device *dev = &pdev->dev;
+	struct device_node *node = dev->of_node;
 	struct resource *res;
 	int ret, irq;
 	unsigned int i = 0, j;
@@ -2497,8 +2501,7 @@ static int xdprxss_probe(struct platform_device *pdev)
 	if (!xdprxss)
 		return -ENOMEM;
 
-	xdprxss->dev = &pdev->dev;
-	node = xdprxss->dev->of_node;
+	xdprxss->xvip.dev = dev;
 
 	ret = xlnx_find_device(pdev, xdprxss, "xlnx,dp-retimer");
 	if (ret)
@@ -2518,39 +2521,37 @@ static int xdprxss_probe(struct platform_device *pdev)
 
 	adata = xdprxss->rx_audio_data;
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dp_base");
-	xdprxss->dp_base = devm_ioremap_resource(dev, res);
-	if (IS_ERR(xdprxss->dp_base)) {
-		dev_err(dev, "couldn't map DisplayPort registers\n");
-		return -ENODEV;
-	}
+	ret = xvip_device_init(&xdprxss->xvip, &xdprxss_info);
+	if (ret < 0)
+		return ret;
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "edid_base");
 	xdprxss->edid_base = devm_ioremap_resource(dev, res);
 	if (IS_ERR(xdprxss->edid_base)) {
 		dev_err(dev, "Couldn't map EDID IP memory\n");
-		return -ENOENT;
+		ret = -ENOENT;
+		goto xvip_err;
 	}
 
 	xdprxss->axi_clk = devm_clk_get(dev, "s_axi_aclk");
 	if (IS_ERR(xdprxss->axi_clk)) {
 		ret = PTR_ERR(xdprxss->axi_clk);
-		dev_err(&pdev->dev, "failed to get s_axi_clk (%d)\n", ret);
-		return ret;
+		dev_err(dev, "failed to get s_axi_clk (%d)\n", ret);
+		goto xvip_err;
 	}
 
 	xdprxss->rx_lnk_clk = devm_clk_get(dev, "rx_lnk_clk");
 	if (IS_ERR(xdprxss->rx_lnk_clk)) {
 		ret = PTR_ERR(xdprxss->rx_lnk_clk);
-		dev_err(&pdev->dev, "failed to get rx_lnk_clk (%d)\n", ret);
-		return ret;
+		dev_err(dev, "failed to get rx_lnk_clk (%d)\n", ret);
+		goto xvip_err;
 	}
 
 	xdprxss->rx_vid_clk = devm_clk_get(dev, "rx_vid_clk");
 	if (IS_ERR(xdprxss->rx_vid_clk)) {
 		ret = PTR_ERR(xdprxss->rx_vid_clk);
-		dev_err(&pdev->dev, "failed to get rx_vid_clk (%d)\n", ret);
-		return ret;
+		dev_err(dev, "failed to get rx_vid_clk (%d)\n", ret);
+		goto xvip_err;
 	}
 
 	ret = xdprxss_parse_of(xdprxss);
@@ -2563,7 +2564,7 @@ static int xdprxss_probe(struct platform_device *pdev)
 			char phy_name[16];
 
 			snprintf(phy_name, sizeof(phy_name), "dp-phy%d", i);
-			xdprxss->phy[i] = devm_phy_get(xdprxss->dev, phy_name);
+			xdprxss->phy[i] = devm_phy_get(dev, phy_name);
 			if (IS_ERR(xdprxss->phy[i])) {
 				ret = PTR_ERR(xdprxss->phy[i]);
 				xdprxss->phy[i] = NULL;
@@ -2583,7 +2584,7 @@ static int xdprxss_probe(struct platform_device *pdev)
 			}
 		}
 	} else {
-		xdprxss->phy[0] = devm_phy_get(xdprxss->dev, "dp-gtquad");
+		xdprxss->phy[0] = devm_phy_get(dev, "dp-gtquad");
 		if (IS_ERR(xdprxss->phy[0]))
 			return dev_err_probe(dev, PTR_ERR(xdprxss->phy[0]),
 					"failed to get phy\n");
@@ -2630,39 +2631,36 @@ static int xdprxss_probe(struct platform_device *pdev)
 	xdprxss_core_init(xdprxss);
 
 	/* Initialize V4L2 subdevice and media entity */
-	xdprxss->pad.flags = MEDIA_PAD_FL_SOURCE;
-
-	/* Initialize V4L2 subdevice and media entity */
-	subdev = &xdprxss->subdev;
+	subdev = &xdprxss->xvip.subdev;
 	v4l2_subdev_init(subdev, &xdprxss_ops);
-	subdev->dev = &pdev->dev;
-	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
+	subdev->dev = dev;
+	strscpy(subdev->name, dev_name(dev), sizeof(subdev->name));
 
 	subdev->flags = V4L2_SUBDEV_FL_HAS_EVENTS | V4L2_SUBDEV_FL_HAS_DEVNODE;
 
 	subdev->entity.ops = &xdprxss_media_ops;
 
 	v4l2_set_subdevdata(subdev, xdprxss);
-	ret = media_entity_pads_init(&subdev->entity, 1, &xdprxss->pad);
+	ret = media_entity_pads_init(&subdev->entity, 1, xdprxss->xvip.pads);
 	if (ret < 0)
 		goto error;
 
 	ret = v4l2_ctrl_handler_init(&xdprxss->ctrl_handler,
 				     ARRAY_SIZE(xdprxss_ctrls));
 	if (ret < 0) {
-		dev_err(xdprxss->dev, "failed to initialize V4L2 ctrl\n");
+		dev_err(dev, "failed to initialize V4L2 ctrl\n");
 		goto error;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(xdprxss_ctrls); i++) {
 		struct v4l2_ctrl *ctrl;
 
-		dev_dbg(xdprxss->dev, "%d ctrl = 0x%x\n", i,
+		dev_dbg(dev, "%d ctrl = 0x%x\n", i,
 			xdprxss_ctrls[i].id);
 		ctrl = v4l2_ctrl_new_custom(&xdprxss->ctrl_handler,
 					    &xdprxss_ctrls[i], NULL);
 		if (!ctrl) {
-			dev_err(xdprxss->dev, "Failed for %s ctrl\n",
+			dev_err(dev, "Failed for %s ctrl\n",
 				xdprxss_ctrls[i].name);
 			v4l2_ctrl_handler_free(&xdprxss->ctrl_handler);
 			goto error;
@@ -2670,7 +2668,7 @@ static int xdprxss_probe(struct platform_device *pdev)
 	}
 
 	if (xdprxss->ctrl_handler.error) {
-		dev_err(xdprxss->dev, "failed to add controls\n");
+		dev_err(dev, "failed to add controls\n");
 		ret = xdprxss->ctrl_handler.error;
 		v4l2_ctrl_handler_free(&xdprxss->ctrl_handler);
 		goto error;
@@ -2679,13 +2677,13 @@ static int xdprxss_probe(struct platform_device *pdev)
 	subdev->ctrl_handler = &xdprxss->ctrl_handler;
 	ret = v4l2_ctrl_handler_setup(&xdprxss->ctrl_handler);
 	if (ret < 0) {
-		dev_err(xdprxss->dev, "failed to set controls\n");
+		dev_err(dev, "failed to set controls\n");
 		goto error;
 	}
 
 	/* Register interrupt handler */
 	irq = irq_of_parse_and_map(node, 0);
-	ret = devm_request_irq(xdprxss->dev, irq, xdprxss_irq_handler,
+	ret = devm_request_irq(dev, irq, xdprxss_irq_handler,
 			       IRQF_SHARED, subdev->name, xdprxss);
 	if (ret) {
 		dev_err(dev, "Err = %d Interrupt handler reg failed!\n",
@@ -2702,15 +2700,15 @@ static int xdprxss_probe(struct platform_device *pdev)
 	}
 
 	if (xdprxss->audio_enable) {
-		ret = dprx_register_aud_dev(xdprxss->dev);
+		ret = dprx_register_aud_dev(dev);
 		if (ret < 0) {
 			xdprxss->audio_init = false;
-			dev_err(xdprxss->dev, "dp rx audio init failed\n");
+			dev_err(dev, "dp rx audio init failed\n");
 			goto error;
 		} else {
 			xdprxss->audio_init = true;
 			init_waitqueue_head(&adata->audio_update_q);
-			dev_info(xdprxss->dev, "dp rx audio initialized\n");
+			dev_info(dev, "dp rx audio initialized\n");
 		}
 	}
 
@@ -2724,12 +2722,12 @@ static int xdprxss_probe(struct platform_device *pdev)
 
 		ret = dprx_register_hdcp1x_dev(xdprxss);
 		if (ret < 0) {
-			dev_err(xdprxss->dev, "dp rx hdcp1x init failed\n");
+			dev_err(dev, "dp rx hdcp1x init failed\n");
 			goto error;
 		}
 
 		irq = irq_of_parse_and_map(node, 2);
-		ret = devm_request_irq(xdprxss->dev, irq,
+		ret = devm_request_irq(dev, irq,
 				       xdprxss_hdcp1x_irq_handler,
 				       IRQF_SHARED, "dprxss_hdcp1x", xdprxss);
 		if (ret) {
@@ -2770,13 +2768,16 @@ error_phy:
 		phy_exit(xdprxss->phy[0]);
 	}
 
+xvip_err:
+	xvip_device_cleanup(&xdprxss->xvip);
+
 	return ret;
 }
 
 static int xdprxss_remove(struct platform_device *pdev)
 {
 	struct xdprxss_state *xdprxss = platform_get_drvdata(pdev);
-	struct v4l2_subdev *subdev = &xdprxss->subdev;
+	struct v4l2_subdev *subdev = &xdprxss->xvip.subdev;
 	unsigned int i;
 
 	cancel_delayed_work_sync(&xdprxss->tp1_work);
@@ -2793,6 +2794,8 @@ static int xdprxss_remove(struct platform_device *pdev)
 
 	if (xdprxss->audio_init)
 		dprx_unregister_aud_dev(&pdev->dev);
+
+	xvip_device_cleanup(&xdprxss->xvip);
 
 	return 0;
 }

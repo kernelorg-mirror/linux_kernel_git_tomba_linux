@@ -342,6 +342,68 @@ EXPORT_SYMBOL_GPL(xvip_set_format_size);
  * Video IP device operations
  */
 
+static int xvip_device_parse_dt(struct xvip_device *xvip)
+{
+	const unsigned int num_pads = xvip->num_sinks + xvip->num_sources;
+	struct device_node *node = xvip->dev->of_node;
+	struct device_node *ports;
+	struct device_node *port;
+	unsigned int num_ports = 0;
+	u32 found_ports = 0;
+	int ret = 0;
+
+	ports = of_get_child_by_name(node, "ports");
+	if (!ports)
+		ports = of_node_get(node);
+
+	for_each_child_of_node(ports, port) {
+		u32 index;
+
+		if (!of_node_name_eq(port, "port"))
+			continue;
+
+		ret = of_property_read_u32(port, "reg", &index);
+		if (ret) {
+			dev_err(xvip->dev, "port %pOF has no reg property\n",
+				port);
+			of_node_put(port);
+			break;
+		}
+
+		if (index >= num_pads) {
+			dev_err(xvip->dev, "Invalid port number %u\n", index);
+			of_node_put(port);
+			ret = -EINVAL;
+			break;
+		}
+
+		if (found_ports & BIT(index)) {
+			dev_err(xvip->dev, "Duplicated port number %u in %pOF\n",
+				index, port);
+			of_node_put(port);
+			ret = -EINVAL;
+			break;
+		}
+
+		found_ports |= BIT(index);
+		num_ports++;
+	}
+
+	of_node_put(ports);
+
+	if (ret)
+		return ret;
+
+	/* Validate the number of ports. */
+	if (num_ports != xvip->num_sinks + xvip->num_sources) {
+		dev_err(xvip->dev, "invalid number of ports: %u, expected %u\n",
+			num_ports, xvip->num_sinks + xvip->num_sources);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 /**
  * xvip_device_init - Initialize a Xilinx video IP device
  * @xvip: The video IP device
@@ -366,18 +428,13 @@ int xvip_device_init(struct xvip_device *xvip,
 	struct platform_device *pdev = to_platform_device(xvip->dev);
 	unsigned int num_pads;
 	unsigned int i;
+	int ret;
 
-	if (info->has_axi_lite) {
-		xvip->iomem = devm_platform_ioremap_resource(pdev, 0);
-		if (IS_ERR(xvip->iomem))
-			return PTR_ERR(xvip->iomem);
-	}
+	xvip->num_sinks = info->num_sinks;
+	xvip->num_sources = info->num_sources;
 
 	num_pads = info->num_sinks + info->num_sources;
 	if (num_pads) {
-		xvip->num_sinks = info->num_sinks;
-		xvip->num_sources = info->num_sources;
-
 		xvip->pads = devm_kcalloc(xvip->dev, num_pads,
 					  sizeof(*xvip->pads), GFP_KERNEL);
 		if (!xvip->pads)
@@ -387,6 +444,16 @@ int xvip_device_init(struct xvip_device *xvip,
 			xvip->pads[i].flags = MEDIA_PAD_FL_SINK;
 		for (; i < num_pads; ++i)
 			xvip->pads[i].flags = MEDIA_PAD_FL_SOURCE;
+	}
+
+	ret = xvip_device_parse_dt(xvip);
+	if (ret < 0)
+		return ret;
+
+	if (info->has_axi_lite) {
+		xvip->iomem = devm_platform_ioremap_resource(pdev, 0);
+		if (IS_ERR(xvip->iomem))
+			return PTR_ERR(xvip->iomem);
 	}
 
 	xvip->clk = devm_clk_get(xvip->dev, NULL);

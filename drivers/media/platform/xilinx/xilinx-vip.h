@@ -88,6 +88,8 @@ struct clk;
 /**
  * struct xvip_device_info - Information about a video IP core
  * @has_axi_lite: The IP has an AXI Lite (register) interface
+ * @num_sinks: Number of sink pads
+ * @num_sources: Number of source pads
  *
  * The xvip_device_info structure contains data that statically describe the
  * features of a Xilinx video IP core. It enables the xvip_device helpers to
@@ -95,21 +97,31 @@ struct clk;
  */
 struct xvip_device_info {
 	bool has_axi_lite;
+	unsigned int num_sinks;
+	unsigned int num_sources;
 };
 
 /**
  * struct xvip_device - Xilinx Video IP device structure
- * @subdev: V4L2 subdevice
  * @dev: (OF) device
  * @iomem: device I/O register space remapped to kernel virtual memory
  * @clk: video core clock
+ * @subdev: V4L2 subdevice
+ * @num_sinks: Number of sink pads
+ * @num_sources: Number of source pads
+ * @pads: Pads for the subdev's media entity
  * @saved_ctrl: saved control register for resume / suspend
  */
 struct xvip_device {
-	struct v4l2_subdev subdev;
 	struct device *dev;
 	void __iomem *iomem;
 	struct clk *clk;
+
+	struct v4l2_subdev subdev;
+	unsigned int num_sinks;
+	unsigned int num_sources;
+	struct media_pad *pads;
+
 	u32 saved_ctrl;
 };
 

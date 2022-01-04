@@ -317,7 +317,7 @@ static int xcfa_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_init_resources(&xcfa->xvip);
+	ret = xvip_device_init(&xcfa->xvip);
 	if (ret < 0)
 		return ret;
 
@@ -369,7 +369,7 @@ static int xcfa_probe(struct platform_device *pdev)
 
 error:
 	media_entity_cleanup(&subdev->entity);
-	xvip_cleanup_resources(&xcfa->xvip);
+	xvip_device_cleanup(&xcfa->xvip);
 	return ret;
 }
 
@@ -381,7 +381,7 @@ static int xcfa_remove(struct platform_device *pdev)
 	v4l2_async_unregister_subdev(subdev);
 	media_entity_cleanup(&subdev->entity);
 
-	xvip_cleanup_resources(&xcfa->xvip);
+	xvip_device_cleanup(&xcfa->xvip);
 
 	return 0;
 }

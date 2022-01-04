@@ -31,6 +31,7 @@
 #include <linux/v4l2-subdev.h>
 #include <linux/xilinx-sdirxss.h>
 #include <linux/xilinx-v4l2-controls.h>
+
 #include <media/hdr-ctrls.h>
 #include <media/media-entity.h>
 #include <media/v4l2-common.h>
@@ -38,6 +39,7 @@
 #include <media/v4l2-event.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
+
 #include "xilinx-vip.h"
 
 /*
@@ -301,8 +303,7 @@ enum sdi_family_enc {
 
 /**
  * struct xsdirxss_core - Core configuration SDI Rx Subsystem device structure
- * @dev: Platform structure
- * @iomem: Base address of subsystem
+ * @xvip: Xilinx Video IP device
  * @irq: requested irq number
  * @include_edh: EDH processor presence
  * @mode: 3G/6G/12G mode
@@ -313,8 +314,8 @@ enum sdi_family_enc {
  * @bpc: Bits per component, can be 10 or 12
  */
 struct xsdirxss_core {
-	struct device *dev;
-	void __iomem *iomem;
+	struct xvip_device xvip;
+
 	int irq;
 	bool include_edh;
 	int mode;
@@ -328,14 +329,11 @@ struct xsdirxss_core {
 /**
  * struct xsdirxss_state - SDI Rx Subsystem device structure
  * @core: Core structure for MIPI SDI Rx Subsystem
- * @subdev: The v4l2 subdev structure
  * @ctrl_handler: control handler
  * @event: Holds the video unlock event
  * @format: Active V4L2 format on source pad
  * @default_format: default V4L2 media bus format
  * @frame_interval: Captures the frame rate
- * @vip_format: format information corresponding to the active format
- * @pad: source media pad
  * @static_hdr: static hdr payload
  * @prev_payload: Previous ST352 payload
  * @vidlockwin: Video lock window value set by control
@@ -351,14 +349,11 @@ struct xsdirxss_core {
  */
 struct xsdirxss_state {
 	struct xsdirxss_core core;
-	struct v4l2_subdev subdev;
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_event event;
 	struct v4l2_mbus_framefmt format;
 	struct v4l2_mbus_framefmt default_format;
 	struct v4l2_fract frame_interval;
-	const struct xvip_video_format *vip_format;
-	struct media_pad pad;
 	struct v4l2_hdr10_payload static_hdr;
 	u32 prev_payload;
 	u32 vidlockwin;
@@ -716,7 +711,7 @@ static const struct xsdirxss_dv_map xsdirxss_dv_timings[] = {
 static inline struct xsdirxss_state *
 to_xsdirxssstate(struct v4l2_subdev *subdev)
 {
-	return container_of(subdev, struct xsdirxss_state, subdev);
+	return container_of(subdev, struct xsdirxss_state, core.xvip.subdev);
 }
 
 /*
@@ -724,13 +719,13 @@ to_xsdirxssstate(struct v4l2_subdev *subdev)
  */
 static inline u32 xsdirxss_read(struct xsdirxss_core *xsdirxss, u32 addr)
 {
-	return ioread32(xsdirxss->iomem + addr);
+	return xvip_read(&xsdirxss->xvip, addr);
 }
 
 static inline void xsdirxss_write(struct xsdirxss_core *xsdirxss, u32 addr,
 				  u32 value)
 {
-	iowrite32(value, xsdirxss->iomem + addr);
+	xvip_write(&xsdirxss->xvip, addr, value);
 }
 
 static inline void xsdirxss_clr(struct xsdirxss_core *xsdirxss, u32 addr,
@@ -775,11 +770,11 @@ static int xsdirx_set_modedetect(struct xsdirxss_core *core, u16 mask)
 
 	mask &= XSDIRX_DETECT_ALL_MODES;
 	if (!mask) {
-		dev_err(core->dev, "Invalid bit mask = 0x%08x\n", mask);
+		dev_err(core->xvip.dev, "Invalid bit mask = 0x%08x\n", mask);
 		return -EINVAL;
 	}
 
-	dev_dbg(core->dev, "mask = 0x%x\n", mask);
+	dev_dbg(core->xvip.dev, "mask = 0x%x\n", mask);
 
 	val = xsdirxss_read(core, XSDIRX_MDL_CTRL_REG);
 	val &= ~XSDIRX_MDL_CTRL_MODE_DET_EN_MASK;
@@ -788,7 +783,7 @@ static int xsdirx_set_modedetect(struct xsdirxss_core *core, u16 mask)
 
 	if (hweight16(mask) > 1) {
 		/* Multi mode detection as more than 1 bit set in mask */
-		dev_dbg(core->dev, "Detect multiple modes\n");
+		dev_dbg(core->xvip.dev, "Detect multiple modes\n");
 		for (i = 0; i < XSDIRX_MODE_NUM_SUPPORTED; i++) {
 			switch (mask & (1 << i)) {
 			case BIT(XSDIRX_MODE_SD_OFFSET):
@@ -816,7 +811,7 @@ static int xsdirx_set_modedetect(struct xsdirxss_core *core, u16 mask)
 		/* Fixed Mode */
 		u32 forced_mode_mask;
 
-		dev_dbg(core->dev, "Detect fixed mode\n");
+		dev_dbg(core->xvip.dev, "Detect fixed mode\n");
 
 		/* Find offset of first bit set */
 		switch (__ffs(mask)) {
@@ -841,12 +836,12 @@ static int xsdirx_set_modedetect(struct xsdirxss_core *core, u16 mask)
 		default:
 			forced_mode_mask = 0;
 		}
-		dev_dbg(core->dev, "Forced Mode Mask : 0x%x\n",
+		dev_dbg(core->xvip.dev, "Forced Mode Mask : 0x%x\n",
 			forced_mode_mask);
 		val |= forced_mode_mask << XSDIRX_MDL_CTRL_FORCED_MODE_OFFSET;
 	}
 
-	dev_dbg(core->dev, "Modes to be detected : sdi ctrl reg = 0x%08x\n",
+	dev_dbg(core->xvip.dev, "Modes to be detected : sdi ctrl reg = 0x%08x\n",
 		val);
 	xsdirxss_write(core, XSDIRX_MDL_CTRL_REG, val);
 
@@ -1053,14 +1048,14 @@ static void xsdirxss_set_gtclk(struct xsdirxss_state *state)
 
 	ret = clk_set_rate(gtclk, clkrate);
 	if (ret)
-		dev_err(core->dev, "failed to set clk rate = %d\n", ret);
+		dev_err(core->xvip.dev, "failed to set clk rate = %d\n", ret);
 
 	/* reset qpll0 and picxo core */
 	xsdirxss_gt_reset(core);
 
 	clkrate = clk_get_rate(gtclk);
 
-	dev_dbg(core->dev, "clkrate = %lu is_frac = %d\n",
+	dev_dbg(core->xvip.dev, "clkrate = %lu is_frac = %d\n",
 		clkrate, is_frac);
 
 	xsdirx_framer(core, state->framer_enable);
@@ -1098,7 +1093,8 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 	valid = xsdirxss_read(core, XSDIRX_ST352_VALID_REG);
 
 	if (mode >= XSDIRX_MODE_6G_MASK && !valid) {
-		dev_err_ratelimited(core->dev, "No valid ST352 payload present even for 6G mode and above\n");
+		dev_err_ratelimited(core->xvip.dev,
+				    "No valid ST352 payload present even for 6G mode and above\n");
 		return -EINVAL;
 	}
 
@@ -1120,7 +1116,7 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 		bpc = (payload & XST352_BYTE4_BIT_DEPTH_MASK) >>
 			XST352_BYTE4_BIT_DEPTH_OFFSET;
 	} else {
-		dev_dbg(core->dev, "No ST352 payload available : Mode = %d\n",
+		dev_dbg(core->xvip.dev, "No ST352 payload available : Mode = %d\n",
 			mode);
 		framerate = (val & XSDIRX_TS_DET_STAT_RATE_MASK) >>
 				XSDIRX_TS_DET_STAT_RATE_OFFSET;
@@ -1130,7 +1126,7 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 
 	if ((bpc == XST352_BYTE4_BIT_DEPTH_10 && core->bpc != 10) ||
 	    (bpc == XST352_BYTE4_BIT_DEPTH_12 && core->bpc != 12)) {
-		dev_dbg(core->dev, "Bit depth not supported. bpc = %d core->bpc = %d\n",
+		dev_dbg(core->xvip.dev, "Bit depth not supported. bpc = %d core->bpc = %d\n",
 			bpc, core->bpc);
 		return -EINVAL;
 	}
@@ -1139,21 +1135,22 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 			XSDIRX_TS_DET_STAT_FAMILY_OFFSET;
 	state->ts_is_interlaced = tscan ? false : true;
 
-	dev_dbg(core->dev, "ts_is_interlaced = %d, family = %d\n",
+	dev_dbg(core->xvip.dev, "ts_is_interlaced = %d, family = %d\n",
 		state->ts_is_interlaced, family);
 
 	switch (mode) {
 	case XSDIRX_MODE_HD_MASK:
 		if (!valid) {
 			/* No payload obtained */
-			dev_dbg(core->dev, "frame rate : %d, tscan = %d\n",
+			dev_dbg(core->xvip.dev, "frame rate : %d, tscan = %d\n",
 				framerate, tscan);
 			/*
 			 * NOTE : A progressive segmented frame pSF will be
 			 * reported incorrectly as Interlaced as we rely on IP's
 			 * transport scan locked bit.
 			 */
-			dev_warn(core->dev, "pSF will be incorrectly reported as Interlaced\n");
+			dev_warn(core->xvip.dev,
+				 "pSF will be incorrectly reported as Interlaced\n");
 
 			switch (framerate) {
 			case XSDIRX_TS_DET_STAT_RATE_23_98HZ:
@@ -1201,7 +1198,7 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 				format->field = V4L2_FIELD_NONE;
 			}
 		} else {
-			dev_dbg(core->dev, "Got the payload\n");
+			dev_dbg(core->xvip.dev, "Got the payload\n");
 			switch (byte1) {
 			case XST352_BYTE1_ST292_1x720L_1_5G:
 				/* SMPTE ST 292-1 for 720 line payloads */
@@ -1217,7 +1214,7 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 					format->width = 1920;
 				break;
 			default:
-				dev_dbg(core->dev, "Unknown HD Mode SMPTE standard\n");
+				dev_dbg(core->xvip.dev, "Unknown HD Mode SMPTE standard\n");
 				return -EINVAL;
 			}
 		}
@@ -1235,7 +1232,7 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 			format->height = 576;
 			break;
 		default:
-			dev_dbg(core->dev, "Unknown SD Mode SMPTE standard\n");
+			dev_dbg(core->xvip.dev, "Unknown SD Mode SMPTE standard\n");
 			return -EINVAL;
 		}
 		break;
@@ -1245,7 +1242,7 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 
 		if (!valid) {
 			/* No payload obtained */
-			dev_warn(core->dev, "No ST352 valid payload available for 3G modes, source is not 3G compliant\n\r");
+			dev_warn(core->xvip.dev, "No ST352 valid payload available for 3G modes, source is not 3G compliant\n\r");
 			if (is_3GB) {
 				switch (framerate) {
 				case XSDIRX_TS_DET_STAT_RATE_96HZ:
@@ -1291,7 +1288,7 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 				}
 			}
 		} else {
-			dev_dbg(core->dev, "Got the payload\n");
+			dev_dbg(core->xvip.dev, "Got the payload\n");
 			switch (byte1) {
 			case XST352_BYTE1_ST425_2008_750L_3GB:
 				/* Sec 4.1.6.1 SMPTE 425-2008 */
@@ -1313,7 +1310,7 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 					format->width = 1920;
 				break;
 			default:
-				dev_dbg(core->dev, "Unknown 3G Mode SMPTE standard\n");
+				dev_dbg(core->xvip.dev, "Unknown 3G Mode SMPTE standard\n");
 				return -EINVAL;
 			}
 		}
@@ -1338,7 +1335,7 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 				format->width = 1920;
 			break;
 		default:
-			dev_dbg(core->dev, "Unknown 6G Mode SMPTE standard\n");
+			dev_dbg(core->xvip.dev, "Unknown 6G Mode SMPTE standard\n");
 			return -EINVAL;
 		}
 		break;
@@ -1362,12 +1359,12 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 				format->width = 1920;
 			break;
 		default:
-			dev_dbg(core->dev, "Unknown 12G Mode SMPTE standard\n");
+			dev_dbg(core->xvip.dev, "Unknown 12G Mode SMPTE standard\n");
 			return -EINVAL;
 		}
 		break;
 	default:
-		dev_err(core->dev, "Invalid Mode\n");
+		dev_err(core->xvip.dev, "Invalid Mode\n");
 		return -EINVAL;
 	}
 
@@ -1417,7 +1414,8 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 			format->code = MEDIA_BUS_FMT_RBG121212_1X36;
 		break;
 	default:
-		dev_err(core->dev, "Unsupported color format : %d\n", sampling);
+		dev_err(core->xvip.dev, "Unsupported color format : %d\n",
+			sampling);
 		return -EINVAL;
 	}
 
@@ -1518,12 +1516,12 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 	if (valid & XSDIRX_ST352_VALID_DS1_MASK)
 		state->prev_payload = payload;
 
-	dev_dbg(core->dev, "Stream width = %d height = %d Field = %d payload = 0x%08x ts = 0x%08x\n",
+	dev_dbg(core->xvip.dev, "Stream width = %d height = %d Field = %d payload = 0x%08x ts = 0x%08x\n",
 		format->width, format->height, format->field, payload, val);
-	dev_dbg(core->dev, "frame rate numerator = %d denominator = %d\n",
+	dev_dbg(core->xvip.dev, "frame rate numerator = %d denominator = %d\n",
 		state->frame_interval.numerator,
 		state->frame_interval.denominator);
-	dev_dbg(core->dev, "Stream code = 0x%x\n", format->code);
+	dev_dbg(core->xvip.dev, "Stream code = 0x%x\n", format->code);
 	return 0;
 }
 
@@ -1543,7 +1541,7 @@ static irqreturn_t xsdirxss_irq_handler(int irq, void *dev_id)
 	u32 status;
 
 	status = xsdirxss_read(core, XSDIRX_ISR_REG);
-	dev_dbg(core->dev, "interrupt status = 0x%08x\n", status);
+	dev_dbg(core->xvip.dev, "interrupt status = 0x%08x\n", status);
 
 	if (!status)
 		return IRQ_NONE;
@@ -1555,7 +1553,7 @@ static irqreturn_t xsdirxss_irq_handler(int irq, void *dev_id)
 		u32 val1, val2;
 		bool gen_event = true;
 
-		dev_dbg(core->dev, "video lock/unlock interrupt\n");
+		dev_dbg(core->xvip.dev, "video lock/unlock interrupt\n");
 
 		xsdirx_streamflow_control(core, false);
 		state->streaming = false;
@@ -1570,7 +1568,7 @@ static irqreturn_t xsdirxss_irq_handler(int irq, void *dev_id)
 
 			u32 prev_payload = state->prev_payload;
 
-			dev_dbg(core->dev, "video lock interrupt\n");
+			dev_dbg(core->xvip.dev, "video lock interrupt\n");
 
 			xsdirxss_set(core, XSDIRX_RST_CTRL_REG, mask);
 			xsdirxss_clr(core, XSDIRX_RST_CTRL_REG, mask);
@@ -1578,8 +1576,8 @@ static irqreturn_t xsdirxss_irq_handler(int irq, void *dev_id)
 			val1 = xsdirxss_read(core, XSDIRX_ST352_VALID_REG);
 			val2 = xsdirxss_read(core, XSDIRX_ST352_DS1_REG);
 
-			dev_dbg(core->dev, "valid st352 mask = 0x%08x\n", val1);
-			dev_dbg(core->dev, "st352 payload = 0x%08x\n", val2);
+			dev_dbg(core->xvip.dev, "valid st352 mask = 0x%08x\n", val1);
+			dev_dbg(core->xvip.dev, "st352 payload = 0x%08x\n", val2);
 
 			if (state->vidlocked) {
 				gen_event = false;
@@ -1598,17 +1596,18 @@ static irqreturn_t xsdirxss_irq_handler(int irq, void *dev_id)
 				 * correct way but a workaround
 				 */
 				if (val2 == prev_payload && state->s_stream) {
-					dev_dbg(core->dev, "Resuming as payload is same\n");
+					dev_dbg(core->xvip.dev, "Resuming as payload is same\n");
 					xsdirx_streamflow_control(core, true);
 					state->streaming = true;
 				}
 			} else {
-				dev_err_ratelimited(core->dev, "Unable to get stream properties!\n");
+				dev_err_ratelimited(core->xvip.dev,
+						    "Unable to get stream properties!\n");
 				state->vidlocked = false;
 			}
 
 		} else {
-			dev_dbg(core->dev, "video unlock interrupt\n");
+			dev_dbg(core->xvip.dev, "video unlock interrupt\n");
 			state->vidlocked = false;
 		}
 		if (gen_event) {
@@ -1616,24 +1615,26 @@ static irqreturn_t xsdirxss_irq_handler(int irq, void *dev_id)
 			state->event.type = V4L2_EVENT_SOURCE_CHANGE;
 			state->event.u.src_change.changes =
 				V4L2_EVENT_SRC_CH_RESOLUTION;
-			v4l2_subdev_notify_event(&state->subdev, &state->event);
+			v4l2_subdev_notify_event(&core->xvip.subdev, &state->event);
 		}
 	}
 
 	if (status & XSDIRX_INTR_UNDERFLOW_MASK) {
-		dev_dbg(core->dev, "Video in to AXI4 Stream core underflow interrupt\n");
+		dev_dbg(core->xvip.dev,
+			"Video in to AXI4 Stream core underflow interrupt\n");
 
 		memset(&state->event, 0, sizeof(state->event));
 		state->event.type = V4L2_EVENT_XLNXSDIRX_UNDERFLOW;
-		v4l2_subdev_notify_event(&state->subdev, &state->event);
+		v4l2_subdev_notify_event(&core->xvip.subdev, &state->event);
 	}
 
 	if (status & XSDIRX_INTR_OVERFLOW_MASK) {
-		dev_dbg(core->dev, "Video in to AXI4 Stream core overflow interrupt\n");
+		dev_dbg(core->xvip.dev,
+			"Video in to AXI4 Stream core overflow interrupt\n");
 
 		memset(&state->event, 0, sizeof(state->event));
 		state->event.type = V4L2_EVENT_XLNXSDIRX_OVERFLOW;
-		v4l2_subdev_notify_event(&state->subdev, &state->event);
+		v4l2_subdev_notify_event(&core->xvip.subdev, &state->event);
 	}
 
 	if (status & XSDIRX_INTR_VSYNC_MASK) {
@@ -1670,7 +1671,7 @@ static irqreturn_t xsdirxss_irq_handler(int irq, void *dev_id)
 		state->event.type = V4L2_EVENT_SOURCE_CHANGE;
 		state->event.u.src_change.changes =
 			V4L2_EVENT_SRC_CH_RESOLUTION;
-		v4l2_subdev_notify_event(&state->subdev, &state->event);
+		v4l2_subdev_notify_event(&core->xvip.subdev, &state->event);
 	}
 
 	return IRQ_HANDLED;
@@ -1703,7 +1704,7 @@ static int xsdirxss_subscribe_event(struct v4l2_subdev *sd,
 	default:
 		return -EINVAL;
 	}
-	dev_dbg(core->dev, "Event subscribed : 0x%08x\n", sub->type);
+	dev_dbg(core->xvip.dev, "Event subscribed : 0x%08x\n", sub->type);
 	return ret;
 }
 
@@ -1722,7 +1723,7 @@ static int xsdirxss_unsubscribe_event(struct v4l2_subdev *sd,
 	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
 	struct xsdirxss_core *core = &xsdirxss->core;
 
-	dev_dbg(core->dev, "Event unsubscribe : 0x%08x\n", sub->type);
+	dev_dbg(core->xvip.dev, "Event unsubscribe : 0x%08x\n", sub->type);
 	return v4l2_event_unsubscribe(fh, sub);
 }
 
@@ -1743,11 +1744,11 @@ static int xsdirxss_s_ctrl(struct v4l2_ctrl *ctrl)
 			     struct xsdirxss_state, ctrl_handler);
 	struct xsdirxss_core *core = &xsdirxss->core;
 
-	dev_dbg(core->dev, "set ctrl id = 0x%08x val = 0x%08x\n",
+	dev_dbg(core->xvip.dev, "set ctrl id = 0x%08x val = 0x%08x\n",
 		ctrl->id, ctrl->val);
 
 	if (xsdirxss->streaming) {
-		dev_err(core->dev, "Cannot set controls while streaming\n");
+		dev_err(core->xvip.dev, "Cannot set controls while streaming\n");
 		return -EINVAL;
 	}
 
@@ -1768,14 +1769,14 @@ static int xsdirxss_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_XILINX_SDIRX_SEARCH_MODES:
 		if (ctrl->val) {
 			if (core->mode == XSDIRXSS_SDI_STD_3G) {
-				dev_dbg(core->dev, "Upto 3G supported\n");
+				dev_dbg(core->xvip.dev, "Upto 3G supported\n");
 				ctrl->val &= ~(BIT(XSDIRX_MODE_6G_OFFSET) |
 					       BIT(XSDIRX_MODE_12GI_OFFSET) |
 					       BIT(XSDIRX_MODE_12GF_OFFSET));
 			}
 
 			if (core->mode == XSDIRXSS_SDI_STD_6G) {
-				dev_dbg(core->dev, "Upto 6G supported\n");
+				dev_dbg(core->xvip.dev, "Upto 6G supported\n");
 				ctrl->val &= ~(BIT(XSDIRX_MODE_12GI_OFFSET) |
 					       BIT(XSDIRX_MODE_12GF_OFFSET));
 			}
@@ -1784,7 +1785,7 @@ static int xsdirxss_s_ctrl(struct v4l2_ctrl *ctrl)
 			if (!ret)
 				xsdirxss->searchmask = ctrl->val;
 		} else {
-			dev_err(core->dev, "Select at least one mode!\n");
+			dev_err(core->xvip.dev, "Select at least one mode!\n");
 			return -EINVAL;
 		}
 		break;
@@ -1815,7 +1816,7 @@ static int xsdirxss_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 	switch (ctrl->id) {
 	case V4L2_CID_XILINX_SDIRX_MODE_DETECT:
 		if (!xsdirxss->vidlocked) {
-			dev_err(core->dev, "Can't get values when video not locked!\n");
+			dev_err(core->xvip.dev, "Can't get values when video not locked!\n");
 			return -EINVAL;
 		}
 		val = xsdirxss_read(core, XSDIRX_MODE_DET_STAT_REG);
@@ -1852,7 +1853,7 @@ static int xsdirxss_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 		if (val == XSDIRX_MODE_SD_MASK) {
 			ctrl->val = xsdirxss_read(core, XSDIRX_EDH_ERRCNT_REG);
 		} else {
-			dev_dbg(core->dev, "%d - not in SD mode\n", ctrl->id);
+			dev_dbg(core->xvip.dev, "%d - not in SD mode\n", ctrl->id);
 			return -EINVAL;
 		}
 		break;
@@ -1862,20 +1863,20 @@ static int xsdirxss_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 		if (val == XSDIRX_MODE_SD_MASK) {
 			ctrl->val = xsdirxss_read(core, XSDIRX_EDH_STAT_REG);
 		} else {
-			dev_dbg(core->dev, "%d - not in SD mode\n", ctrl->id);
+			dev_dbg(core->xvip.dev, "%d - not in SD mode\n", ctrl->id);
 			return -EINVAL;
 		}
 		break;
 	case V4L2_CID_XILINX_SDIRX_TS_IS_INTERLACED:
 		if (!xsdirxss->vidlocked) {
-			dev_err(core->dev, "Can't get values when video not locked!\n");
+			dev_err(core->xvip.dev, "Can't get values when video not locked!\n");
 			return -EINVAL;
 		}
 		ctrl->val = xsdirxss->ts_is_interlaced;
 		break;
 	case V4L2_CID_XILINX_SDIRX_ACTIVE_STREAMS:
 		if (!xsdirxss->vidlocked) {
-			dev_err(core->dev, "Can't get values when video not locked!\n");
+			dev_err(core->xvip.dev, "Can't get values when video not locked!\n");
 			return -EINVAL;
 		}
 		val = xsdirxss_read(core, XSDIRX_MODE_DET_STAT_REG);
@@ -1885,7 +1886,7 @@ static int xsdirxss_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_XILINX_SDIRX_IS_3GB:
 		if (!xsdirxss->vidlocked) {
-			dev_err(core->dev, "Can't get values when video not locked!\n");
+			dev_err(core->xvip.dev, "Can't get values when video not locked!\n");
 			return -EINVAL;
 		}
 		val = xsdirxss_read(core, XSDIRX_MODE_DET_STAT_REG);
@@ -1894,7 +1895,7 @@ static int xsdirxss_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_METADATA_HDR:
 		if (!xsdirxss->vidlocked) {
-			dev_err(core->dev, "Can't get values when video not locked!\n");
+			dev_err(core->xvip.dev, "Can't get values when video not locked!\n");
 			return -EINVAL;
 		}
 		hdr_ptr = (struct v4l2_metadata_hdr *)ctrl->p_new.p;
@@ -1904,10 +1905,10 @@ static int xsdirxss_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 		       hdr_ptr->size);
 		break;
 	default:
-		dev_err(core->dev, "Get Invalid control id 0x%0x\n", ctrl->id);
+		dev_err(core->xvip.dev, "Get Invalid control id 0x%0x\n", ctrl->id);
 		return -EINVAL;
 	}
-	dev_dbg(core->dev, "Get ctrl id = 0x%08x val = 0x%08x\n",
+	dev_dbg(core->xvip.dev, "Get ctrl id = 0x%08x val = 0x%08x\n",
 		ctrl->id, ctrl->val);
 	return 0;
 }
@@ -1957,13 +1958,13 @@ static int xsdirxss_g_frame_interval(struct v4l2_subdev *sd,
 	struct xsdirxss_core *core = &xsdirxss->core;
 
 	if (!xsdirxss->vidlocked) {
-		dev_err(core->dev, "Video not locked!\n");
+		dev_err(core->xvip.dev, "Video not locked!\n");
 		return -EINVAL;
 	}
 
 	fi->interval = xsdirxss->frame_interval;
 
-	dev_dbg(core->dev, "frame rate numerator = %d denominator = %d\n",
+	dev_dbg(core->xvip.dev, "frame rate numerator = %d denominator = %d\n",
 		xsdirxss->frame_interval.numerator,
 		xsdirxss->frame_interval.denominator);
 	return 0;
@@ -1986,28 +1987,28 @@ static int xsdirxss_s_stream(struct v4l2_subdev *sd, int enable)
 
 	if (enable) {
 		if (!xsdirxss->vidlocked) {
-			dev_dbg(core->dev, "Video is not locked\n");
+			dev_dbg(core->xvip.dev, "Video is not locked\n");
 			return -EINVAL;
 		}
 		if (xsdirxss->streaming) {
-			dev_dbg(core->dev, "Already streaming\n");
+			dev_dbg(core->xvip.dev, "Already streaming\n");
 			return -EINVAL;
 		}
 
 		xsdirx_streamflow_control(core, true);
 		xsdirxss->streaming = true;
 		xsdirxss->s_stream = true;
-		dev_dbg(core->dev, "Streaming started\n");
+		dev_dbg(core->xvip.dev, "Streaming started\n");
 	} else {
 		xsdirxss->s_stream = false;
 		if (!xsdirxss->streaming) {
-			dev_dbg(core->dev, "Stopped streaming already\n");
+			dev_dbg(core->xvip.dev, "Stopped streaming already\n");
 			return 0;
 		}
 
 		xsdirx_streamflow_control(core, false);
 		xsdirxss->streaming = false;
-		dev_dbg(core->dev, "Streaming stopped\n");
+		dev_dbg(core->xvip.dev, "Streaming stopped\n");
 	}
 
 	return 0;
@@ -2046,7 +2047,7 @@ __xsdirxss_get_pad_format(struct xsdirxss_state *xsdirxss,
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xsdirxss->subdev,
+		format = v4l2_subdev_get_try_format(&xsdirxss->core.xvip.subdev,
 						    sd_state,
 						    pad);
 		break;
@@ -2080,7 +2081,7 @@ static int xsdirxss_get_format(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *format;
 
 	if (!xsdirxss->vidlocked) {
-		dev_err(core->dev, "Video not locked!\n");
+		dev_err(core->xvip.dev, "Video not locked!\n");
 		return -EINVAL;
 	}
 
@@ -2091,7 +2092,7 @@ static int xsdirxss_get_format(struct v4l2_subdev *sd,
 
 	fmt->format = *format;
 
-	dev_dbg(core->dev, "Stream width = %d height = %d Field = %d\n",
+	dev_dbg(core->xvip.dev, "Stream width = %d height = %d Field = %d\n",
 		fmt->format.width, fmt->format.height, fmt->format.field);
 
 	return 0;
@@ -2116,7 +2117,7 @@ static int xsdirxss_set_format(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *__format;
 	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
 
-	dev_dbg(xsdirxss->core.dev,
+	dev_dbg(xsdirxss->core.xvip.dev,
 		"set width %d height %d code %d field %d colorspace %d\n",
 		fmt->format.width, fmt->format.height,
 		fmt->format.code, fmt->format.field,
@@ -2419,21 +2420,19 @@ static const struct v4l2_subdev_internal_ops xsdirxss_internal_ops = {
 
 static int xsdirxss_parse_of(struct xsdirxss_state *xsdirxss)
 {
-	struct device_node *node = xsdirxss->core.dev->of_node;
-	struct device_node *ports = NULL;
-	struct device_node *port = NULL;
-	unsigned int nports = 0;
 	struct xsdirxss_core *core = &xsdirxss->core;
+	struct device_node *node = core->xvip.dev->of_node;
+	const struct xvip_video_format *format;
 	int ret;
 	const char *sdi_std;
 
 	core->include_edh = of_property_read_bool(node, "xlnx,include-edh");
-	dev_dbg(core->dev, "EDH property = %s\n",
+	dev_dbg(core->xvip.dev, "EDH property = %s\n",
 		core->include_edh ? "Present" : "Absent");
 
 	ret = of_property_read_string(node, "xlnx,line-rate", &sdi_std);
 	if (ret < 0) {
-		dev_err(core->dev, "xlnx,line-rate property not found\n");
+		dev_err(core->xvip.dev, "xlnx,line-rate property not found\n");
 		return ret;
 	}
 
@@ -2444,16 +2443,16 @@ static int xsdirxss_parse_of(struct xsdirxss_state *xsdirxss)
 	} else if (!strncmp(sdi_std, "3G_SDI", XSDIRX_MAX_STR_LENGTH)) {
 		core->mode = XSDIRXSS_SDI_STD_3G;
 	} else {
-		dev_err(core->dev, "Invalid Line Rate\n");
+		dev_err(core->xvip.dev, "Invalid Line Rate\n");
 		return -EINVAL;
 	}
-	dev_dbg(core->dev, "SDI Rx Line Rate = %s, mode = %d\n", sdi_std,
+	dev_dbg(core->xvip.dev, "SDI Rx Line Rate = %s, mode = %d\n", sdi_std,
 		core->mode);
 
 	ret = of_property_read_u32(node, "xlnx,bpp", &core->bpc);
 	if (ret < 0) {
 		if (ret != -EINVAL) {
-			dev_err(core->dev, "failed to get xlnx,bpp\n");
+			dev_err(core->xvip.dev, "failed to get xlnx,bpp\n");
 			return ret;
 		}
 
@@ -2465,65 +2464,31 @@ static int xsdirxss_parse_of(struct xsdirxss_state *xsdirxss)
 	}
 
 	if (core->bpc != 10 && core->bpc != 12) {
-		dev_err(core->dev, "bits per component=%u. Can be 10 or 12 only\n",
+		dev_err(core->xvip.dev, "bits per component=%u. Can be 10 or 12 only\n",
 			core->bpc);
 		return -EINVAL;
 	}
 
-	ports = of_get_child_by_name(node, "ports");
-	if (!ports)
-		ports = node;
+	format = core->xvip.ports[0].format;
 
-	for_each_child_of_node(ports, port) {
-		const struct xvip_video_format *format;
-		struct device_node *endpoint;
-
-		if (!port->name || of_node_cmp(port->name, "port"))
-			continue;
-
-		format = xvip_of_get_format(port);
-		if (IS_ERR(format)) {
-			dev_err(core->dev, "invalid format in DT");
-			return PTR_ERR(format);
-		}
-
-		dev_dbg(core->dev, "vf_code = %d bpc = %d bpp = %d\n",
-			format->vf_code, format->width, format->bpp);
-
-		if (format->vf_code != XVIP_VF_YUV_422 &&
-		    format->vf_code != XVIP_VF_YUV_420 &&
-		    format->vf_code != XVIP_VF_YUV_444 &&
-		    format->vf_code != XVIP_VF_RBG &&
-		    ((core->bpc == 10 && format->width != 10) ||
-		     (core->bpc == 12 && format->width != 12))) {
-			dev_err(core->dev,
-				"Incorrect UG934 video format set.\n");
-			return -EINVAL;
-		}
-		xsdirxss->vip_format = format;
-
-		endpoint = of_get_next_child(port, NULL);
-		if (!endpoint) {
-			dev_err(core->dev, "No port at\n");
-			return -EINVAL;
-		}
-
-		/* Count the number of ports. */
-		nports++;
-	}
-
-	if (nports != 1) {
-		dev_err(core->dev, "invalid number of ports %u\n", nports);
+	if (format->vf_code != XVIP_VF_YUV_422 &&
+	    format->vf_code != XVIP_VF_YUV_420 &&
+	    format->vf_code != XVIP_VF_YUV_444 &&
+	    format->vf_code != XVIP_VF_RBG &&
+	    ((core->bpc == 10 && format->width != 10) ||
+	     (core->bpc == 12 && format->width != 12))) {
+		dev_err(core->xvip.dev,
+			"Incorrect UG934 video format set.\n");
 		return -EINVAL;
 	}
 
 	/* Register interrupt handler */
 	core->irq = irq_of_parse_and_map(node, 0);
-	ret = devm_request_threaded_irq(core->dev, core->irq, NULL,
+	ret = devm_request_threaded_irq(core->xvip.dev, core->irq, NULL,
 					xsdirxss_irq_handler, IRQF_ONESHOT,
 					"xilinx-sdirxss", xsdirxss);
 	if (ret) {
-		dev_err(core->dev, "Err = %d Interrupt handler reg failed!\n",
+		dev_err(core->xvip.dev, "Err = %d Interrupt handler reg failed!\n",
 			ret);
 		return ret;
 	}
@@ -2531,12 +2496,18 @@ static int xsdirxss_parse_of(struct xsdirxss_state *xsdirxss)
 	return 0;
 }
 
+static const struct xvip_device_info xsdirxss_info = {
+	.has_axi_lite = true,
+	.has_port_formats = true,
+	.num_sinks = 0,
+	.num_sources = 1,
+};
+
 static int xsdirxss_probe(struct platform_device *pdev)
 {
 	struct v4l2_subdev *subdev;
 	struct xsdirxss_state *xsdirxss;
 	struct xsdirxss_core *core;
-	struct resource *res;
 	int ret;
 	unsigned int num_ctrls, num_edh_ctrls = 0, i;
 
@@ -2544,8 +2515,12 @@ static int xsdirxss_probe(struct platform_device *pdev)
 	if (!xsdirxss)
 		return -ENOMEM;
 
-	xsdirxss->core.dev = &pdev->dev;
 	core = &xsdirxss->core;
+	core->xvip.dev = &pdev->dev;
+
+	ret = xvip_device_init(&core->xvip, &xsdirxss_info);
+	if (ret < 0)
+		return ret;
 
 	core->rst_gt_gpio = devm_gpiod_get_optional(&pdev->dev, "reset_gt",
 						    GPIOD_OUT_HIGH);
@@ -2587,13 +2562,6 @@ static int xsdirxss_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto clk_err;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	xsdirxss->core.iomem = devm_ioremap_resource(xsdirxss->core.dev, res);
-	if (IS_ERR(xsdirxss->core.iomem)) {
-		ret = PTR_ERR(xsdirxss->core.iomem);
-		goto clk_err;
-	}
-
 	/* Reset the core */
 	xsdirx_streamflow_control(core, false);
 	xsdirx_core_disable(core);
@@ -2603,11 +2571,8 @@ static int xsdirxss_probe(struct platform_device *pdev)
 	xsdirx_globalintr(core, true);
 	xsdirxss_write(core, XSDIRX_CRC_ERRCNT_REG, 0xFFFF);
 
-	/* Initialize V4L2 subdevice and media entity */
-	xsdirxss->pad.flags = MEDIA_PAD_FL_SOURCE;
-
 	/* Initialize the default format */
-	xsdirxss->default_format.code = xsdirxss->vip_format->code;
+	xsdirxss->default_format.code = core->xvip.ports[0].format->code;
 	xsdirxss->default_format.field = V4L2_FIELD_NONE;
 	xsdirxss->default_format.colorspace = V4L2_COLORSPACE_DEFAULT;
 	xsdirxss->default_format.width = XSDIRX_DEFAULT_WIDTH;
@@ -2616,7 +2581,7 @@ static int xsdirxss_probe(struct platform_device *pdev)
 	xsdirxss->format = xsdirxss->default_format;
 
 	/* Initialize V4L2 subdevice and media entity */
-	subdev = &xsdirxss->subdev;
+	subdev = &core->xvip.subdev;
 	v4l2_subdev_init(subdev, &xsdirxss_ops);
 
 	subdev->dev = &pdev->dev;
@@ -2629,14 +2594,14 @@ static int xsdirxss_probe(struct platform_device *pdev)
 
 	v4l2_set_subdevdata(subdev, xsdirxss);
 
-	ret = media_entity_pads_init(&subdev->entity, 1, &xsdirxss->pad);
+	ret = media_entity_pads_init(&subdev->entity, 1, core->xvip.pads);
 	if (ret < 0)
 		goto error;
 
 	/* Initialise and register the controls */
 	num_ctrls = ARRAY_SIZE(xsdirxss_ctrls);
 
-	if (xsdirxss->core.include_edh)
+	if (core->include_edh)
 		num_edh_ctrls = ARRAY_SIZE(xsdirxss_edh_ctrls);
 
 	v4l2_ctrl_handler_init(&xsdirxss->ctrl_handler,
@@ -2645,23 +2610,23 @@ static int xsdirxss_probe(struct platform_device *pdev)
 	for (i = 0; i < num_ctrls; i++) {
 		struct v4l2_ctrl *ctrl;
 
-		dev_dbg(xsdirxss->core.dev, "%d %s ctrl = 0x%x\n",
+		dev_dbg(core->xvip.dev, "%d %s ctrl = 0x%x\n",
 			i, xsdirxss_ctrls[i].name, xsdirxss_ctrls[i].id);
 
 		ctrl = v4l2_ctrl_new_custom(&xsdirxss->ctrl_handler,
 					    &xsdirxss_ctrls[i], NULL);
 		if (!ctrl) {
-			dev_dbg(xsdirxss->core.dev, "Failed to add %s ctrl\n",
+			dev_dbg(core->xvip.dev, "Failed to add %s ctrl\n",
 				xsdirxss_ctrls[i].name);
 			goto error;
 		}
 	}
 
-	if (xsdirxss->core.include_edh) {
+	if (core->include_edh) {
 		for (i = 0; i < num_edh_ctrls; i++) {
 			struct v4l2_ctrl *ctrl;
 
-			dev_dbg(xsdirxss->core.dev, "%d %s ctrl = 0x%x\n",
+			dev_dbg(core->xvip.dev, "%d %s ctrl = 0x%x\n",
 				i, xsdirxss_edh_ctrls[i].name,
 				xsdirxss_edh_ctrls[i].id);
 
@@ -2669,7 +2634,7 @@ static int xsdirxss_probe(struct platform_device *pdev)
 						    &xsdirxss_edh_ctrls[i],
 						    NULL);
 			if (!ctrl) {
-				dev_dbg(xsdirxss->core.dev, "Failed to add %s ctrl\n",
+				dev_dbg(core->xvip.dev, "Failed to add %s ctrl\n",
 					xsdirxss_edh_ctrls[i].name);
 				goto error;
 			}
@@ -2703,7 +2668,7 @@ static int xsdirxss_probe(struct platform_device *pdev)
 
 	xsdirx_core_enable(core);
 
-	dev_info(xsdirxss->core.dev, "Xilinx SDI Rx Subsystem device found!\n");
+	dev_info(core->xvip.dev, "Xilinx SDI Rx Subsystem device found!\n");
 
 	return 0;
 error:
@@ -2720,7 +2685,7 @@ static int xsdirxss_remove(struct platform_device *pdev)
 {
 	struct xsdirxss_state *xsdirxss = platform_get_drvdata(pdev);
 	struct xsdirxss_core *core = &xsdirxss->core;
-	struct v4l2_subdev *subdev = &xsdirxss->subdev;
+	struct v4l2_subdev *subdev = &core->xvip.subdev;
 
 	v4l2_async_unregister_subdev(subdev);
 	v4l2_ctrl_handler_free(&xsdirxss->ctrl_handler);

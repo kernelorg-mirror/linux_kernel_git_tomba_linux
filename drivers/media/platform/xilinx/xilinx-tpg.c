@@ -1087,6 +1087,10 @@ static int xtpg_parse_of(struct xtpg_device *xtpg)
 	return 0;
 }
 
+static const struct xvip_device_info xtpg_info = {
+	.has_axi_lite = true,
+};
+
 static int xtpg_probe(struct platform_device *pdev)
 {
 	struct v4l2_subdev *subdev;
@@ -1105,7 +1109,7 @@ static int xtpg_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_device_init(&xtpg->xvip);
+	ret = xvip_device_init(&xtpg->xvip, &xtpg_info);
 	if (ret < 0)
 		return ret;
 

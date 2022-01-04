@@ -334,6 +334,10 @@ static int xvtc_parse_of(struct xvtc_device *xvtc)
 	return 0;
 }
 
+static const struct xvip_device_info xvtc_info = {
+	.has_axi_lite = true,
+};
+
 static int xvtc_probe(struct platform_device *pdev)
 {
 	struct xvtc_device *xvtc;
@@ -349,7 +353,7 @@ static int xvtc_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_device_init(&xvtc->xvip);
+	ret = xvip_device_init(&xvtc->xvip, &xvtc_info);
 	if (ret < 0)
 		return ret;
 

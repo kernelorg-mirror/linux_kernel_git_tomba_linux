@@ -330,6 +330,10 @@ static int xcresample_parse_of(struct xcresample_device *xcresample)
 	return 0;
 }
 
+static const struct xvip_device_info xcresample_info = {
+	.has_axi_lite = true,
+};
+
 static int xcresample_probe(struct platform_device *pdev)
 {
 	struct xcresample_device *xcresample;
@@ -347,7 +351,7 @@ static int xcresample_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_device_init(&xcresample->xvip);
+	ret = xvip_device_init(&xcresample->xvip, &xcresample_info);
 	if (ret < 0)
 		return ret;
 

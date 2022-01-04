@@ -443,6 +443,10 @@ static int xg_parse_of(struct xgamma_dev *xg)
 	return 0;
 }
 
+static const struct xvip_device_info xg_info = {
+	.has_axi_lite = true,
+};
+
 static int xg_probe(struct platform_device *pdev)
 {
 	struct xgamma_dev *xg;
@@ -458,7 +462,7 @@ static int xg_probe(struct platform_device *pdev)
 	rval = xg_parse_of(xg);
 	if (rval < 0)
 		return rval;
-	rval = xvip_device_init(&xg->xvip);
+	rval = xvip_device_init(&xg->xvip, &xg_info);
 	if (rval)
 		return -EIO;
 

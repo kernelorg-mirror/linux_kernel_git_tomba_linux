@@ -362,6 +362,10 @@ static int xsw_parse_of(struct xswitch_device *xsw)
 	return 0;
 }
 
+static const struct xvip_device_info xsw_info = {
+	.has_axi_lite = true,
+};
+
 static int xsw_probe(struct platform_device *pdev)
 {
 	struct v4l2_subdev *subdev;
@@ -380,7 +384,7 @@ static int xsw_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_device_init(&xsw->xvip);
+	ret = xvip_device_init(&xsw->xvip, &xsw_info);
 	if (ret < 0)
 		return ret;
 

@@ -451,6 +451,10 @@ static int xrgb2yuv_parse_of(struct xrgb2yuv_device *xrgb2yuv)
 	return 0;
 }
 
+static const struct xvip_device_info xrgb2yuv_info = {
+	.has_axi_lite = true,
+};
+
 static int xrgb2yuv_probe(struct platform_device *pdev)
 {
 	struct xrgb2yuv_device *xrgb2yuv;
@@ -469,7 +473,7 @@ static int xrgb2yuv_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_device_init(&xrgb2yuv->xvip);
+	ret = xvip_device_init(&xrgb2yuv->xvip, &xrgb2yuv_info);
 	if (ret < 0)
 		return ret;
 

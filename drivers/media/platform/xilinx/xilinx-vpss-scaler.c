@@ -1974,6 +1974,10 @@ static int xscaler_parse_of(struct xscaler_device *xscaler)
 	return 0;
 }
 
+static const struct xvip_device_info xscaler_info = {
+	.has_axi_lite = true,
+};
+
 static int xscaler_probe(struct platform_device *pdev)
 {
 	struct xscaler_device *xscaler;
@@ -2030,7 +2034,7 @@ static int xscaler_probe(struct platform_device *pdev)
 			goto axis_clk_cleanup;
 		}
 	} else {
-		ret = xvip_device_init(&xscaler->xvip);
+		ret = xvip_device_init(&xscaler->xvip, &xscaler_info);
 		if (ret < 0)
 			return ret;
 	}

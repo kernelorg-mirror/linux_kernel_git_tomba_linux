@@ -46,20 +46,15 @@
 /**
  * struct xrgb2yuv_device - Xilinx RGB2YUV device structure
  * @xvip: Xilinx Video IP device
- * @pads: media pads
  * @formats: V4L2 media bus formats at the sink and source pads
  * @default_formats: default V4L2 media bus formats
- * @vip_formats: Xilinx Video IP formats
  * @ctrl_handler: control handler
  */
 struct xrgb2yuv_device {
 	struct xvip_device xvip;
 
-	struct media_pad pads[2];
-
 	struct v4l2_mbus_framefmt formats[2];
 	struct v4l2_mbus_framefmt default_formats[2];
-	const struct xvip_video_format *vip_formats[2];
 
 	struct v4l2_ctrl_handler ctrl_handler;
 };
@@ -409,50 +404,11 @@ static int __maybe_unused xrgb2yuv_pm_resume(struct device *dev)
  * Platform Device Driver
  */
 
-static int xrgb2yuv_parse_of(struct xrgb2yuv_device *xrgb2yuv)
-{
-	struct device *dev = xrgb2yuv->xvip.dev;
-	struct device_node *node = xrgb2yuv->xvip.dev->of_node;
-	struct device_node *ports;
-	struct device_node *port;
-	u32 port_id;
-	int ret;
-
-	ports = of_get_child_by_name(node, "ports");
-	if (ports == NULL)
-		ports = node;
-
-	/* Get the format description for each pad */
-	for_each_child_of_node(ports, port) {
-		if (port->name && (of_node_cmp(port->name, "port") == 0)) {
-			const struct xvip_video_format *vip_format;
-
-			vip_format = xvip_of_get_format(port);
-			if (IS_ERR(vip_format)) {
-				dev_err(dev, "invalid format in DT");
-				return PTR_ERR(vip_format);
-			}
-
-			ret = of_property_read_u32(port, "reg", &port_id);
-			if (ret < 0) {
-				dev_err(dev, "no reg in DT");
-				return ret;
-			}
-
-			if (port_id != 0 && port_id != 1) {
-				dev_err(dev, "invalid reg in DT");
-				return -EINVAL;
-			}
-
-			xrgb2yuv->vip_formats[port_id] = vip_format;
-		}
-	}
-
-	return 0;
-}
-
 static const struct xvip_device_info xrgb2yuv_info = {
 	.has_axi_lite = true,
+	.has_port_formats = true,
+	.num_sinks = 1,
+	.num_sources = 1,
 };
 
 static int xrgb2yuv_probe(struct platform_device *pdev)
@@ -468,10 +424,6 @@ static int xrgb2yuv_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	xrgb2yuv->xvip.dev = &pdev->dev;
-
-	ret = xrgb2yuv_parse_of(xrgb2yuv);
-	if (ret < 0)
-		return ret;
 
 	ret = xvip_device_init(&xrgb2yuv->xvip, &xrgb2yuv_info);
 	if (ret < 0)
@@ -491,7 +443,7 @@ static int xrgb2yuv_probe(struct platform_device *pdev)
 
 	/* Initialize default and active formats */
 	default_format = &xrgb2yuv->default_formats[XVIP_PAD_SINK];
-	default_format->code = xrgb2yuv->vip_formats[XVIP_PAD_SINK]->code;
+	default_format->code = xrgb2yuv->xvip.ports[XVIP_PAD_SINK].format->code;
 	default_format->field = V4L2_FIELD_NONE;
 	default_format->colorspace = V4L2_COLORSPACE_SRGB;
 	xvip_get_frame_size(&xrgb2yuv->xvip, default_format);
@@ -500,14 +452,12 @@ static int xrgb2yuv_probe(struct platform_device *pdev)
 
 	default_format = &xrgb2yuv->default_formats[XVIP_PAD_SOURCE];
 	*default_format = xrgb2yuv->default_formats[XVIP_PAD_SINK];
-	default_format->code = xrgb2yuv->vip_formats[XVIP_PAD_SOURCE]->code;
+	default_format->code = xrgb2yuv->xvip.ports[XVIP_PAD_SOURCE].format->code;
 
 	xrgb2yuv->formats[XVIP_PAD_SOURCE] = *default_format;
 
-	xrgb2yuv->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	xrgb2yuv->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 	subdev->entity.ops = &xrgb2yuv_media_ops;
-	ret = media_entity_pads_init(&subdev->entity, 2, xrgb2yuv->pads);
+	ret = media_entity_pads_init(&subdev->entity, 2, xrgb2yuv->xvip.pads);
 	if (ret < 0)
 		goto error;
 

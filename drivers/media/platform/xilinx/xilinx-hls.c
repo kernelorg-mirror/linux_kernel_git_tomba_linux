@@ -415,7 +415,7 @@ static int xhls_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_init_resources(&xhls->xvip);
+	ret = xvip_device_init(&xhls->xvip);
 	if (ret < 0)
 		return ret;
 
@@ -465,7 +465,7 @@ static int xhls_probe(struct platform_device *pdev)
 error:
 	v4l2_ctrl_handler_free(&xhls->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
-	xvip_cleanup_resources(&xhls->xvip);
+	xvip_device_cleanup(&xhls->xvip);
 	return ret;
 }
 
@@ -478,7 +478,7 @@ static int xhls_remove(struct platform_device *pdev)
 	v4l2_ctrl_handler_free(&xhls->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 
-	xvip_cleanup_resources(&xhls->xvip);
+	xvip_device_cleanup(&xhls->xvip);
 
 	return 0;
 }

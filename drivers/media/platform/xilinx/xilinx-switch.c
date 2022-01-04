@@ -380,7 +380,7 @@ static int xsw_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_init_resources(&xsw->xvip);
+	ret = xvip_device_init(&xsw->xvip);
 	if (ret < 0)
 		return ret;
 
@@ -437,7 +437,7 @@ static int xsw_probe(struct platform_device *pdev)
 error:
 	media_entity_cleanup(&subdev->entity);
 error_resources:
-	xvip_cleanup_resources(&xsw->xvip);
+	xvip_device_cleanup(&xsw->xvip);
 	return ret;
 }
 
@@ -449,7 +449,7 @@ static int xsw_remove(struct platform_device *pdev)
 	v4l2_async_unregister_subdev(subdev);
 	media_entity_cleanup(&subdev->entity);
 
-	xvip_cleanup_resources(&xsw->xvip);
+	xvip_device_cleanup(&xsw->xvip);
 
 	return 0;
 }

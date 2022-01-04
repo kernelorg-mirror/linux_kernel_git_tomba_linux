@@ -349,7 +349,7 @@ static int xvtc_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_init_resources(&xvtc->xvip);
+	ret = xvip_device_init(&xvtc->xvip);
 	if (ret < 0)
 		return ret;
 
@@ -368,7 +368,7 @@ static int xvtc_remove(struct platform_device *pdev)
 
 	xvtc_unregister_device(xvtc);
 
-	xvip_cleanup_resources(&xvtc->xvip);
+	xvip_device_cleanup(&xvtc->xvip);
 
 	return 0;
 }

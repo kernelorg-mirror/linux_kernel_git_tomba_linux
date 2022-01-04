@@ -347,7 +347,7 @@ static int xcresample_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_init_resources(&xcresample->xvip);
+	ret = xvip_device_init(&xcresample->xvip);
 	if (ret < 0)
 		return ret;
 
@@ -418,7 +418,7 @@ static int xcresample_probe(struct platform_device *pdev)
 error:
 	v4l2_ctrl_handler_free(&xcresample->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
-	xvip_cleanup_resources(&xcresample->xvip);
+	xvip_device_cleanup(&xcresample->xvip);
 	return ret;
 }
 
@@ -431,7 +431,7 @@ static int xcresample_remove(struct platform_device *pdev)
 	v4l2_ctrl_handler_free(&xcresample->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 
-	xvip_cleanup_resources(&xcresample->xvip);
+	xvip_device_cleanup(&xcresample->xvip);
 
 	return 0;
 }

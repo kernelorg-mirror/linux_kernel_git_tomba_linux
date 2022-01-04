@@ -1105,7 +1105,7 @@ static int xtpg_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_init_resources(&xtpg->xvip);
+	ret = xvip_device_init(&xtpg->xvip);
 	if (ret < 0)
 		return ret;
 
@@ -1271,7 +1271,7 @@ error:
 	media_entity_cleanup(&subdev->entity);
 	xvtc_put(xtpg->vtc);
 error_resource:
-	xvip_cleanup_resources(&xtpg->xvip);
+	xvip_device_cleanup(&xtpg->xvip);
 	return ret;
 }
 
@@ -1284,7 +1284,7 @@ static int xtpg_remove(struct platform_device *pdev)
 	v4l2_ctrl_handler_free(&xtpg->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 
-	xvip_cleanup_resources(&xtpg->xvip);
+	xvip_device_cleanup(&xtpg->xvip);
 
 	return 0;
 }

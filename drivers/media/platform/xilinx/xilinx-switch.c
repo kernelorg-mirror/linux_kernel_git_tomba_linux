@@ -31,18 +31,11 @@
 /**
  * struct xswitch_device - Xilinx Video Switch device structure
  * @xvip: Xilinx Video IP device
- * @pads: media pads
- * @nsinks: number of sink pads (2 to 8)
- * @nsources: number of source pads (1 to 8)
  * @routing: sink pad connected to each source pad (-1 if none)
  * @formats: active V4L2 media bus formats on sink pads
  */
 struct xswitch_device {
 	struct xvip_device xvip;
-
-	struct media_pad *pads;
-	unsigned int nsinks;
-	unsigned int nsources;
 
 	int routing[8];
 
@@ -75,10 +68,10 @@ static int xsw_s_stream(struct v4l2_subdev *subdev, int enable)
 	 * synthesized we can use input 7 for that purpose. Otherwise find an
 	 * unused input to connect to unused outputs.
 	 */
-	if (xsw->nsinks == 8) {
+	if (xsw->xvip.num_sinks == 8) {
 		u32 mask;
 
-		for (i = 0, mask = 0xff; i < xsw->nsources; ++i) {
+		for (i = 0, mask = 0xff; i < xsw->xvip.num_sources; ++i) {
 			if (xsw->routing[i] != -1)
 				mask &= ~BIT(xsw->routing[i]);
 		}
@@ -93,7 +86,7 @@ static int xsw_s_stream(struct v4l2_subdev *subdev, int enable)
 	}
 
 	/* Configure routing. */
-	for (i = 0, routing = 0; i < xsw->nsources; ++i) {
+	for (i = 0, routing = 0; i < xsw->xvip.num_sources; ++i) {
 		unsigned int route;
 
 		route = xsw->routing[i] == -1 ?  unused_input : xsw->routing[i];
@@ -104,7 +97,7 @@ static int xsw_s_stream(struct v4l2_subdev *subdev, int enable)
 	xvip_write(&xsw->xvip, XSW_CORE_CH_CTRL, routing);
 
 	xvip_write(&xsw->xvip, XVIP_CTRL_CONTROL,
-		   ((((unsigned long)1 << xsw->nsources) - 1) << 4) |
+		   ((((unsigned long)1 << xsw->xvip.num_sources) - 1) << 4) |
 		   XVIP_CTRL_CONTROL_SW_ENABLE);
 
 	return 0;
@@ -145,8 +138,8 @@ static int xsw_get_format(struct v4l2_subdev *subdev,
 	int pad = fmt->pad;
 	struct v4l2_mbus_framefmt *format;
 
-	if (pad >= xsw->nsinks) {
-		pad = xsw->routing[pad - xsw->nsinks];
+	if (pad >= xsw->xvip.num_sinks) {
+		pad = xsw->routing[pad - xsw->xvip.num_sinks];
 		if (pad < 0) {
 			memset(&fmt->format, 0, sizeof(fmt->format));
 			return 0;
@@ -172,7 +165,7 @@ static int xsw_set_format(struct v4l2_subdev *subdev,
 	/* The source pad format is always identical to the sink pad format and
 	 * can't be modified.
 	 */
-	if (fmt->pad >= xsw->nsinks)
+	if (fmt->pad >= xsw->xvip.num_sinks)
 		return xsw_get_format(subdev, sd_state, fmt);
 
 	format = xsw_get_pad_format(xsw, sd_state, fmt->pad, fmt->which);
@@ -200,12 +193,12 @@ static int xsw_get_routing(struct v4l2_subdev *subdev,
 
 	mutex_lock(&subdev->entity.graph_obj.mdev->graph_mutex);
 
-	for (i = 0; i < min(xsw->nsources, route->num_routes); ++i) {
+	for (i = 0; i < min(xsw->xvip.num_sources, route->num_routes); ++i) {
 		route->routes[i].sink = xsw->routing[i];
 		route->routes[i].source = i;
 	}
 
-	route->num_routes = xsw->nsources;
+	route->num_routes = xsw->xvip.num_sources;
 
 	mutex_unlock(&subdev->entity.graph_obj.mdev->graph_mutex);
 
@@ -226,11 +219,11 @@ static int xsw_set_routing(struct v4l2_subdev *subdev,
 		goto done;
 	}
 
-	for (i = 0; i < xsw->nsources; ++i)
+	for (i = 0; i < xsw->xvip.num_sources; ++i)
 		xsw->routing[i] = -1;
 
 	for (i = 0; i < route->num_routes; ++i)
-		xsw->routing[route->routes[i].source - xsw->nsinks] =
+		xsw->routing[route->routes[i].source - xsw->xvip.num_sinks] =
 			route->routes[i].sink;
 
 done:
@@ -262,7 +255,7 @@ static void xsw_init_formats(struct v4l2_subdev *subdev,
 	struct v4l2_subdev_format format;
 	unsigned int i;
 
-	for (i = 0; i < xsw->nsinks; ++i) {
+	for (i = 0; i < xsw->xvip.num_sinks; ++i) {
 		memset(&format, 0, sizeof(format));
 
 		format.pad = 0;
@@ -322,11 +315,13 @@ static bool xsw_has_route(struct media_entity *entity, unsigned int pad0,
 	unsigned int sink0, sink1;
 
 	/* Two sinks are never connected together. */
-	if (pad0 < xsw->nsinks && pad1 < xsw->nsinks)
+	if (pad0 < xsw->xvip.num_sinks && pad1 < xsw->xvip.num_sinks)
 		return false;
 
-	sink0 = pad0 < xsw->nsinks ? pad0 : xsw->routing[pad0 - xsw->nsinks];
-	sink1 = pad1 < xsw->nsinks ? pad1 : xsw->routing[pad1 - xsw->nsinks];
+	sink0 = pad0 < xsw->xvip.num_sinks
+	      ? pad0 : xsw->routing[pad0 - xsw->xvip.num_sinks];
+	sink1 = pad1 < xsw->xvip.num_sinks
+	      ? pad1 : xsw->routing[pad1 - xsw->xvip.num_sinks];
 
 	return sink0 == sink1;
 }
@@ -340,19 +335,20 @@ static const struct media_entity_operations xsw_media_ops = {
  * Platform Device Driver
  */
 
-static int xsw_parse_of(struct xswitch_device *xsw)
+static int xsw_parse_of(struct xswitch_device *xsw,
+			struct xvip_device_info *info)
 {
 	struct device_node *node = xsw->xvip.dev->of_node;
 	int ret;
 
-	ret = of_property_read_u32(node, "#xlnx,inputs", &xsw->nsinks);
+	ret = of_property_read_u32(node, "#xlnx,inputs", &info->num_sinks);
 	if (ret < 0) {
 		dev_err(xsw->xvip.dev, "missing or invalid #xlnx,%s property\n",
 			"inputs");
 		return ret;
 	}
 
-	ret = of_property_read_u32(node, "#xlnx,outputs", &xsw->nsources);
+	ret = of_property_read_u32(node, "#xlnx,outputs", &info->num_sources);
 	if (ret < 0) {
 		dev_err(xsw->xvip.dev, "missing or invalid #xlnx,%s property\n",
 			"outputs");
@@ -362,12 +358,11 @@ static int xsw_parse_of(struct xswitch_device *xsw)
 	return 0;
 }
 
-static const struct xvip_device_info xsw_info = {
-	.has_axi_lite = true,
-};
-
 static int xsw_probe(struct platform_device *pdev)
 {
+	struct xvip_device_info xsw_info = {
+		.has_axi_lite = true,
+	};
 	struct v4l2_subdev *subdev;
 	struct xswitch_device *xsw;
 	unsigned int npads;
@@ -380,7 +375,7 @@ static int xsw_probe(struct platform_device *pdev)
 
 	xsw->xvip.dev = &pdev->dev;
 
-	ret = xsw_parse_of(xsw);
+	ret = xsw_parse_of(xsw, &xsw_info);
 	if (ret < 0)
 		return ret;
 
@@ -391,25 +386,16 @@ static int xsw_probe(struct platform_device *pdev)
 	/* Initialize V4L2 subdevice and media entity. Pad numbers depend on the
 	 * number of pads.
 	 */
-	npads = xsw->nsinks + xsw->nsources;
-	xsw->pads = devm_kzalloc(&pdev->dev, npads * sizeof(*xsw->pads),
-				 GFP_KERNEL);
-	if (!xsw->pads)
-		goto error_resources;
-
-	for (i = 0; i < xsw->nsinks; ++i)
-		xsw->pads[i].flags = MEDIA_PAD_FL_SINK;
-	for (; i < npads; ++i)
-		xsw->pads[i].flags = MEDIA_PAD_FL_SOURCE;
+	npads = xsw->xvip.num_sinks + xsw->xvip.num_sources;
 
 	xsw->formats = devm_kzalloc(&pdev->dev,
-				    xsw->nsinks * sizeof(*xsw->formats),
+				    xsw->xvip.num_sinks * sizeof(*xsw->formats),
 				    GFP_KERNEL);
 	if (!xsw->formats)
 		goto error_resources;
 
-	for (i = 0; i < xsw->nsources; ++i)
-		xsw->routing[i] = i < xsw->nsinks ? i : -1;
+	for (i = 0; i < xsw->xvip.num_sources; ++i)
+		xsw->routing[i] = i < xsw->xvip.num_sinks ? i : -1;
 
 	subdev = &xsw->xvip.subdev;
 	v4l2_subdev_init(subdev, &xsw_ops);
@@ -422,7 +408,7 @@ static int xsw_probe(struct platform_device *pdev)
 
 	xsw_init_formats(subdev, NULL);
 
-	ret = media_entity_pads_init(&subdev->entity, npads, xsw->pads);
+	ret = media_entity_pads_init(&subdev->entity, npads, xsw->xvip.pads);
 	if (ret < 0)
 		goto error;
 

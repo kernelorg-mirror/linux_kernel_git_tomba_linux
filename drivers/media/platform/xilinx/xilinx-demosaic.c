@@ -48,7 +48,6 @@ enum xdmsc_bayer_format {
 
 struct xdmsc_dev {
 	struct xvip_device xvip;
-	struct media_pad pads[2];
 	struct v4l2_mbus_framefmt formats[2];
 	struct v4l2_mbus_framefmt default_formats[2];
 
@@ -272,9 +271,6 @@ static int xdmsc_parse_of(struct xdmsc_dev *xdmsc)
 {
 	struct device *dev = xdmsc->xvip.dev;
 	struct device_node *node = dev->of_node;
-	struct device_node *ports;
-	struct device_node *port;
-	u32 port_id = 0;
 	int rval;
 
 	rval = of_property_read_u32(node, "xlnx,max-height",
@@ -299,25 +295,6 @@ static int xdmsc_parse_of(struct xdmsc_dev *xdmsc)
 		return -EINVAL;
 	}
 
-	ports = of_get_child_by_name(node, "ports");
-	if (!ports)
-		ports = node;
-	/* Get the format description for each pad */
-	for_each_child_of_node(ports, port) {
-		if (port->name && (of_node_cmp(port->name, "port") == 0)) {
-			rval = of_property_read_u32(port, "reg", &port_id);
-			if (rval < 0) {
-				dev_err(dev, "No reg in DT");
-				return rval;
-			}
-
-			if (port_id != 0 && port_id != 1) {
-				dev_err(dev, "Invalid reg in DT");
-				return -EINVAL;
-			}
-		}
-	}
-
 	xdmsc->rst_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(xdmsc->rst_gpio)) {
 		if (PTR_ERR(xdmsc->rst_gpio) != -EPROBE_DEFER)
@@ -329,6 +306,8 @@ static int xdmsc_parse_of(struct xdmsc_dev *xdmsc)
 
 static const struct xvip_device_info xdmsc_info = {
 	.has_axi_lite = true,
+	.num_sinks = 1,
+	.num_sources = 1,
 };
 
 static int xdmsc_probe(struct platform_device *pdev)
@@ -382,12 +361,9 @@ static int xdmsc_probe(struct platform_device *pdev)
 	def_fmt->code = MEDIA_BUS_FMT_RBG888_1X24;
 	xdmsc->formats[XVIP_PAD_SOURCE] = *def_fmt;
 
-	xdmsc->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	xdmsc->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
-
 	/* Init Media Entity */
 	subdev->entity.ops = &xdmsc_media_ops;
-	rval = media_entity_pads_init(&subdev->entity, 2, xdmsc->pads);
+	rval = media_entity_pads_init(&subdev->entity, 2, xdmsc->xvip.pads);
 	if (rval < 0)
 		goto media_error;
 

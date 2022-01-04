@@ -364,11 +364,29 @@ int xvip_device_init(struct xvip_device *xvip,
 		     const struct xvip_device_info *info)
 {
 	struct platform_device *pdev = to_platform_device(xvip->dev);
+	unsigned int num_pads;
+	unsigned int i;
 
 	if (info->has_axi_lite) {
 		xvip->iomem = devm_platform_ioremap_resource(pdev, 0);
 		if (IS_ERR(xvip->iomem))
 			return PTR_ERR(xvip->iomem);
+	}
+
+	num_pads = info->num_sinks + info->num_sources;
+	if (num_pads) {
+		xvip->num_sinks = info->num_sinks;
+		xvip->num_sources = info->num_sources;
+
+		xvip->pads = devm_kcalloc(xvip->dev, num_pads,
+					  sizeof(*xvip->pads), GFP_KERNEL);
+		if (!xvip->pads)
+			return -ENOMEM;
+
+		for (i = 0; i < xvip->num_sinks; ++i)
+			xvip->pads[i].flags = MEDIA_PAD_FL_SINK;
+		for (; i < num_pads; ++i)
+			xvip->pads[i].flags = MEDIA_PAD_FL_SOURCE;
 	}
 
 	xvip->clk = devm_clk_get(xvip->dev, NULL);

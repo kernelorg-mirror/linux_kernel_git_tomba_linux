@@ -18,29 +18,22 @@
 
 #include "xilinx-vip.h"
 
-#define MAX_VBR_SINKS			1
 #define MIN_VBR_SRCS			2
 #define MAX_VBR_SRCS			16
 
 /**
  * struct xvbroadcaster_device - AXI4-Stream Broadcaster device structure
- * @dev: Platform structure
- * @subdev: The v4l2 subdev structure
- * @pads: media pads
+ * @xvip: Xilinx Video IP device
  * @formats: active V4L2 media bus formats on each pad
- * @npads: number of pads
  */
 struct xvbroadcaster_device {
-	struct device *dev;
-	struct v4l2_subdev subdev;
-	struct media_pad *pads;
+	struct xvip_device xvip;
 	struct v4l2_mbus_framefmt formats;
-	u32 npads;
 };
 
 static inline struct xvbroadcaster_device *to_xvbr(struct v4l2_subdev *subdev)
 {
-	return container_of(subdev, struct xvbroadcaster_device, subdev);
+	return container_of(subdev, struct xvbroadcaster_device, xvip.subdev);
 }
 
 /* -----------------------------------------------------------------------------
@@ -63,7 +56,8 @@ xvbr_get_pad_format(struct xvbroadcaster_device *xvbr,
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_format(&xvbr->subdev, sd_state, pad);
+		return v4l2_subdev_get_try_format(&xvbr->xvip.subdev, sd_state,
+						  pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		return &xvbr->formats;
 	default:
@@ -104,9 +98,12 @@ static int xvbr_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 {
 	struct xvbroadcaster_device *xvbr = to_xvbr(subdev);
 	struct v4l2_mbus_framefmt *format;
+	unsigned int num_pads;
 	unsigned int i;
 
-	for (i = 0; i < xvbr->npads; ++i) {
+	num_pads = xvbr->xvip.num_sinks + xvbr->xvip.num_sources;
+
+	for (i = 0; i < num_pads; ++i) {
 		format = v4l2_subdev_get_try_format(subdev, fh->state, i);
 		*format = xvbr->formats;
 	}
@@ -152,79 +149,71 @@ static const struct media_entity_operations xvbr_media_ops = {
  * Platform Device Driver
  */
 
-static int xvbr_parse_of(struct xvbroadcaster_device *xvbr)
+static int xvbr_parse_of(struct xvbroadcaster_device *xvbr,
+			 struct xvip_device_info *info)
 {
-	struct device_node *node = xvbr->dev->of_node;
+	struct device_node *node = xvbr->xvip.dev->of_node;
 	struct device_node *ports;
 	struct device_node *port;
+	unsigned int num_ports = 0;
+
+	/* Count the number of ports. */
 
 	ports = of_get_child_by_name(node, "ports");
 	if (!ports)
-		ports = node;
+		ports = of_node_get(node);
 
 	for_each_child_of_node(ports, port) {
-		struct device_node *endpoint;
-
-		if (!port->name || of_node_cmp(port->name, "port"))
+		if (!of_node_name_eq(port, "port"))
 			continue;
 
-		endpoint = of_get_next_child(port, NULL);
-		if (!endpoint) {
-			dev_err(xvbr->dev, "No port at\n");
-			return -EINVAL;
-		}
-
-		/* Count the number of ports. */
-		xvbr->npads++;
+		num_ports++;
 	}
 
-	/* validate number of ports */
-	if ((xvbr->npads > (MAX_VBR_SINKS + MAX_VBR_SRCS)) ||
-	    (xvbr->npads < (MAX_VBR_SINKS + MIN_VBR_SRCS))) {
-		dev_err(xvbr->dev, "invalid number of ports %u\n", xvbr->npads);
+	of_node_put(ports);
+
+	if (info->num_sources < 1 + MIN_VBR_SRCS ||
+	    info->num_sources > 1 + MAX_VBR_SRCS) {
+		dev_err(xvbr->xvip.dev, "invalid number of ports %u\n", num_ports);
 		return -EINVAL;
 	}
+
+	info->num_sinks = 1;
+	info->num_sources = num_ports - 1;
 
 	return 0;
 }
 
 static int xvbr_probe(struct platform_device *pdev)
 {
-	struct v4l2_subdev *subdev;
+	struct xvip_device_info xvbr_info = { };
 	struct xvbroadcaster_device *xvbr;
-	unsigned int i;
+	struct v4l2_subdev *subdev;
+	unsigned int num_pads;
 	int ret;
 
 	xvbr = devm_kzalloc(&pdev->dev, sizeof(*xvbr), GFP_KERNEL);
 	if (!xvbr)
 		return -ENOMEM;
 
-	xvbr->dev = &pdev->dev;
+	xvbr->xvip.dev = &pdev->dev;
 
-	ret = xvbr_parse_of(xvbr);
+	ret = xvbr_parse_of(xvbr, &xvbr_info);
 	if (ret < 0)
 		return ret;
 
-	/*
-	 * Initialize V4L2 subdevice and media entity
-	 */
-	xvbr->pads = devm_kzalloc(&pdev->dev, xvbr->npads * sizeof(*xvbr->pads),
-				  GFP_KERNEL);
-	if (!xvbr->pads)
-		return -ENOMEM;
+	ret = xvip_device_init(&xvbr->xvip, &xvbr_info);
+	if (ret < 0)
+		return ret;
 
-	xvbr->pads[0].flags = MEDIA_PAD_FL_SINK;
-
-	for (i = 1; i < xvbr->npads; ++i)
-		xvbr->pads[i].flags = MEDIA_PAD_FL_SOURCE;
-
+	/* Initialize V4L2 subdevice and media entity. */
 	xvbr->formats.code = MEDIA_BUS_FMT_RGB888_1X24;
 	xvbr->formats.field = V4L2_FIELD_NONE;
 	xvbr->formats.colorspace = V4L2_COLORSPACE_SRGB;
 	xvbr->formats.width = XVIP_MAX_WIDTH;
 	xvbr->formats.height = XVIP_MAX_HEIGHT;
 
-	subdev = &xvbr->subdev;
+	subdev = &xvbr->xvip.subdev;
 	v4l2_subdev_init(subdev, &xvbr_ops);
 	subdev->dev = &pdev->dev;
 	subdev->internal_ops = &xvbr_internal_ops;
@@ -233,7 +222,8 @@ static int xvbr_probe(struct platform_device *pdev)
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	subdev->entity.ops = &xvbr_media_ops;
 
-	ret = media_entity_pads_init(&subdev->entity, xvbr->npads, xvbr->pads);
+	num_pads = xvbr->xvip.num_sinks + xvbr->xvip.num_sources;
+	ret = media_entity_pads_init(&subdev->entity, num_pads, xvbr->xvip.pads);
 	if (ret < 0)
 		goto error;
 
@@ -245,12 +235,13 @@ static int xvbr_probe(struct platform_device *pdev)
 		goto error;
 	}
 
-	dev_info(xvbr->dev, "Xilinx AXI4-Stream Broadcaster found!\n");
+	dev_info(&pdev->dev, "Xilinx AXI4-Stream Broadcaster found!\n");
 
 	return 0;
 
 error:
 	media_entity_cleanup(&subdev->entity);
+	xvip_device_cleanup(&xvbr->xvip);
 
 	return ret;
 }
@@ -258,10 +249,11 @@ error:
 static int xvbr_remove(struct platform_device *pdev)
 {
 	struct xvbroadcaster_device *xvbr = platform_get_drvdata(pdev);
-	struct v4l2_subdev *subdev = &xvbr->subdev;
+	struct v4l2_subdev *subdev = &xvbr->xvip.subdev;
 
 	v4l2_async_unregister_subdev(subdev);
 	media_entity_cleanup(&subdev->entity);
+	xvip_device_cleanup(&xvbr->xvip);
 
 	return 0;
 }

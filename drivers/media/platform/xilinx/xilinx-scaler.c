@@ -66,10 +66,8 @@ static inline s16 fixp_mult(s16 a, s16 b)
 /**
  * struct xscaler_device - Xilinx Scaler device structure
  * @xvip: Xilinx Video IP device
- * @pads: media pads
  * @formats: V4L2 media bus formats at the sink and source pads
  * @default_formats: default V4L2 media bus formats
- * @vip_format: Xilinx Video IP format
  * @crop: Active crop rectangle for the sink pad
  * @num_hori_taps: number of vertical taps
  * @num_vert_taps: number of vertical taps
@@ -80,11 +78,8 @@ static inline s16 fixp_mult(s16 a, s16 b)
 struct xscaler_device {
 	struct xvip_device xvip;
 
-	struct media_pad pads[2];
-
 	struct v4l2_mbus_framefmt formats[2];
 	struct v4l2_mbus_framefmt default_formats[2];
-	const struct xvip_video_format *vip_format;
 	struct v4l2_rect crop;
 
 	u32 num_hori_taps;
@@ -554,35 +549,8 @@ static int __maybe_unused xscaler_pm_resume(struct device *dev)
 
 static int xscaler_parse_of(struct xscaler_device *xscaler)
 {
-	struct device *dev = xscaler->xvip.dev;
 	struct device_node *node = xscaler->xvip.dev->of_node;
-	struct device_node *ports;
-	struct device_node *port;
 	int ret;
-
-	ports = of_get_child_by_name(node, "ports");
-	if (ports == NULL)
-		ports = node;
-
-	/* Get the format description for each pad */
-	for_each_child_of_node(ports, port) {
-		if (port->name && (of_node_cmp(port->name, "port") == 0)) {
-			const struct xvip_video_format *vip_format;
-
-			vip_format = xvip_of_get_format(port);
-			if (IS_ERR(vip_format)) {
-				dev_err(dev, "invalid format in DT");
-				return PTR_ERR(vip_format);
-			}
-
-			if (!xscaler->vip_format) {
-				xscaler->vip_format = vip_format;
-			} else if (xscaler->vip_format != vip_format) {
-				dev_err(dev, "in/out format mismatch in DT");
-				return -EINVAL;
-			}
-		}
-	}
 
 	ret = of_property_read_u32(node, "xlnx,num-hori-taps",
 				   &xscaler->num_hori_taps);
@@ -610,6 +578,9 @@ static int xscaler_parse_of(struct xscaler_device *xscaler)
 
 static const struct xvip_device_info xscaler_info = {
 	.has_axi_lite = true,
+	.has_port_formats = true,
+	.num_sinks = 1,
+	.num_sources = 1,
 };
 
 static int xscaler_probe(struct platform_device *pdev)
@@ -648,7 +619,7 @@ static int xscaler_probe(struct platform_device *pdev)
 
 	/* Initialize default and active formats */
 	default_format = &xscaler->default_formats[XVIP_PAD_SINK];
-	default_format->code = xscaler->vip_format->code;
+	default_format->code = xscaler->xvip.ports[XVIP_PAD_SINK].format->code;
 	default_format->field = V4L2_FIELD_NONE;
 	default_format->colorspace = V4L2_COLORSPACE_SRGB;
 	size = xvip_read(&xscaler->xvip, XSCALER_SOURCE_SIZE);
@@ -669,11 +640,9 @@ static int xscaler_probe(struct platform_device *pdev)
 
 	xscaler->formats[XVIP_PAD_SOURCE] = *default_format;
 
-	xscaler->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	xscaler->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 	subdev->entity.ops = &xscaler_media_ops;
 
-	ret = media_entity_pads_init(&subdev->entity, 2, xscaler->pads);
+	ret = media_entity_pads_init(&subdev->entity, 2, xscaler->xvip.pads);
 	if (ret < 0)
 		goto error;
 

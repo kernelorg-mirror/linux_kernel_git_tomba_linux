@@ -16,6 +16,7 @@ properties:
   compatible:
     enum:
       - ti,ds90ub953-q1
+      - ti,ds90ub971-q1
 
   '#gpio-cells':
     const: 2

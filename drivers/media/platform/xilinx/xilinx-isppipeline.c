@@ -542,6 +542,10 @@ static int xisp_parse_of(struct xisp_dev *xisp)
 	return 0;
 }
 
+static const struct xvip_device_info xisp_info = {
+	.has_axi_lite = true,
+};
+
 static int xisp_probe(struct platform_device *pdev)
 {
 	struct xisp_dev *xisp;
@@ -558,7 +562,7 @@ static int xisp_probe(struct platform_device *pdev)
 	if (rval < 0)
 		return rval;
 
-	rval = xvip_device_init(&xisp->xvip);
+	rval = xvip_device_init(&xisp->xvip, &xisp_info);
 	if (rval)
 		return -EIO;
 

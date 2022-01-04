@@ -345,22 +345,31 @@ EXPORT_SYMBOL_GPL(xvip_set_format_size);
 /**
  * xvip_device_init - Initialize a Xilinx video IP device
  * @xvip: The video IP device
+ * @info: Device information
  *
  * Before being used, xvip_device instances must be initialized by a call to
- * this function. Initialization acquires resources needed by the device.
+ * this function.
+ *
+ * The @info structure describes the resources needed by the device. Those
+ * resources are acquired by this function. No reference to the @info pointer is
+ * stored, the caller isn't required to keep it valid after the function
+ * returns.
  *
  * Every device successfully initialized by this function must be cleaned up by
  * a call to xvip_device_cleanup().
  *
  * Return: 0 on success or a negative error code on failure
  */
-int xvip_device_init(struct xvip_device *xvip)
+int xvip_device_init(struct xvip_device *xvip,
+		     const struct xvip_device_info *info)
 {
 	struct platform_device *pdev = to_platform_device(xvip->dev);
 
-	xvip->iomem = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(xvip->iomem))
-		return PTR_ERR(xvip->iomem);
+	if (info->has_axi_lite) {
+		xvip->iomem = devm_platform_ioremap_resource(pdev, 0);
+		if (IS_ERR(xvip->iomem))
+			return PTR_ERR(xvip->iomem);
+	}
 
 	xvip->clk = devm_clk_get(xvip->dev, NULL);
 	if (IS_ERR(xvip->clk))

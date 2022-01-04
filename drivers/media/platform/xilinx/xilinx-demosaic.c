@@ -327,6 +327,10 @@ static int xdmsc_parse_of(struct xdmsc_dev *xdmsc)
 	return 0;
 }
 
+static const struct xvip_device_info xdmsc_info = {
+	.has_axi_lite = true,
+};
+
 static int xdmsc_probe(struct platform_device *pdev)
 {
 	struct xdmsc_dev *xdmsc;
@@ -341,7 +345,7 @@ static int xdmsc_probe(struct platform_device *pdev)
 	rval = xdmsc_parse_of(xdmsc);
 	if (rval < 0)
 		return rval;
-	rval = xvip_device_init(&xdmsc->xvip);
+	rval = xvip_device_init(&xdmsc->xvip, &xdmsc_info);
 	if (rval)
 		return -EIO;
 

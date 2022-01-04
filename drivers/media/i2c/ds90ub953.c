@@ -99,6 +99,7 @@
 
 struct ub953_hw_data {
 	const char *model;
+	bool ub971;
 };
 
 struct ub953_data {
@@ -1017,7 +1018,7 @@ static const struct regmap_config ub953_regmap_config = {
 	.val_format_endian = REGMAP_ENDIAN_DEFAULT,
 };
 
-static void ub953_setup_clkout(struct ub953_data *priv)
+static void ub953_setup_clkout_ub953(struct ub953_data *priv)
 {
 	unsigned long refclk;
 	unsigned long fc_rate;
@@ -1041,6 +1042,28 @@ static void ub953_setup_clkout(struct ub953_data *priv)
 
 	ub953_write(priv, UB953_REG_CLKOUT_CTRL0, (__ffs(hs_clk_div) << 5) | m);
 	ub953_write(priv, UB953_REG_CLKOUT_CTRL1, n);
+}
+
+static void ub953_setup_clkout_ub971(struct ub953_data *priv)
+{
+	u64 fc_rate;
+	u32 m, n;
+	u32 clk_out;
+
+	/* TODO: get FC rate from deserializer, and clkout rate from DT */
+
+	/* CLK_OUT = FC * M / (8 * N) */
+
+	m = 1;
+	n = 0x28;
+
+	fc_rate = 7550000000ull;
+	clk_out = (u32)div_u64(fc_rate * m, 8 * n);
+
+	ub953_write(priv, UB953_REG_CLKOUT_CTRL0, m);
+	ub953_write(priv, UB953_REG_CLKOUT_CTRL1, n);
+
+	dev_dbg(&priv->client->dev, "clkout rate %u Hz\n", clk_out);
 }
 
 static int ub953_probe(struct i2c_client *client)
@@ -1182,7 +1205,10 @@ static int ub953_probe(struct i2c_client *client)
 		goto err_unreg_notif;
 	}
 
-	ub953_setup_clkout(priv);
+	if (priv->hw_data->ub971)
+		ub953_setup_clkout_ub971(priv);
+	else
+		ub953_setup_clkout_ub953(priv);
 
 	ub953_write(priv, UB953_REG_GENERAL_CFG,
 		    (1 << 6) | /* continuous clk */
@@ -1240,8 +1266,14 @@ static const struct ub953_hw_data ds90ub953_hw = {
 	.model = "ub953",
 };
 
+static const struct ub953_hw_data ds90ub971_hw = {
+	.model = "ub971",
+	.ub971 = true,
+};
+
 static const struct i2c_device_id ub953_id[] = {
 	{ "ds90ub953-q1", 0 },
+	{ "ds90ub971-q1", 0 },
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, ub953_id);
@@ -1249,6 +1281,7 @@ MODULE_DEVICE_TABLE(i2c, ub953_id);
 #ifdef CONFIG_OF
 static const struct of_device_id ub953_dt_ids[] = {
 	{ .compatible = "ti,ds90ub953-q1", .data = &ds90ub953_hw },
+	{ .compatible = "ti,ds90ub971-q1", .data = &ds90ub971_hw },
 	{}
 };
 MODULE_DEVICE_TABLE(of, ub953_dt_ids);

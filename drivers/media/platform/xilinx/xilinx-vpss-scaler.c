@@ -935,10 +935,8 @@ struct xscaler_feature {
 /**
  * struct xscaler_device - Xilinx Scaler device structure
  * @xvip: Xilinx Video IP device
- * @pads: Scaler sub-device media pads
  * @formats: V4L2 media bus formats at the sink and source pads
  * @default_formats: default V4L2 media bus formats
- * @vip_formats: Xilinx Video IP format retrieved from the DT
  * @num_hori_taps: number of horizontal taps
  * @num_vert_taps: number of vertical taps
  * @max_num_phases: maximum number of phases
@@ -957,10 +955,8 @@ struct xscaler_feature {
 struct xscaler_device {
 	struct xvip_device xvip;
 
-	struct media_pad pads[2];
 	struct v4l2_mbus_framefmt formats[2];
 	struct v4l2_mbus_framefmt default_formats[2];
-	const struct xvip_video_format *vip_formats[2];
 
 	u32 num_hori_taps;
 	u32 num_vert_taps;
@@ -1824,11 +1820,8 @@ static int xscaler_parse_of(struct xscaler_device *xscaler)
 {
 	struct device *dev = xscaler->xvip.dev;
 	struct device_node *node = xscaler->xvip.dev->of_node;
-	const struct xvip_video_format *vip_format;
-	struct device_node *ports;
-	struct device_node *port;
+	u32 dt_ppc = 0;
 	int ret;
-	u32 port_id, dt_ppc = 0;
 
 	if (xscaler->cfg->flags & XSCALER_CLK_PROP) {
 		xscaler->aclk_axis = devm_clk_get(dev, "aclk_axis");
@@ -1867,33 +1860,6 @@ static int xscaler_parse_of(struct xscaler_device *xscaler)
 		   xscaler->max_pixels < XSCALER_MIN_WIDTH) {
 		dev_err(dev, "Invalid width in dt");
 		return -EINVAL;
-	}
-
-	ports = of_get_child_by_name(node, "ports");
-	if (!ports)
-		ports = node;
-
-	/* Get the format description for each pad */
-	for_each_child_of_node(ports, port) {
-		if (port->name && (of_node_cmp(port->name, "port") == 0)) {
-			vip_format = xvip_of_get_format(port);
-			if (IS_ERR(vip_format)) {
-				dev_err(dev, "invalid format in DT");
-				return PTR_ERR(vip_format);
-			}
-
-			ret = of_property_read_u32(port, "reg", &port_id);
-			if (ret < 0) {
-				dev_err(dev, "No reg in DT");
-				return ret;
-			}
-
-			if (port_id != 0 && port_id != 1) {
-				dev_err(dev, "Invalid reg in DT");
-				return -EINVAL;
-			}
-			xscaler->vip_formats[port_id] = vip_format;
-		}
 	}
 
 	ret = of_property_read_u32(node, "xlnx,num-hori-taps",
@@ -1976,6 +1942,9 @@ static int xscaler_parse_of(struct xscaler_device *xscaler)
 
 static const struct xvip_device_info xscaler_info = {
 	.has_axi_lite = true,
+	.has_port_formats = true,
+	.num_sinks = 1,
+	.num_sources = 1,
 };
 
 static int xscaler_probe(struct platform_device *pdev)
@@ -2048,7 +2017,7 @@ static int xscaler_probe(struct platform_device *pdev)
 
 	/* Initialize default and active formats */
 	default_format = &xscaler->default_formats[XVIP_PAD_SINK];
-	default_format->code = xscaler->vip_formats[XVIP_PAD_SINK]->code;
+	default_format->code = xscaler->xvip.ports[XVIP_PAD_SINK].format->code;
 	default_format->field = V4L2_FIELD_NONE;
 	default_format->colorspace = V4L2_COLORSPACE_SRGB;
 	default_format->width = XSCALER_DEF_IN_WIDTH;
@@ -2057,16 +2026,14 @@ static int xscaler_probe(struct platform_device *pdev)
 
 	default_format = &xscaler->default_formats[XVIP_PAD_SOURCE];
 	*default_format = xscaler->default_formats[XVIP_PAD_SINK];
-	default_format->code = xscaler->vip_formats[XVIP_PAD_SOURCE]->code;
+	default_format->code = xscaler->xvip.ports[XVIP_PAD_SOURCE].format->code;
 	default_format->width = XSCALER_DEF_OUT_WIDTH;
 	default_format->height = XSCALER_DEF_OUT_HEIGHT;
 	xscaler->formats[XVIP_PAD_SOURCE] = *default_format;
 
-	xscaler->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	xscaler->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 	subdev->entity.ops = &xscaler_media_ops;
 
-	ret = media_entity_pads_init(&subdev->entity, 2, xscaler->pads);
+	ret = media_entity_pads_init(&subdev->entity, 2, xscaler->xvip.pads);
 	if (ret < 0)
 		goto error;
 

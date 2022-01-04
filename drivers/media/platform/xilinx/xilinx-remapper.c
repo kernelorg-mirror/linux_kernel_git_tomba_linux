@@ -12,7 +12,6 @@
  * published by the Free Software Foundation.
  */
 
-#include <linux/clk.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
@@ -62,7 +61,6 @@ struct xremap_mapping {
 /**
  * struct xremap_device - Xilinx Test Pattern Generator device structure
  * @xvip: Xilinx Video IP device
- * @pads: media pads
  * @formats: V4L2 media bus formats at the sink and source pads
  * @config: device configuration parsed from its DT node
  * @config.width: video bus width in bits
@@ -74,7 +72,6 @@ struct xremap_mapping {
  */
 struct xremap_device {
 	struct xvip_device xvip;
-	struct media_pad pads[2];
 	struct v4l2_mbus_framefmt formats[2];
 
 	struct {
@@ -469,6 +466,11 @@ static int xremap_parse_of(struct xremap_device *xremap)
 	return -EINVAL;
 }
 
+static const struct xvip_device_info xremap_info = {
+	.num_sinks = 1,
+	.num_sources = 1,
+};
+
 static int xremap_probe(struct platform_device *pdev)
 {
 	struct xremap_device *xremap;
@@ -481,19 +483,13 @@ static int xremap_probe(struct platform_device *pdev)
 
 	xremap->xvip.dev = &pdev->dev;
 
-	ret = xremap_parse_of(xremap);
+	ret = xvip_device_init(&xremap->xvip, &xremap_info);
 	if (ret < 0)
 		return ret;
 
-	xremap->xvip.clk = devm_clk_get(xremap->xvip.dev, NULL);
-	if (IS_ERR(xremap->xvip.clk))
-		return PTR_ERR(xremap->xvip.clk);
-
-	ret = clk_prepare_enable(xremap->xvip.clk);
-	if (ret) {
-		dev_err(&pdev->dev, "failed to enable clk (%d)\n", ret);
-		return ret;
-	}
+	ret = xremap_parse_of(xremap);
+	if (ret < 0)
+		goto error_xvip;
 
 	/* Initialize V4L2 subdevice and media entity */
 	subdev = &xremap->xvip.subdev;
@@ -506,28 +502,27 @@ static int xremap_probe(struct platform_device *pdev)
 
 	xremap_init_formats(subdev, NULL);
 
-	xremap->pads[XREMAP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	xremap->pads[XREMAP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 	subdev->entity.ops = &xremap_media_ops;
-	ret = media_entity_pads_init(&subdev->entity, 2, xremap->pads);
+	ret = media_entity_pads_init(&subdev->entity, 2, xremap->xvip.pads);
 	if (ret < 0)
-		goto error;
+		goto error_media;
 
 	platform_set_drvdata(pdev, xremap);
 
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to register subdev\n");
-		goto error;
+		goto error_media;
 	}
 
 	dev_info(&pdev->dev, "device registered\n");
 
 	return 0;
 
-error:
+error_media:
 	media_entity_cleanup(&subdev->entity);
-	clk_disable_unprepare(xremap->xvip.clk);
+error_xvip:
+	xvip_device_cleanup(&xremap->xvip);
 	return ret;
 }
 
@@ -538,8 +533,7 @@ static int xremap_remove(struct platform_device *pdev)
 
 	v4l2_async_unregister_subdev(subdev);
 	media_entity_cleanup(&subdev->entity);
-
-	clk_disable_unprepare(xremap->xvip.clk);
+	xvip_device_cleanup(&xremap->xvip);
 
 	return 0;
 }

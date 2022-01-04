@@ -523,10 +523,8 @@ static int xvsw_probe(struct platform_device *pdev)
 	xvsw->formats = devm_kzalloc(&pdev->dev,
 				     padcount * sizeof(*xvsw->formats),
 				     GFP_KERNEL);
-	if (!xvsw->formats) {
-		dev_err(xvsw->dev, "No memory to allocate formats!\n");
+	if (!xvsw->formats)
 		return -ENOMEM;
-	}
 
 	for (i = 0; i < padcount; i++) {
 		xvsw->formats[i].code = MEDIA_BUS_FMT_RGB888_1X24;

@@ -469,7 +469,7 @@ static int xrgb2yuv_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_init_resources(&xrgb2yuv->xvip);
+	ret = xvip_device_init(&xrgb2yuv->xvip);
 	if (ret < 0)
 		return ret;
 
@@ -538,7 +538,7 @@ static int xrgb2yuv_probe(struct platform_device *pdev)
 error:
 	v4l2_ctrl_handler_free(&xrgb2yuv->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
-	xvip_cleanup_resources(&xrgb2yuv->xvip);
+	xvip_device_cleanup(&xrgb2yuv->xvip);
 	return ret;
 }
 
@@ -551,7 +551,7 @@ static int xrgb2yuv_remove(struct platform_device *pdev)
 	v4l2_ctrl_handler_free(&xrgb2yuv->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 
-	xvip_cleanup_resources(&xrgb2yuv->xvip);
+	xvip_device_cleanup(&xrgb2yuv->xvip);
 
 	return 0;
 }

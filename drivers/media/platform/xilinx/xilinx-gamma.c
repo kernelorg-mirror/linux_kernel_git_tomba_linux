@@ -458,7 +458,7 @@ static int xg_probe(struct platform_device *pdev)
 	rval = xg_parse_of(xg);
 	if (rval < 0)
 		return rval;
-	rval = xvip_init_resources(&xg->xvip);
+	rval = xvip_device_init(&xg->xvip);
 	if (rval)
 		return -EIO;
 
@@ -529,7 +529,7 @@ ctrl_error:
 v4l2_subdev_error:
 	media_entity_cleanup(&subdev->entity);
 media_error:
-	xvip_cleanup_resources(&xg->xvip);
+	xvip_device_cleanup(&xg->xvip);
 	return rval;
 }
 
@@ -541,7 +541,7 @@ static int xg_remove(struct platform_device *pdev)
 	v4l2_async_unregister_subdev(subdev);
 	/* Add entry to cleanup v4l2 control handle */
 	media_entity_cleanup(&subdev->entity);
-	xvip_cleanup_resources(&xg->xvip);
+	xvip_device_cleanup(&xg->xvip);
 	return 0;
 }
 

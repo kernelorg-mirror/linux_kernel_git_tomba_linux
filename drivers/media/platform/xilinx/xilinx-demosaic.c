@@ -341,7 +341,7 @@ static int xdmsc_probe(struct platform_device *pdev)
 	rval = xdmsc_parse_of(xdmsc);
 	if (rval < 0)
 		return rval;
-	rval = xvip_init_resources(&xdmsc->xvip);
+	rval = xvip_device_init(&xdmsc->xvip);
 	if (rval)
 		return -EIO;
 
@@ -400,7 +400,7 @@ static int xdmsc_probe(struct platform_device *pdev)
 v4l2_subdev_error:
 	media_entity_cleanup(&subdev->entity);
 media_error:
-	xvip_cleanup_resources(&xdmsc->xvip);
+	xvip_device_cleanup(&xdmsc->xvip);
 	return rval;
 }
 
@@ -411,7 +411,7 @@ static int xdmsc_remove(struct platform_device *pdev)
 
 	v4l2_async_unregister_subdev(subdev);
 	media_entity_cleanup(&subdev->entity);
-	xvip_cleanup_resources(&xdmsc->xvip);
+	xvip_device_cleanup(&xdmsc->xvip);
 	return 0;
 }
 

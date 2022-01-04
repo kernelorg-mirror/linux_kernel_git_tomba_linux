@@ -166,8 +166,8 @@ static inline void xvip_set(struct xvip_device *xvip, u32 addr, u32 set)
 void xvip_clr_or_set(struct xvip_device *xvip, u32 addr, u32 mask, bool set);
 void xvip_clr_and_set(struct xvip_device *xvip, u32 addr, u32 clr, u32 set);
 
-int xvip_init_resources(struct xvip_device *xvip);
-void xvip_cleanup_resources(struct xvip_device *xvip);
+int xvip_device_init(struct xvip_device *xvip);
+void xvip_device_cleanup(struct xvip_device *xvip);
 
 static inline void xvip_reset(struct xvip_device *xvip)
 {

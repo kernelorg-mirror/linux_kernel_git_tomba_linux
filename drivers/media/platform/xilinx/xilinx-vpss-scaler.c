@@ -2030,7 +2030,7 @@ static int xscaler_probe(struct platform_device *pdev)
 			goto axis_clk_cleanup;
 		}
 	} else {
-		ret = xvip_init_resources(&xscaler->xvip);
+		ret = xvip_device_init(&xscaler->xvip);
 		if (ret < 0)
 			return ret;
 	}
@@ -2093,7 +2093,7 @@ error:
 axis_clk_cleanup:
 	clk_disable_unprepare(xscaler->aclk_axis);
 res_cleanup:
-	xvip_cleanup_resources(&xscaler->xvip);
+	xvip_device_cleanup(&xscaler->xvip);
 	return ret;
 }
 
@@ -2106,7 +2106,7 @@ static int xscaler_remove(struct platform_device *pdev)
 	media_entity_cleanup(&subdev->entity);
 	clk_disable_unprepare(xscaler->aclk_ctrl);
 	clk_disable_unprepare(xscaler->aclk_axis);
-	xvip_cleanup_resources(&xscaler->xvip);
+	xvip_device_cleanup(&xscaler->xvip);
 
 	return 0;
 }

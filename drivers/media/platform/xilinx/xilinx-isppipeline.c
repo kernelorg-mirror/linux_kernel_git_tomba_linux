@@ -558,7 +558,7 @@ static int xisp_probe(struct platform_device *pdev)
 	if (rval < 0)
 		return rval;
 
-	rval = xvip_init_resources(&xisp->xvip);
+	rval = xvip_device_init(&xisp->xvip);
 	if (rval)
 		return -EIO;
 
@@ -632,7 +632,7 @@ static int xisp_probe(struct platform_device *pdev)
 ctrl_error:
 	v4l2_ctrl_handler_free(&xisp->ctrl_handler);
 media_error:
-	xvip_cleanup_resources(&xisp->xvip);
+	xvip_device_cleanup(&xisp->xvip);
 
 	return rval;
 }
@@ -644,7 +644,7 @@ static int xisp_remove(struct platform_device *pdev)
 
 	v4l2_async_unregister_subdev(subdev);
 	media_entity_cleanup(&subdev->entity);
-	xvip_cleanup_resources(&xisp->xvip);
+	xvip_device_cleanup(&xisp->xvip);
 
 	return 0;
 }

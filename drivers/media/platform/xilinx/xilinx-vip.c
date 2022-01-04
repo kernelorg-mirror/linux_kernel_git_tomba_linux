@@ -386,7 +386,7 @@ void xvip_clr_and_set(struct xvip_device *xvip, u32 addr, u32 clr, u32 set)
 }
 EXPORT_SYMBOL_GPL(xvip_clr_and_set);
 
-int xvip_init_resources(struct xvip_device *xvip)
+int xvip_device_init(struct xvip_device *xvip)
 {
 	struct platform_device *pdev = to_platform_device(xvip->dev);
 
@@ -400,13 +400,13 @@ int xvip_init_resources(struct xvip_device *xvip)
 
 	return clk_prepare_enable(xvip->clk);
 }
-EXPORT_SYMBOL_GPL(xvip_init_resources);
+EXPORT_SYMBOL_GPL(xvip_device_init);
 
-void xvip_cleanup_resources(struct xvip_device *xvip)
+void xvip_device_cleanup(struct xvip_device *xvip)
 {
 	clk_disable_unprepare(xvip->clk);
 }
-EXPORT_SYMBOL_GPL(xvip_cleanup_resources);
+EXPORT_SYMBOL_GPL(xvip_device_cleanup);
 
 /* -----------------------------------------------------------------------------
  * Subdev operations handlers

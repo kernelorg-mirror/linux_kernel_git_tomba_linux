@@ -626,7 +626,7 @@ static int xscaler_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_init_resources(&xscaler->xvip);
+	ret = xvip_device_init(&xscaler->xvip);
 	if (ret < 0)
 		return ret;
 
@@ -710,7 +710,7 @@ static int xscaler_probe(struct platform_device *pdev)
 
 error:
 	media_entity_cleanup(&subdev->entity);
-	xvip_cleanup_resources(&xscaler->xvip);
+	xvip_device_cleanup(&xscaler->xvip);
 	return ret;
 }
 
@@ -722,7 +722,7 @@ static int xscaler_remove(struct platform_device *pdev)
 	v4l2_async_unregister_subdev(subdev);
 	media_entity_cleanup(&subdev->entity);
 
-	xvip_cleanup_resources(&xscaler->xvip);
+	xvip_device_cleanup(&xscaler->xvip);
 
 	return 0;
 }

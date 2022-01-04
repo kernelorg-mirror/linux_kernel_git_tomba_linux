@@ -1099,7 +1099,7 @@ static int xcsc_probe(struct platform_device *pdev)
 
 	/* Reset and initialize the core */
 	gpiod_set_value_cansleep(xcsc->rst_gpio, XCSC_RESET_DEASSERT);
-	rval = xvip_init_resources(&xcsc->xvip);
+	rval = xvip_device_init(&xcsc->xvip);
 	if (rval < 0)
 		return rval;
 
@@ -1168,7 +1168,7 @@ ctrl_error:
 	v4l2_ctrl_handler_free(&xcsc->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 media_error:
-	xvip_cleanup_resources(&xcsc->xvip);
+	xvip_device_cleanup(&xcsc->xvip);
 	return rval;
 }
 
@@ -1180,7 +1180,7 @@ static int xcsc_remove(struct platform_device *pdev)
 	v4l2_async_unregister_subdev(subdev);
 	v4l2_ctrl_handler_free(&xcsc->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
-	xvip_cleanup_resources(&xcsc->xvip);
+	xvip_device_cleanup(&xcsc->xvip);
 	return 0;
 }
 

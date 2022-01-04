@@ -17,12 +17,14 @@
 #include <linux/of_irq.h>
 #include <linux/platform_device.h>
 #include <linux/v4l2-subdev.h>
+
 #include <media/media-entity.h>
 #include <media/mipi-csi2.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
+
 #include "xilinx-vip.h"
 
 /* Register register map */
@@ -200,8 +202,7 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
 
 /**
  * struct xcsi2rxss_state - CSI-2 Rx Subsystem device structure
- * @dev: Platform structure
- * @iomem: Base address of subsystem
+ * @xvip: Xilinx Video IP device
  * @clks: array of clocks
  * @rst_gpio: reset to video_aresetn
  * @lock: mutex for accessing this structure
@@ -210,8 +211,6 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  * @datatype: Data type filter
  * @enable_active_lanes: If number of active lanes can be modified
  * @en_vcx: If more than 4 VC are enabled
- * @pads: media pads
- * @subdev: The v4l2 subdev structure
  * @rsubdev: Remote subdev connected to sink pad
  * @format: Active V4L2 formats on each pad
  * @streaming: Flag for storing streaming state
@@ -221,9 +220,8 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  * This structure contains the device driver related parameters
  */
 struct xcsi2rxss_state {
-	struct device *dev;
+	struct xvip_device xvip;
 
-	void __iomem *iomem;
 	struct clk_bulk_data *clks;
 	struct gpio_desc *rst_gpio;
 
@@ -235,9 +233,6 @@ struct xcsi2rxss_state {
 	u32 datatype;
 	bool enable_active_lanes;
 	bool en_vcx;
-
-	struct media_pad pads[XCSI_MEDIA_PADS];
-	struct v4l2_subdev subdev;
 
 	struct v4l2_subdev *rsubdev;
 	struct v4l2_mbus_framefmt format;
@@ -255,7 +250,7 @@ static const struct clk_bulk_data xcsi2rxss_clks[] = {
 static inline struct xcsi2rxss_state *
 to_xcsi2rxssstate(struct v4l2_subdev *subdev)
 {
-	return container_of(subdev, struct xcsi2rxss_state, subdev);
+	return container_of(subdev, struct xcsi2rxss_state, xvip.subdev);
 }
 
 /*
@@ -263,13 +258,13 @@ to_xcsi2rxssstate(struct v4l2_subdev *subdev)
  */
 static inline u32 xcsi2rxss_read(struct xcsi2rxss_state *csi2rx, u32 addr)
 {
-	return ioread32(csi2rx->iomem + addr);
+	return xvip_read(&csi2rx->xvip, addr);
 }
 
 static inline void xcsi2rxss_write(struct xcsi2rxss_state *csi2rx, u32 addr,
 				   u32 value)
 {
-	iowrite32(value, csi2rx->iomem + addr);
+	xvip_write(&csi2rx->xvip, addr, value);
 }
 
 static inline void xcsi2rxss_clr(struct xcsi2rxss_state *csi2rx, u32 addr,
@@ -333,7 +328,7 @@ static int xcsi2rxss_soft_reset(struct xcsi2rxss_state *csi2rx)
 
 	while (xcsi2rxss_read(csi2rx, XCSI_CSR_OFFSET) & XCSI_CSR_RIPCD) {
 		if (timeout == 0) {
-			dev_err(csi2rx->dev, "soft reset timed out!\n");
+			dev_err(csi2rx->xvip.dev, "soft reset timed out!\n");
 			return -ETIME;
 		}
 
@@ -370,7 +365,7 @@ static void xcsi2rxss_reset_event_counters(struct xcsi2rxss_state *csi2rx)
 /* Print event counters */
 static void xcsi2rxss_log_counters(struct xcsi2rxss_state *csi2rx)
 {
-	struct device *dev = csi2rx->dev;
+	struct device *dev = csi2rx->xvip.dev;
 	unsigned int i;
 
 	for (i = 0; i < XCSI_NUM_EVENTS; i++) {
@@ -405,7 +400,7 @@ static void xcsi2rxss_log_counters(struct xcsi2rxss_state *csi2rx)
 static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 {
 	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
-	struct device *dev = csi2rx->dev;
+	struct device *dev = csi2rx->xvip.dev;
 	u32 reg, data;
 	unsigned int i, max_vc;
 
@@ -514,7 +509,7 @@ static int xcsi2rxss_start_stream(struct xcsi2rxss_state *csi2rx)
 	csi2rx->streaming = true;
 
 	csi2rx->rsubdev =
-		xcsi2rxss_get_remote_subdev(&csi2rx->pads[XVIP_PAD_SINK]);
+		xcsi2rxss_get_remote_subdev(&csi2rx->xvip.pads[XVIP_PAD_SINK]);
 
 	if (!csi2rx->rsubdev) {
 		ret = -ENODEV;
@@ -563,7 +558,7 @@ static void xcsi2rxss_stop_stream(struct xcsi2rxss_state *csi2rx)
 static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
 {
 	struct xcsi2rxss_state *csi2rx = (struct xcsi2rxss_state *)data;
-	struct device *dev = csi2rx->dev;
+	struct device *dev = csi2rx->xvip.dev;
 	u32 status;
 
 	status = xcsi2rxss_read(csi2rx, XCSI_ISR_OFFSET)
@@ -695,7 +690,7 @@ __xcsi2rxss_get_pad_format(struct xcsi2rxss_state *csi2rx,
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		get_fmt = v4l2_subdev_get_try_format(&csi2rx->subdev,
+		get_fmt = v4l2_subdev_get_try_format(&csi2rx->xvip.subdev,
 						     sd_state, pad);
 		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
@@ -854,7 +849,7 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 	 */
 	dt = xcsi2rxss_get_dt(fmt->format.code);
 	if (dt != csi2rx->datatype && dt != MIPI_CSI2_DT_RAW8) {
-		dev_dbg(csi2rx->dev, "Unsupported media bus format");
+		dev_dbg(csi2rx->xvip.dev, "Unsupported media bus format");
 		/* set the default format for the data type */
 		fmt->format.code = xcsi2rxss_get_nth_mbus(csi2rx->datatype,
 							  0);
@@ -900,7 +895,7 @@ static const struct v4l2_subdev_ops xcsi2rxss_ops = {
 
 static int xcsi2rxss_parse_of(struct xcsi2rxss_state *csi2rx)
 {
-	struct device *dev = csi2rx->dev;
+	struct device *dev = csi2rx->xvip.dev;
 	struct device_node *node = dev->of_node;
 
 	struct fwnode_handle *ep;
@@ -999,6 +994,12 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *csi2rx)
 	return 0;
 }
 
+static const struct xvip_device_info xcsi2rxss_info = {
+	.has_axi_lite = true,
+	.num_sinks = 1,
+	.num_sources = 1,
+};
+
 static int xcsi2rxss_probe(struct platform_device *pdev)
 {
 	struct v4l2_subdev *subdev;
@@ -1011,12 +1012,18 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	if (!csi2rx)
 		return -ENOMEM;
 
-	csi2rx->dev = dev;
+	csi2rx->xvip.dev = dev;
+
+	ret = xvip_device_init(&csi2rx->xvip, &xcsi2rxss_info);
+	if (ret)
+		return ret;
 
 	csi2rx->clks = devm_kmemdup(dev, xcsi2rxss_clks,
 				       sizeof(xcsi2rxss_clks), GFP_KERNEL);
-	if (!csi2rx->clks)
-		return -ENOMEM;
+	if (!csi2rx->clks) {
+		ret = -ENOMEM;
+		goto err_xvip;
+	}
 
 	/* Reset GPIO */
 	csi2rx->rst_gpio = devm_gpiod_get_optional(dev, "video-reset",
@@ -1024,32 +1031,31 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	if (IS_ERR(csi2rx->rst_gpio)) {
 		if (PTR_ERR(csi2rx->rst_gpio) != -EPROBE_DEFER)
 			dev_err(dev, "Video Reset GPIO not setup in DT");
-		return PTR_ERR(csi2rx->rst_gpio);
+		ret = PTR_ERR(csi2rx->rst_gpio);
+		goto err_xvip;
 	}
 
 	ret = xcsi2rxss_parse_of(csi2rx);
 	if (ret < 0)
-		return ret;
-
-	csi2rx->iomem = devm_platform_ioremap_resource(pdev, 0);
-	if (IS_ERR(csi2rx->iomem))
-		return PTR_ERR(csi2rx->iomem);
+		goto err_xvip;
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0)
-		return irq;
+	if (irq < 0) {
+		ret = irq;
+		goto err_xvip;
+	}
 
 	ret = devm_request_threaded_irq(dev, irq, NULL,
 					xcsi2rxss_irq_handler, IRQF_ONESHOT,
 					dev_name(dev), csi2rx);
 	if (ret) {
 		dev_err(dev, "Err = %d Interrupt handler reg failed!\n", ret);
-		return ret;
+		goto err_xvip;
 	}
 
 	ret = clk_bulk_get(dev, num_clks, csi2rx->clks);
 	if (ret)
-		return ret;
+		goto err_xvip;
 
 	/* TODO: Enable/disable clocks at stream on/off time. */
 	ret = clk_bulk_prepare_enable(num_clks, csi2rx->clks);
@@ -1061,10 +1067,6 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	xcsi2rxss_hard_reset(csi2rx);
 	xcsi2rxss_soft_reset(csi2rx);
 
-	/* Initialize V4L2 subdevice and media entity */
-	csi2rx->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	csi2rx->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
-
 	/* Initialize the default format */
 	csi2rx->default_format.code =
 		xcsi2rxss_get_nth_mbus(csi2rx->datatype, 0);
@@ -1075,7 +1077,7 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	csi2rx->format = csi2rx->default_format;
 
 	/* Initialize V4L2 subdevice and media entity */
-	subdev = &csi2rx->subdev;
+	subdev = &csi2rx->xvip.subdev;
 	v4l2_subdev_init(subdev, &xcsi2rxss_ops);
 	subdev->dev = dev;
 	strscpy(subdev->name, dev_name(dev), sizeof(subdev->name));
@@ -1084,7 +1086,7 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	v4l2_set_subdevdata(subdev, csi2rx);
 
 	ret = media_entity_pads_init(&subdev->entity, XCSI_MEDIA_PADS,
-				     csi2rx->pads);
+				     csi2rx->xvip.pads);
 	if (ret < 0)
 		goto error;
 
@@ -1103,13 +1105,15 @@ error:
 	clk_bulk_disable_unprepare(num_clks, csi2rx->clks);
 err_clk_put:
 	clk_bulk_put(num_clks, csi2rx->clks);
+err_xvip:
+	xvip_device_cleanup(&csi2rx->xvip);
 	return ret;
 }
 
 static int xcsi2rxss_remove(struct platform_device *pdev)
 {
 	struct xcsi2rxss_state *csi2rx = platform_get_drvdata(pdev);
-	struct v4l2_subdev *subdev = &csi2rx->subdev;
+	struct v4l2_subdev *subdev = &csi2rx->xvip.subdev;
 	int num_clks = ARRAY_SIZE(xcsi2rxss_clks);
 
 	v4l2_async_unregister_subdev(subdev);
@@ -1117,6 +1121,7 @@ static int xcsi2rxss_remove(struct platform_device *pdev)
 	mutex_destroy(&csi2rx->lock);
 	clk_bulk_disable_unprepare(num_clks, csi2rx->clks);
 	clk_bulk_put(num_clks, csi2rx->clks);
+	xvip_device_cleanup(&csi2rx->xvip);
 
 	return 0;
 }

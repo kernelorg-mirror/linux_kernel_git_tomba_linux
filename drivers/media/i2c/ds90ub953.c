@@ -880,7 +880,7 @@ static int ub953_v4l2_notifier_register(struct ub953_data *priv)
 
 	asd = v4l2_async_notifier_add_fwnode_remote_subdev(
 		&priv->notifier, of_fwnode_handle(ep_node),
-		struct v4l2_async_subdev);
+		sizeof(*asd));
 
 	of_node_put(ep_node);
 

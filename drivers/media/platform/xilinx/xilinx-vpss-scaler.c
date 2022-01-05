@@ -1983,10 +1983,9 @@ static int xscaler_probe(struct platform_device *pdev)
 	struct xscaler_device *xscaler;
 	struct v4l2_subdev *subdev;
 	struct v4l2_mbus_framefmt *default_format;
-	int ret;
 	const struct of_device_id *match;
 	struct device_node *node = pdev->dev.of_node;
-	struct resource *res;
+	int ret;
 
 	xscaler = devm_kzalloc(&pdev->dev, sizeof(*xscaler), GFP_KERNEL);
 	if (!xscaler)
@@ -2010,16 +2009,14 @@ static int xscaler_probe(struct platform_device *pdev)
 	if (ret < 0)
 		return ret;
 
+	ret = xvip_device_init(&xscaler->xvip, &xscaler_info);
+	if (ret < 0)
+		return ret;
+
 	/* Initialize coefficient parameters */
 	xscaler->max_num_phases = XSCALER_MAX_PHASES;
 
 	if (xscaler->cfg->flags & XSCALER_CLK_PROP) {
-		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-		xscaler->xvip.iomem = devm_ioremap_resource(xscaler->xvip.dev,
-							    res);
-		if (IS_ERR(xscaler->xvip.iomem))
-			return PTR_ERR(xscaler->xvip.iomem);
-
 		ret = clk_prepare_enable(xscaler->aclk_axis);
 		if (ret) {
 			dev_err(&pdev->dev, "failed to enable aclk_axis (%d)\n",
@@ -2033,10 +2030,6 @@ static int xscaler_probe(struct platform_device *pdev)
 				ret);
 			goto axis_clk_cleanup;
 		}
-	} else {
-		ret = xvip_device_init(&xscaler->xvip, &xscaler_info);
-		if (ret < 0)
-			return ret;
 	}
 
 	/* Reset the Global IP Reset through a PS GPIO */

@@ -113,21 +113,24 @@ struct media_pipeline {
 };
 
 /**
- * struct media_pipeline_pad - A pad part of a media pipeline
+ * struct media_pipeline_pad - A pad and associated streams part of a media
+ *	pipeline
  *
- * @list:		Entry in the media_pad pads list
- * @pipe:		The media_pipeline that the pad is part of
+ * @list:		Entry in the media_pipeline pads list
+ * @pipe:		The media_pipeline that the pad and streams are part of
  * @pad:		The media pad
+ * @streams:		Bitmask of streams on the pad
  *
- * This structure associate a pad with a media pipeline. Instances of
- * media_pipeline_pad are created by media_pipeline_start() when it builds the
- * pipeline, and stored in the &media_pad.pads list. media_pipeline_stop()
- * removes the entries from the list and deletes them.
+ * This structure associate a pad and streams it carries with a media pipeline.
+ * Instances of media_pipeline_pad are created by media_pipeline_start() when it
+ * builds the pipeline, and stored in the &media_pad.pads list.
+ * media_pipeline_stop() removes the entries from the list and deletes them.
  */
 struct media_pipeline_pad {
 	struct list_head list;
 	struct media_pipeline *pipe;
 	struct media_pad *pad;
+	u64 streams;
 };
 
 /**
@@ -237,8 +240,10 @@ struct media_pad {
  * @link_validate:	Return whether a link is valid from the entity point of
  *			view. The media_pipeline_start() function
  *			validates all links by calling this operation. Optional.
- * @has_pad_interdep:	Return whether two pads of the entity are
- *			interdependent. If two pads are interdependent they are
+ * @has_pad_interdep:	Return the bitmask of streams on pad1 that are related
+ *			to the given streams (also expressed as a bitmask) on
+ *			pad0 (0 if there is no interdepency of streams between
+ *			pad0 and pad1). If two pads are interdependent they are
  *			part of the same pipeline and enabling one of the pads
  *			means that the other pad will become "locked" and
  *			doesn't allow configuration changes. pad0 and pad1 are
@@ -246,7 +251,8 @@ struct media_pad {
  *			the .has_pad_interdep() operation directly, always use
  *			media_entity_has_pad_interdep().
  *			Optional: If the operation isn't implemented all pads
- *			will be considered as interdependent.
+ *			will be considered as interdependent, with the same
+ *			streams.
  *
  * .. note::
  *
@@ -260,8 +266,8 @@ struct media_entity_operations {
 			  const struct media_pad *local,
 			  const struct media_pad *remote, u32 flags);
 	int (*link_validate)(struct media_link *link);
-	bool (*has_pad_interdep)(struct media_entity *entity, unsigned int pad0,
-				 unsigned int pad1);
+	u64 (*has_pad_interdep)(struct media_entity *entity, unsigned int pad0,
+				u64 streams, unsigned int pad1);
 };
 
 /**

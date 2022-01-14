@@ -1306,6 +1306,7 @@ int v4l2_subdev_link_validate(struct media_link *link);
  *
  * @entity: pointer to &struct media_entity
  * @pad0: pad number for the first pad
+ * @streams: streams bitmask on the first pad
  * @pad1: pad number for the second pad
  *
  * This function is an implementation of the
@@ -1316,8 +1317,8 @@ int v4l2_subdev_link_validate(struct media_link *link);
  * It considers two pads interdependent if there is an active route between pad0
  * and pad1.
  */
-bool v4l2_subdev_has_pad_interdep(struct media_entity *entity,
-				  unsigned int pad0, unsigned int pad1);
+u64 v4l2_subdev_has_pad_interdep(struct media_entity *entity, unsigned int pad0,
+				 u64 streams, unsigned int pad1);
 
 /**
  * __v4l2_subdev_state_alloc - allocate v4l2_subdev_state

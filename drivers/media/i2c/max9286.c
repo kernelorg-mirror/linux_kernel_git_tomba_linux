@@ -1229,7 +1229,8 @@ static const struct v4l2_subdev_ops max9286_subdev_ops = {
 };
 
 static const struct media_entity_operations max9286_media_ops = {
-	.link_validate = v4l2_subdev_link_validate
+	.link_validate = v4l2_subdev_link_validate,
+	.has_pad_interdep = v4l2_subdev_has_pad_interdep,
 };
 
 static int max9286_s_ctrl(struct v4l2_ctrl *ctrl)

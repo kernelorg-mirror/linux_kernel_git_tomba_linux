@@ -1228,9 +1228,40 @@ static const struct v4l2_subdev_ops max9286_subdev_ops = {
 	.pad		= &max9286_pad_ops,
 };
 
+static u64 max9286_has_pad_interdep(struct media_entity *entity,
+				    unsigned int pad0, u64 streams,
+				    unsigned int pad1)
+{
+	struct v4l2_subdev *sd = media_entity_to_v4l2_subdev(entity);
+	struct v4l2_subdev_krouting *routing;
+	struct v4l2_subdev_state *state;
+	u64 pad1_streams = 0;
+	unsigned int i;
+
+	if (pad0 == MAX9286_SRC_PAD)
+		return v4l2_subdev_has_pad_interdep(entity, pad0, streams, pad1);
+
+	state = v4l2_subdev_lock_and_get_active_state(sd);
+
+	routing = &state->routing;
+
+	for (i = 0; i < routing->num_routes; ++i) {
+		struct v4l2_subdev_route *route = &routing->routes[i];
+
+		if (!(route->flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE))
+			continue;
+
+		pad1_streams |= BIT(route->source_stream);
+	}
+
+	v4l2_subdev_unlock_state(state);
+
+	return pad1_streams;
+}
+
 static const struct media_entity_operations max9286_media_ops = {
 	.link_validate = v4l2_subdev_link_validate,
-	.has_pad_interdep = v4l2_subdev_has_pad_interdep,
+	.has_pad_interdep = max9286_has_pad_interdep,
 };
 
 static int max9286_s_ctrl(struct v4l2_ctrl *ctrl)

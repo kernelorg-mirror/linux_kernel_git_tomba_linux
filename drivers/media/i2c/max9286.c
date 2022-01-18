@@ -207,6 +207,7 @@ struct max9286_priv {
 	unsigned int route_mask;
 	unsigned int bound_sources;
 	unsigned int csi2_data_lanes;
+	u64 enabled_streams;
 	struct max9286_source sources[MAX9286_NUM_GMSL];
 	struct v4l2_async_notifier notifier;
 };
@@ -636,18 +637,15 @@ static void max9286_set_fsync_period(struct max9286_priv *priv)
  * Configure the links output order (which defines on which CSI-2 VC a
  * link is output on) and configure link masking.
  */
-static void max9286_config_links(struct max9286_priv *priv)
+static void max9286_config_links(struct max9286_priv *priv,
+				 struct v4l2_subdev_state *state)
 {
-	const struct v4l2_subdev_krouting *routing;
+	const struct v4l2_subdev_krouting *routing = &state->routing;
 	const struct v4l2_mbus_framefmt *format;
-	struct v4l2_subdev_state *state;
 	unsigned int pad;
 	u8 link_order = 0;
 	u8 vc_mask = 0xf;
 	unsigned int i;
-
-	state = v4l2_subdev_lock_and_get_active_state(&priv->sd);
-	routing = &state->routing;
 
 	for (i = 0; i < routing->num_routes; ++i) {
 		struct v4l2_subdev_route *route = &routing->routes[i];
@@ -695,8 +693,6 @@ static void max9286_config_links(struct max9286_priv *priv)
 
 	max9286_set_video_format(priv, format);
 	max9286_set_fsync_period(priv);
-
-	v4l2_subdev_unlock_state(state);
 }
 
 /* -----------------------------------------------------------------------------
@@ -877,7 +873,9 @@ static void max9286_v4l2_notifier_unregister(struct max9286_priv *priv)
 	v4l2_async_nf_cleanup(&priv->notifier);
 }
 
-static int max9286_s_stream(struct v4l2_subdev *sd, int enable)
+static int max9286_enable_streams(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *state, u32 pad,
+				  u64 streams_mask)
 {
 	struct max9286_priv *priv = sd_to_max9286(sd);
 	struct max9286_source *source;
@@ -885,68 +883,94 @@ static int max9286_s_stream(struct v4l2_subdev *sd, int enable)
 	bool sync = false;
 	int ret;
 
-	if (enable) {
-		max9286_config_links(priv);
+	/*
+	 * Enable all configured sources as well as the MAX9286 when the first
+	 * stream is enabled. Subsequent calls to enable further streams are
+	 * just ignored.
+	 */
+	if (priv->enabled_streams) {
+		priv->enabled_streams |= streams_mask;
+		return 0;
+	}
 
-		/*
-		 * The frame sync between cameras is transmitted across the
-		 * reverse channel as GPIO. We must open all channels while
-		 * streaming to allow this synchronisation signal to be shared.
-		 */
-		max9286_i2c_mux_open(priv);
+	max9286_config_links(priv, state);
 
-		/* Start cameras. */
-		for_each_route(priv, source) {
-			ret = v4l2_subdev_call(source->sd, video, s_stream, 1);
-			if (ret)
-				return ret;
-		}
+	/*
+	 * The frame sync between cameras is transmitted across the
+	 * reverse channel as GPIO. We must open all channels while
+	 * streaming to allow this synchronisation signal to be shared.
+	 */
+	max9286_i2c_mux_open(priv);
 
-		ret = max9286_check_video_links(priv);
+	/* Start cameras. */
+	for_each_route(priv, source) {
+		ret = v4l2_subdev_call(source->sd, video, s_stream, 1);
 		if (ret)
 			return ret;
-
-		/*
-		 * Wait until frame synchronization is locked.
-		 *
-		 * Manual says frame sync locking should take ~6 VTS.
-		 * From practical experience at least 8 are required. Give
-		 * 12 complete frames time (~400ms at 30 fps) to achieve frame
-		 * locking before returning error.
-		 */
-		for (i = 0; i < 40; i++) {
-			if (max9286_read(priv, 0x31) & MAX9286_FSYNC_LOCKED) {
-				sync = true;
-				break;
-			}
-			usleep_range(9000, 11000);
-		}
-
-		if (!sync) {
-			dev_err(&priv->client->dev,
-				"Failed to get frame synchronization\n");
-			return -EXDEV; /* Invalid cross-device link */
-		}
-
-		/*
-		 * Configure the CSI-2 output to line interleaved mode (W x (N
-		 * x H), as opposed to the (N x W) x H mode that outputs the
-		 * images stitched side-by-side) and enable it.
-		 */
-		max9286_write(priv, 0x15, MAX9286_CSI_IMAGE_TYP | MAX9286_VCTYPE |
-			      MAX9286_CSIOUTEN | MAX9286_SWP_ENDIAN |
-			      MAX9286_EN_CCBSYB_CLK_STR | MAX9286_EN_GPI_CCBSYB);
-	} else {
-		max9286_write(priv, 0x15, MAX9286_VCTYPE | MAX9286_SWP_ENDIAN |
-			      MAX9286_EN_CCBSYB_CLK_STR |
-			      MAX9286_EN_GPI_CCBSYB);
-
-		/* Stop cameras. */
-		for_each_route(priv, source)
-			v4l2_subdev_call(source->sd, video, s_stream, 0);
-
-		max9286_i2c_mux_close(priv);
 	}
+
+	ret = max9286_check_video_links(priv);
+	if (ret)
+		return ret;
+
+	/*
+	 * Wait until frame synchronization is locked.
+	 *
+	 * Manual says frame sync locking should take ~6 VTS.
+	 * From practical experience at least 8 are required. Give
+	 * 12 complete frames time (~400ms at 30 fps) to achieve frame
+	 * locking before returning error.
+	 */
+	for (i = 0; i < 40; i++) {
+		if (max9286_read(priv, 0x31) & MAX9286_FSYNC_LOCKED) {
+			sync = true;
+			break;
+		}
+		usleep_range(9000, 11000);
+	}
+
+	if (!sync) {
+		dev_err(&priv->client->dev,
+			"Failed to get frame synchronization\n");
+		return -EXDEV; /* Invalid cross-device link */
+	}
+
+	/*
+	 * Configure the CSI-2 output to line interleaved mode (W x (N
+	 * x H), as opposed to the (N x W) x H mode that outputs the
+	 * images stitched side-by-side) and enable it.
+	 */
+	max9286_write(priv, 0x15, MAX9286_CSI_IMAGE_TYP | MAX9286_VCTYPE |
+		      MAX9286_CSIOUTEN | MAX9286_SWP_ENDIAN |
+		      MAX9286_EN_CCBSYB_CLK_STR | MAX9286_EN_GPI_CCBSYB);
+
+	priv->enabled_streams |= streams_mask;
+
+	return 0;
+}
+
+static int max9286_disable_streams(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_state *state, u32 pad,
+				   u64 streams_mask)
+{
+	struct max9286_priv *priv = sd_to_max9286(sd);
+	struct max9286_source *source;
+
+	priv->enabled_streams &= ~streams_mask;
+
+	/* Don't turn anything off until the last stream gets disabled. */
+	if (priv->enabled_streams)
+		return 0;
+
+	max9286_write(priv, 0x15, MAX9286_VCTYPE | MAX9286_SWP_ENDIAN |
+		      MAX9286_EN_CCBSYB_CLK_STR |
+		      MAX9286_EN_GPI_CCBSYB);
+
+	/* Stop cameras. */
+	for_each_route(priv, source)
+		v4l2_subdev_call(source->sd, video, s_stream, 0);
+
+	max9286_i2c_mux_close(priv);
 
 	return 0;
 }
@@ -1209,7 +1233,7 @@ static int max9286_init_cfg(struct v4l2_subdev *sd,
 }
 
 static const struct v4l2_subdev_video_ops max9286_video_ops = {
-	.s_stream	= max9286_s_stream,
+	.s_stream	= v4l2_subdev_s_stream_helper,
 	.g_frame_interval = max9286_g_frame_interval,
 	.s_frame_interval = max9286_s_frame_interval,
 };
@@ -1221,6 +1245,8 @@ static const struct v4l2_subdev_pad_ops max9286_pad_ops = {
 	.set_fmt	= max9286_set_fmt,
 	.get_frame_desc = max9286_get_frame_desc,
 	.set_routing	= max9286_set_routing,
+	.enable_streams = max9286_enable_streams,
+	.disable_streams = max9286_disable_streams,
 };
 
 static const struct v4l2_subdev_ops max9286_subdev_ops = {

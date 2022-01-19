@@ -148,10 +148,25 @@ struct xvip_device_port {
 };
 
 /**
+ * struct xvip_device_ops - Xilinx Video IP device operations
+ * @enable_streams: Enable streams on a pad
+ * @disable_streams: Disable streams on a pad
+ */
+struct xvip_device_ops {
+	int (*enable_streams)(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_state *state,
+			      u32 pad, u64 streams);
+	int (*disable_streams)(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state,
+			       u32 pad, u64 streams);
+};
+
+/**
  * struct xvip_device - Xilinx Video IP device structure
  * @dev: (OF) device
  * @iomem: device I/O register space remapped to kernel virtual memory
  * @clk: video core clock
+ * @ops: xvip device operations
  * @subdev: V4L2 subdevice
  * @num_sinks: Number of sink pads
  * @num_sources: Number of source pads
@@ -164,6 +179,8 @@ struct xvip_device {
 	void __iomem *iomem;
 	struct clk *clk;
 
+	const struct xvip_device_ops *ops;
+
 	struct v4l2_subdev subdev;
 	unsigned int num_sinks;
 	unsigned int num_sources;
@@ -172,6 +189,11 @@ struct xvip_device {
 
 	u32 saved_ctrl;
 };
+
+static inline struct xvip_device *to_xvip_device(struct v4l2_subdev *sd)
+{
+	return container_of(sd, struct xvip_device, subdev);
+}
 
 const struct xvip_video_format *xvip_get_format_by_code(unsigned int code);
 const struct xvip_video_format *xvip_get_format_by_fourcc(u32 fourcc);
@@ -191,6 +213,11 @@ int xvip_link_validate(struct v4l2_subdev *sd, struct media_link *link,
 		       struct v4l2_subdev_format *sink_fmt);
 int xvip_get_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 			 struct v4l2_mbus_config *config);
+int xvip_enable_streams(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
+			u32 pad, u64 streams_mask);
+int xvip_disable_streams(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
+			u32 pad, u64 streams_mask);
+int xvip_s_stream(struct v4l2_subdev *sd, int enable);
 
 static inline u32 xvip_read(struct xvip_device *xvip, u32 addr)
 {

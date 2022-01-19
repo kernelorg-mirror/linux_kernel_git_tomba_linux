@@ -3169,14 +3169,6 @@ static int xhdmirx_set_edid(struct v4l2_subdev *subdev, struct v4l2_edid *edid)
 	return ret;
 }
 
-static int xhdmirx_s_stream(struct v4l2_subdev *subdev, int enable)
-{
-	struct xhdmirx_state *xhdmi = to_xhdmirx_state(subdev);
-
-	dev_dbg(xhdmi->xvip.dev, "s_stream : enable %d\n", enable);
-	return 0;
-}
-
 /**
  * xhdmirx_g_input_status - Gets the current link status
  *
@@ -3332,7 +3324,7 @@ static int xhdmirx_subscribe_event(struct v4l2_subdev *sd, struct v4l2_fh *fh,
 }
 
 static const struct v4l2_subdev_video_ops xvideo_ops = {
-	.s_stream		= xhdmirx_s_stream,
+	.s_stream		= xvip_s_stream,
 	.query_dv_timings	= xhdmirx_query_dv_timings,
 	.g_input_status		= xhdmirx_g_input_status,
 };
@@ -3348,6 +3340,8 @@ static const struct v4l2_subdev_pad_ops xpad_ops = {
 	.dv_timings_cap		= xhdmirx_dv_timings_cap,
 	.get_fmt		= xhdmirx_get_format,
 	.set_fmt		= xhdmirx_set_format,
+	.enable_streams		= xvip_enable_streams,
+	.disable_streams	= xvip_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xhdmirx_ops = {

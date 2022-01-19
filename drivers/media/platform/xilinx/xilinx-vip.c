@@ -750,7 +750,7 @@ EXPORT_SYMBOL_GPL(xvip_link_validate);
 int xvip_get_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 			 struct v4l2_mbus_config *config)
 {
-	struct xvip_device *xvip = container_of(sd, struct xvip_device, subdev);
+	struct xvip_device *xvip = to_xvip_device(sd);
 
 	if (pad >= xvip->num_sinks + xvip->num_sources)
 		return -EINVAL;
@@ -761,3 +761,124 @@ int xvip_get_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(xvip_get_mbus_config);
+
+/**
+ * xvip_enable_streams - Enable streams on a subdevice
+ * @sd: The V4L2 subdevice
+ * @state: The subdevice state
+ * @pad: The pad
+ * @streams_mask: The streams mask
+ *
+ * This function is a drop-in implementation of the subdev enable_streams pad
+ * operation. It currently just delegates enabling of the streams to the
+ * &xvip_device_ops.enable_streams operation, and will be expanded when
+ * reworking the stream control implementation.
+ *
+ * Device that don't need to perform any operation when enabling streams may
+ * leave the &xvip_device_ops.enable_streams operation unimplemented.
+ *
+ * Return: 0 on success, or a negative error code otherwise.
+ */
+int xvip_enable_streams(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
+			u32 pad, u64 streams_mask)
+{
+	struct xvip_device *xvip = to_xvip_device(sd);
+	int ret = 0;
+
+	if (xvip->ops && xvip->ops->enable_streams)
+		ret = xvip->ops->enable_streams(sd, state, pad, streams_mask);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(xvip_enable_streams);
+
+/**
+ * xvip_disable_streams - Disables streams on a subdevice
+ * @sd: The V4L2 subdevice
+ * @state: The subdevice state
+ * @pad: The pad
+ * @streams_mask: The streams mask
+ *
+ * This function is a drop-in implementation of the subdev disable_streams pad
+ * operation. It currently just delegates disabling of the device to the
+ * &xvip_device_ops.disable_streams operation, and will be expanded when
+ * reworking the stream control implementation.
+ *
+ * Device that don't need to perform any operation when disabling streams may
+ * leave the &xvip_device_ops.disable_streams operation unimplemented.
+ *
+ * Return: 0 on success, or a negative error code otherwise.
+ */
+int xvip_disable_streams(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
+			u32 pad, u64 streams_mask)
+{
+	struct xvip_device *xvip = to_xvip_device(sd);
+	int ret = 0;
+
+	if (xvip->ops && xvip->ops->disable_streams)
+		ret = xvip->ops->disable_streams(sd, state, pad, streams_mask);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(xvip_disable_streams);
+
+/**
+ * xvip_s_streams - Start or stop streaming on a subdevice
+ * @sd: The V4L2 subdevice
+ * @enable: True to start streaming, false to stop it
+ *
+ * This function is a drop-in implementation of the subdev s_stream video
+ * operation. It is meant to handle the transition to per-stream control and
+ * should be removed once the transition completes.
+ *
+ * Return: 0 on success, or a negative error code otherwise.
+ */
+int xvip_s_stream(struct v4l2_subdev *sd, int enable)
+{
+	struct v4l2_subdev_state *state;
+	struct media_pad *pad;
+	int pad_index = -1;
+	u64 streams = BIT(1);
+	int ret;
+
+	/*
+	 * Find a source pad and collect all source streams to call the
+	 * stream enable/disable operations. This isn't entirely
+	 * correct, but should work well enough to handle the transition
+	 * away from .s_stream().
+	 */
+	media_entity_for_each_pad(&sd->entity, pad) {
+		if (pad->flags & MEDIA_PAD_FL_SOURCE) {
+			pad_index = pad->index;
+			break;
+		}
+	}
+
+	if (WARN_ON(pad_index == -1))
+		return -EINVAL;
+
+	state = v4l2_subdev_get_unlocked_active_state(sd);
+	if (state) {
+		struct v4l2_subdev_route *route;
+
+		v4l2_subdev_lock_state(state);
+
+		streams = 0;
+
+		for_each_active_route(&state->routing, route)
+			streams |= BIT(route->source_stream);
+	}
+
+	if (enable)
+		ret = v4l2_subdev_call(sd, pad, enable_streams, state,
+				       pad_index, streams);
+	else
+		ret = v4l2_subdev_call(sd, pad, disable_streams, state,
+				       pad_index, streams);
+
+	if (state)
+		v4l2_subdev_unlock_state(state);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(xvip_s_stream);

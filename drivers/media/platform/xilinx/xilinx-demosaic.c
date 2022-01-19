@@ -84,6 +84,52 @@ static inline struct xdmsc_dev *to_xdmsc(struct v4l2_subdev *subdev)
 	return container_of(subdev, struct xdmsc_dev, xvip.subdev);
 }
 
+/* -----------------------------------------------------------------------------
+ * xvip operations
+ */
+
+static int xdmsc_enable_streams(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xdmsc_dev *xdmsc = to_xdmsc(sd);
+
+	xdmsc_write(xdmsc, XDEMOSAIC_WIDTH,
+		    xdmsc->formats[XVIP_PAD_SINK].width);
+	xdmsc_write(xdmsc, XDEMOSAIC_HEIGHT,
+		    xdmsc->formats[XVIP_PAD_SINK].height);
+	xdmsc_write(xdmsc, XDEMOSAIC_INPUT_BAYER_FORMAT, xdmsc->bayer_fmt);
+
+	/* Start Demosaic Video IP */
+	xdmsc_write(xdmsc, XDEMOSAIC_AP_CTRL, XDEMOSAIC_STREAM_ON);
+
+	return 0;
+}
+
+static int xdmsc_disable_streams(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state, u32 pad,
+				 u64 streams_mask)
+{
+	struct xdmsc_dev *xdmsc = to_xdmsc(sd);
+
+	dev_dbg(xdmsc->xvip.dev, "%s : Off", __func__);
+	gpiod_set_value_cansleep(xdmsc->rst_gpio,
+				 XDEMOSAIC_RESET_ASSERT);
+	gpiod_set_value_cansleep(xdmsc->rst_gpio,
+				 XDEMOSAIC_RESET_DEASSERT);
+
+	return 0;
+}
+
+static const struct xvip_device_ops xdmsc_xvip_device_ops = {
+	.enable_streams = xdmsc_enable_streams,
+	.disable_streams = xdmsc_disable_streams,
+};
+
+/* -----------------------------------------------------------------------------
+ * V4L2 subdev operations
+ */
+
 static struct v4l2_mbus_framefmt
 *__xdmsc_get_pad_format(struct xdmsc_dev *xdmsc,
 			struct v4l2_subdev_state *sd_state,
@@ -106,34 +152,6 @@ static struct v4l2_mbus_framefmt
 
 	return get_fmt;
 }
-
-static int xdmsc_s_stream(struct v4l2_subdev *subdev, int enable)
-{
-	struct xdmsc_dev *xdmsc = to_xdmsc(subdev);
-
-	if (!enable) {
-		dev_dbg(xdmsc->xvip.dev, "%s : Off", __func__);
-		gpiod_set_value_cansleep(xdmsc->rst_gpio,
-					 XDEMOSAIC_RESET_ASSERT);
-		gpiod_set_value_cansleep(xdmsc->rst_gpio,
-					 XDEMOSAIC_RESET_DEASSERT);
-		return 0;
-	}
-
-	xdmsc_write(xdmsc, XDEMOSAIC_WIDTH,
-		    xdmsc->formats[XVIP_PAD_SINK].width);
-	xdmsc_write(xdmsc, XDEMOSAIC_HEIGHT,
-		    xdmsc->formats[XVIP_PAD_SINK].height);
-	xdmsc_write(xdmsc, XDEMOSAIC_INPUT_BAYER_FORMAT, xdmsc->bayer_fmt);
-
-	/* Start Demosaic Video IP */
-	xdmsc_write(xdmsc, XDEMOSAIC_AP_CTRL, XDEMOSAIC_STREAM_ON);
-	return 0;
-}
-
-static const struct v4l2_subdev_video_ops xdmsc_video_ops = {
-	.s_stream = xdmsc_s_stream,
-};
 
 static int xdmsc_get_format(struct v4l2_subdev *subdev,
 			    struct v4l2_subdev_state *sd_state,
@@ -251,11 +269,17 @@ static const struct v4l2_subdev_internal_ops xdmsc_internal_ops = {
 	.close = xdmsc_close,
 };
 
+static const struct v4l2_subdev_video_ops xdmsc_video_ops = {
+	.s_stream = xvip_s_stream,
+};
+
 static const struct v4l2_subdev_pad_ops xdmsc_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = xdmsc_get_format,
 	.set_fmt = xdmsc_set_format,
+	.enable_streams = xvip_enable_streams,
+	.disable_streams = xvip_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xdmsc_ops = {
@@ -320,7 +344,10 @@ static int xdmsc_probe(struct platform_device *pdev)
 	xdmsc = devm_kzalloc(&pdev->dev, sizeof(*xdmsc), GFP_KERNEL);
 	if (!xdmsc)
 		return -ENOMEM;
+
 	xdmsc->xvip.dev = &pdev->dev;
+	xdmsc->xvip.ops = &xdmsc_xvip_device_ops;
+
 	rval = xdmsc_parse_of(xdmsc);
 	if (rval < 0)
 		return rval;

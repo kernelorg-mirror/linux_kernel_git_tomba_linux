@@ -64,18 +64,15 @@ static inline struct xrgb2yuv_device *to_rgb2yuv(struct v4l2_subdev *subdev)
 	return container_of(subdev, struct xrgb2yuv_device, xvip.subdev);
 }
 
-/*
- * V4L2 Subdevice Video Operations
+/* -----------------------------------------------------------------------------
+ * xvip operations
  */
 
-static int xrgb2yuv_s_stream(struct v4l2_subdev *subdev, int enable)
+static int xrgb2yuv_enable_streams(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_state *state, u32 pad,
+				   u64 streams_mask)
 {
-	struct xrgb2yuv_device *xrgb2yuv = to_rgb2yuv(subdev);
-
-	if (!enable) {
-		xvip_stop(&xrgb2yuv->xvip);
-		return 0;
-	}
+	struct xrgb2yuv_device *xrgb2yuv = to_rgb2yuv(sd);
 
 	xvip_set_frame_size(&xrgb2yuv->xvip, &xrgb2yuv->formats[XVIP_PAD_SINK]);
 
@@ -83,6 +80,22 @@ static int xrgb2yuv_s_stream(struct v4l2_subdev *subdev, int enable)
 
 	return 0;
 }
+
+static int xrgb2yuv_disable_streams(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *state, u32 pad,
+				    u64 streams_mask)
+{
+	struct xrgb2yuv_device *xrgb2yuv = to_rgb2yuv(sd);
+
+	xvip_stop(&xrgb2yuv->xvip);
+
+	return 0;
+}
+
+static const struct xvip_device_ops xrgb2yuv_xvip_device_ops = {
+	.enable_streams = xrgb2yuv_enable_streams,
+	.disable_streams = xrgb2yuv_disable_streams,
+};
 
 /*
  * V4L2 Subdevice Pad Operations
@@ -238,7 +251,7 @@ static const struct v4l2_ctrl_ops xrgb2yuv_ctrl_ops = {
 };
 
 static struct v4l2_subdev_video_ops xrgb2yuv_video_ops = {
-	.s_stream = xrgb2yuv_s_stream,
+	.s_stream = xvip_s_stream,
 };
 
 static struct v4l2_subdev_pad_ops xrgb2yuv_pad_ops = {
@@ -246,6 +259,8 @@ static struct v4l2_subdev_pad_ops xrgb2yuv_pad_ops = {
 	.enum_frame_size	= xvip_enum_frame_size,
 	.get_fmt		= xrgb2yuv_get_format,
 	.set_fmt		= xrgb2yuv_set_format,
+	.enable_streams		= xvip_enable_streams,
+	.disable_streams	= xvip_disable_streams,
 };
 
 static struct v4l2_subdev_ops xrgb2yuv_ops = {
@@ -424,6 +439,7 @@ static int xrgb2yuv_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	xrgb2yuv->xvip.dev = &pdev->dev;
+	xrgb2yuv->xvip.ops = &xrgb2yuv_xvip_device_ops;
 
 	ret = xvip_device_init(&xrgb2yuv->xvip, &xrgb2yuv_info);
 	if (ret < 0)

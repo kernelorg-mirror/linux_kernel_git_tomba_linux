@@ -521,29 +521,6 @@ static inline struct xcsc_dev *to_csc(struct v4l2_subdev *subdev)
 	return container_of(subdev, struct xcsc_dev, xvip.subdev);
 }
 
-static struct v4l2_mbus_framefmt *
-__xcsc_get_pad_format(struct xcsc_dev *xcsc,
-		      struct v4l2_subdev_state *sd_state,
-		      unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *format;
-
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xcsc->xvip.subdev,
-						    sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		format = &xcsc->formats[pad];
-		break;
-	default:
-		format = NULL;
-		break;
-	}
-
-	return format;
-}
-
 static void
 xcsc_correct_coeff(struct xcsc_dev *xcsc,
 		   s32 temp[XV_CSC_K_MAX_ROWS][XV_CSC_K_MAX_COLUMNS + 1])
@@ -728,27 +705,18 @@ static void xcsc_set_size(struct xcsc_dev *xcsc)
 	xcsc_write(xcsc, XV_CSC_HEIGHT, height);
 }
 
-static int xcsc_s_stream(struct v4l2_subdev *subdev, int enable)
+/* -----------------------------------------------------------------------------
+ * xvip operations
+ */
+
+static int xcsc_enable_streams(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
 {
-	struct xcsc_dev *xcsc = to_csc(subdev);
+	struct xcsc_dev *xcsc = to_csc(sd);
 
-	dev_dbg(xcsc->xvip.dev, "%s : Stream %s", __func__,
-		enable ? "On" : "Off");
-	if (!enable) {
-		/* Reset the Global IP Reset through PS GPIO */
-		gpiod_set_value_cansleep(xcsc->rst_gpio, XCSC_RESET_ASSERT);
-		gpiod_set_value_cansleep(xcsc->rst_gpio, XCSC_RESET_DEASSERT);
+	dev_dbg(xcsc->xvip.dev, "%s : Stream On", __func__);
 
-		/* Reset the active controls */
-		xcsc->brightness_active	= 120;
-		xcsc->contrast_active = 0;
-		xcsc->red_gain_active = 120;
-		xcsc->blue_gain_active = 120;
-		xcsc->green_gain_active = 120;
-		xcsc_copy_coeff(xcsc->shadow_coeff, rgb_unity_matrix);
-
-		return 0;
-	}
 	/* Set the controls */
 	xcsc_set_brightness(xcsc);
 	xcsc_set_contrast(xcsc);
@@ -776,12 +744,64 @@ static int xcsc_s_stream(struct v4l2_subdev *subdev, int enable)
 #endif
 	/* Start VPSS CSC IP */
 	xcsc_write(xcsc, XV_CSC_AP_CTRL, XCSC_STREAM_ON);
+
 	return 0;
 }
 
-static const struct v4l2_subdev_video_ops xcsc_video_ops = {
-	.s_stream = xcsc_s_stream,
+static int xcsc_disable_streams(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xcsc_dev *xcsc = to_csc(sd);
+
+	dev_dbg(xcsc->xvip.dev, "%s : Stream Off", __func__);
+
+	/* Reset the Global IP Reset through PS GPIO */
+	gpiod_set_value_cansleep(xcsc->rst_gpio, XCSC_RESET_ASSERT);
+	gpiod_set_value_cansleep(xcsc->rst_gpio, XCSC_RESET_DEASSERT);
+
+	/* Reset the active controls */
+	xcsc->brightness_active	= 120;
+	xcsc->contrast_active = 0;
+	xcsc->red_gain_active = 120;
+	xcsc->blue_gain_active = 120;
+	xcsc->green_gain_active = 120;
+	xcsc_copy_coeff(xcsc->shadow_coeff, rgb_unity_matrix);
+
+	return 0;
+}
+
+static const struct xvip_device_ops xcsc_xvip_device_ops = {
+	.enable_streams = xcsc_enable_streams,
+	.disable_streams = xcsc_disable_streams,
 };
+
+/* -----------------------------------------------------------------------------
+ * V4L2 subdev operations
+ */
+
+static struct v4l2_mbus_framefmt *
+__xcsc_get_pad_format(struct xcsc_dev *xcsc,
+		      struct v4l2_subdev_state *sd_state,
+		      unsigned int pad, u32 which)
+{
+	struct v4l2_mbus_framefmt *format;
+
+	switch (which) {
+	case V4L2_SUBDEV_FORMAT_TRY:
+		format = v4l2_subdev_get_try_format(&xcsc->xvip.subdev,
+						    sd_state, pad);
+		break;
+	case V4L2_SUBDEV_FORMAT_ACTIVE:
+		format = &xcsc->formats[pad];
+		break;
+	default:
+		format = NULL;
+		break;
+	}
+
+	return format;
+}
 
 static int xcsc_get_format(struct v4l2_subdev *subdev,
 			   struct v4l2_subdev_state *sd_state,
@@ -849,11 +869,17 @@ static int xcsc_set_format(struct v4l2_subdev *subdev,
 	return 0;
 }
 
+static const struct v4l2_subdev_video_ops xcsc_video_ops = {
+	.s_stream = xvip_s_stream,
+};
+
 static const struct v4l2_subdev_pad_ops xcsc_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = xcsc_get_format,
 	.set_fmt = xcsc_set_format,
+	.enable_streams = xvip_enable_streams,
+	.disable_streams = xvip_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xcsc_ops = {
@@ -1087,6 +1113,7 @@ static int xcsc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	xcsc->xvip.dev = &pdev->dev;
+	xcsc->xvip.ops = &xcsc_xvip_device_ops;
 
 	rval = xcsc_parse_of(xcsc);
 	if (rval < 0)

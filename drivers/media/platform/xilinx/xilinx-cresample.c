@@ -54,18 +54,15 @@ static inline struct xcresample_device *to_cresample(struct v4l2_subdev *subdev)
 	return container_of(subdev, struct xcresample_device, xvip.subdev);
 }
 
-/*
- * V4L2 Subdevice Video Operations
+/* -----------------------------------------------------------------------------
+ * xvip operations
  */
 
-static int xcresample_s_stream(struct v4l2_subdev *subdev, int enable)
+static int xcresample_enable_streams(struct v4l2_subdev *sd,
+				     struct v4l2_subdev_state *state, u32 pad,
+				     u64 streams_mask)
 {
-	struct xcresample_device *xcresample = to_cresample(subdev);
-
-	if (!enable) {
-		xvip_stop(&xcresample->xvip);
-		return 0;
-	}
+	struct xcresample_device *xcresample = to_cresample(sd);
 
 	xvip_set_frame_size(&xcresample->xvip,
 			    &xcresample->formats[XVIP_PAD_SINK]);
@@ -74,6 +71,22 @@ static int xcresample_s_stream(struct v4l2_subdev *subdev, int enable)
 
 	return 0;
 }
+
+static int xcresample_disable_streams(struct v4l2_subdev *sd,
+				      struct v4l2_subdev_state *state, u32 pad,
+				      u64 streams_mask)
+{
+	struct xcresample_device *xcresample = to_cresample(sd);
+
+	xvip_stop(&xcresample->xvip);
+
+	return 0;
+}
+
+static const struct xvip_device_ops xcresample_xvip_device_ops = {
+	.enable_streams = xcresample_enable_streams,
+	.disable_streams = xcresample_disable_streams,
+};
 
 /*
  * V4L2 Subdevice Pad Operations
@@ -200,7 +213,7 @@ static const struct v4l2_ctrl_ops xcresample_ctrl_ops = {
 };
 
 static struct v4l2_subdev_video_ops xcresample_video_ops = {
-	.s_stream = xcresample_s_stream,
+	.s_stream = xvip_s_stream,
 };
 
 static struct v4l2_subdev_pad_ops xcresample_pad_ops = {
@@ -208,6 +221,8 @@ static struct v4l2_subdev_pad_ops xcresample_pad_ops = {
 	.enum_frame_size	= xvip_enum_frame_size,
 	.get_fmt		= xcresample_get_format,
 	.set_fmt		= xcresample_set_format,
+	.enable_streams		= xvip_enable_streams,
+	.disable_streams	= xvip_disable_streams,
 };
 
 static struct v4l2_subdev_ops xcresample_ops = {
@@ -302,6 +317,7 @@ static int xcresample_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	xcresample->xvip.dev = &pdev->dev;
+	xcresample->xvip.ops = &xcresample_xvip_device_ops;
 
 	ret = xvip_device_init(&xcresample->xvip, &xcresample_info);
 	if (ret < 0)

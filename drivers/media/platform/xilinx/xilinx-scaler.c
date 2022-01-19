@@ -239,16 +239,17 @@ static void xscaler_set_aperture(struct xscaler_device *xscaler)
 	xvip_enable_reg_update(&xscaler->xvip);
 }
 
-static int xscaler_s_stream(struct v4l2_subdev *subdev, int enable)
+/* -----------------------------------------------------------------------------
+ * xvip operations
+ */
+
+static int xscaler_enable_streams(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *state, u32 pad,
+				  u64 streams_mask)
 {
-	struct xscaler_device *xscaler = to_scaler(subdev);
+	struct xscaler_device *xscaler = to_scaler(sd);
 	u32 width;
 	u32 height;
-
-	if (!enable) {
-		xvip_stop(&xscaler->xvip);
-		return 0;
-	}
 
 	/* set input width / height */
 	width = xscaler->formats[XVIP_PAD_SINK].width;
@@ -271,6 +272,22 @@ static int xscaler_s_stream(struct v4l2_subdev *subdev, int enable)
 
 	return 0;
 }
+
+static int xscaler_disable_streams(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_state *state, u32 pad,
+				   u64 streams_mask)
+{
+	struct xscaler_device *xscaler = to_scaler(sd);
+
+	xvip_stop(&xscaler->xvip);
+
+	return 0;
+}
+
+static const struct xvip_device_ops xscaler_xvip_device_ops = {
+	.enable_streams = xscaler_enable_streams,
+	.disable_streams = xscaler_disable_streams,
+};
 
 /*
  * V4L2 Subdevice Pad Operations
@@ -491,7 +508,7 @@ static int xscaler_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 }
 
 static struct v4l2_subdev_video_ops xscaler_video_ops = {
-	.s_stream = xscaler_s_stream,
+	.s_stream = xvip_s_stream,
 };
 
 static struct v4l2_subdev_pad_ops xscaler_pad_ops = {
@@ -501,6 +518,8 @@ static struct v4l2_subdev_pad_ops xscaler_pad_ops = {
 	.set_fmt		= xscaler_set_format,
 	.get_selection		= xscaler_get_selection,
 	.set_selection		= xscaler_set_selection,
+	.enable_streams		= xvip_enable_streams,
+	.disable_streams	= xvip_disable_streams,
 };
 
 static struct v4l2_subdev_ops xscaler_ops = {
@@ -596,6 +615,7 @@ static int xscaler_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	xscaler->xvip.dev = &pdev->dev;
+	xscaler->xvip.ops = &xscaler_xvip_device_ops;
 
 	ret = xscaler_parse_of(xscaler);
 	if (ret < 0)

@@ -58,6 +58,42 @@ static inline struct xhls_device *to_hls(struct v4l2_subdev *subdev)
 }
 
 /* -----------------------------------------------------------------------------
+ * xvip operations
+ */
+
+static int xhls_enable_streams(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
+{
+	struct xhls_device *xhls = to_hls(sd);
+	struct v4l2_mbus_framefmt *format = &xhls->formats[XVIP_PAD_SINK];
+
+	xvip_write(&xhls->xvip, XHLS_REG_COLS, format->width);
+	xvip_write(&xhls->xvip, XHLS_REG_ROWS, format->height);
+
+	xvip_write(&xhls->xvip, XVIP_CTRL_CONTROL,
+		   XHLS_REG_CTRL_AUTO_RESTART | XVIP_CTRL_CONTROL_SW_ENABLE);
+
+	return 0;
+}
+
+static int xhls_disable_streams(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xhls_device *xhls = to_hls(sd);
+
+	xvip_write(&xhls->xvip, XVIP_CTRL_CONTROL, 0);
+
+	return 0;
+}
+
+static const struct xvip_device_ops xhls_xvip_device_ops = {
+	.enable_streams = xhls_enable_streams,
+	.disable_streams = xhls_disable_streams,
+};
+
+/* -----------------------------------------------------------------------------
  * Controls
  */
 
@@ -168,29 +204,6 @@ static long xhls_ioctl(struct v4l2_subdev *subdev, unsigned int cmd, void *arg)
 }
 
 /* -----------------------------------------------------------------------------
- * V4L2 Subdevice Video Operations
- */
-
-static int xhls_s_stream(struct v4l2_subdev *subdev, int enable)
-{
-	struct xhls_device *xhls = to_hls(subdev);
-	struct v4l2_mbus_framefmt *format = &xhls->formats[XVIP_PAD_SINK];
-
-	if (!enable) {
-		xvip_write(&xhls->xvip, XVIP_CTRL_CONTROL, 0);
-		return 0;
-	}
-
-	xvip_write(&xhls->xvip, XHLS_REG_COLS, format->width);
-	xvip_write(&xhls->xvip, XHLS_REG_ROWS, format->height);
-
-	xvip_write(&xhls->xvip, XVIP_CTRL_CONTROL,
-		   XHLS_REG_CTRL_AUTO_RESTART | XVIP_CTRL_CONTROL_SW_ENABLE);
-
-	return 0;
-}
-
-/* -----------------------------------------------------------------------------
  * V4L2 Subdevice Pad Operations
  */
 
@@ -293,7 +306,7 @@ static struct v4l2_subdev_core_ops xhls_core_ops = {
 };
 
 static struct v4l2_subdev_video_ops xhls_video_ops = {
-	.s_stream = xhls_s_stream,
+	.s_stream = xvip_s_stream,
 };
 
 static struct v4l2_subdev_pad_ops xhls_pad_ops = {
@@ -301,6 +314,8 @@ static struct v4l2_subdev_pad_ops xhls_pad_ops = {
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = xhls_get_format,
 	.set_fmt = xhls_set_format,
+	.enable_streams = xvip_enable_streams,
+	.disable_streams = xvip_disable_streams,
 };
 
 static struct v4l2_subdev_ops xhls_ops = {
@@ -379,6 +394,7 @@ static int xhls_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	xhls->xvip.dev = &pdev->dev;
+	xhls->xvip.ops = &xhls_xvip_device_ops;
 
 	ret = xhls_parse_of(xhls);
 	if (ret < 0)

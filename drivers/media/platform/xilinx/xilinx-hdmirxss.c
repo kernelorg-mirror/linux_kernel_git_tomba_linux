@@ -3033,182 +3033,18 @@ static void xhdmirx_init(struct xhdmirx_state *xhdmi)
 	xhdmirx_reset(xhdmi);
 }
 
-static void print_dt_clk_err_msg(struct xhdmirx_state *xhdmi, u8 isfrlclk, const char *range)
+static void xhdmirx_delayed_work_enable_hotplug(struct work_struct *work)
 {
-	dev_err(xhdmi->dev, "The %s port is driven by a clock outside the valid range (%s MHz)",
-		isfrlclk ? "frl_clk" : "vid_clk", range);
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct xhdmirx_state *xhdmi = container_of(dwork, struct xhdmirx_state,
+						   delayed_work_enable_hotplug);
+
+	xhdmirx_set_hpd(xhdmi, 1);
 }
 
-static int xhdmirx_parse_of(struct xhdmirx_state *xhdmi)
-{
-	struct device_node *node = xhdmi->dev->of_node;
-	struct device *dev = xhdmi->dev;
-	int ret;
-
-	ret = of_property_read_u16(node, "xlnx,edid-ram-size",
-				   &xhdmi->edid_ram_size);
-	if (ret) {
-		dev_err(dev, "xlnx,edid-ram-size property not found.\n");
-		return ret;
-	}
-
-	if (xhdmi->edid_ram_size != 256 && xhdmi->edid_ram_size != 512 &&
-	    xhdmi->edid_ram_size != 1024 && xhdmi->edid_ram_size != 4096) {
-		dev_err(dev, "invalid edid ram size %d in dt\n",
-			xhdmi->edid_ram_size);
-		return -EINVAL;
-	}
-
-	xhdmi->edid_blocks_max = xhdmi->edid_ram_size / XEDID_BLOCK_SIZE;
-
-	ret = of_property_read_u8(node, "xlnx,input-pixels-per-clock",
-				  &xhdmi->max_ppc);
-	if (ret) {
-		dev_err(dev, "xlnx,input-pixels-per-clock property not found.\n");
-		return ret;
-	}
-
-	if (xhdmi->max_ppc != 4 && xhdmi->max_ppc != 8) {
-		dev_err(dev, "dt pixels per clock %d  is invalid.\n",
-			xhdmi->max_ppc);
-		return -EINVAL;
-	}
-
-	ret = of_property_read_u8(node, "xlnx,max-bits-per-component",
-				  &xhdmi->max_bpc);
-	if (ret) {
-		dev_err(dev, "xlnx,max-bit-per-component property not found.\n");
-		return ret;
-	}
-
-	if (xhdmi->max_bpc != 8 && xhdmi->max_bpc != 10 &&
-	    xhdmi->max_bpc != 12 && xhdmi->max_bpc != 16) {
-		dev_err(dev, "dt max bits per component %d is invalid.\n",
-			xhdmi->max_bpc);
-		return -EINVAL;
-	}
-
-	ret = of_property_read_u8(node, "xlnx,max-frl-rate",
-				  &xhdmi->max_frl_rate);
-	if (ret) {
-		dev_err(dev, "xlnx,max-frl-rate property not found.\n");
-		return ret;
-	}
-
-	if (xhdmi->max_frl_rate != 4 && xhdmi->max_frl_rate != 5 &&
-	    xhdmi->max_frl_rate != 6) {
-		dev_err(dev, "dt max frl rate %d is invalid.\n", xhdmi->max_frl_rate);
-		return -EINVAL;
-	}
-
-	ret = of_property_read_u32(node, "xlnx,frl-clk-freq-khz",
-				   &xhdmi->frlclkfreqkhz);
-	if (ret) {
-		dev_err(dev, "frl clk freq khz property not found!");
-		return ret;
-	}
-
-	ret = of_property_read_u32(node, "xlnx,vid-clk-freq-khz",
-				   &xhdmi->vidclkfreqkhz);
-	if (ret) {
-		dev_err(dev, "video clk freq khz property not found!");
-		return ret;
-	}
-
-	switch (xhdmi->max_frl_rate) {
-	case 6:
-		/* 12G @ 4 Lanes */
-		if (xhdmi->frlclkfreqkhz < 449000 || xhdmi->frlclkfreqkhz > 451000) {
-			print_dt_clk_err_msg(xhdmi, 1, "449-451");
-			ret = -EINVAL;
-		}
-		if (xhdmi->vidclkfreqkhz < 399000 || xhdmi->vidclkfreqkhz > 401000) {
-			print_dt_clk_err_msg(xhdmi, 0, "399-401");
-			ret = -EINVAL;
-		}
-		break;
-	case 5:
-		/* 10G @ 4 Lanes */
-		if (xhdmi->frlclkfreqkhz < 379000 || xhdmi->frlclkfreqkhz > 381000) {
-			print_dt_clk_err_msg(xhdmi, 1, "379-381");
-			ret = -EINVAL;
-		}
-		if (xhdmi->vidclkfreqkhz < 374000 || xhdmi->vidclkfreqkhz > 376000) {
-			print_dt_clk_err_msg(xhdmi, 0, "374-376");
-			ret = -EINVAL;
-		}
-		break;
-	case 4:
-		/* 8G @ 4 Lanes */
-		if (xhdmi->frlclkfreqkhz < 324000 || xhdmi->frlclkfreqkhz > 326000) {
-			print_dt_clk_err_msg(xhdmi, 1, "324-326");
-			ret = -EINVAL;
-		}
-		if (xhdmi->vidclkfreqkhz < 299000 || xhdmi->vidclkfreqkhz > 301000) {
-			print_dt_clk_err_msg(xhdmi, 0, "299-301");
-			ret = -EINVAL;
-		}
-		break;
-	case 3:
-		/* 6G @ 4 Lanes */
-		if (xhdmi->frlclkfreqkhz < 249000 || xhdmi->frlclkfreqkhz > 251000) {
-			print_dt_clk_err_msg(xhdmi, 1, "249-251");
-			ret = -EINVAL;
-		}
-		if (xhdmi->vidclkfreqkhz < 224000 || xhdmi->vidclkfreqkhz > 226000) {
-			print_dt_clk_err_msg(xhdmi, 0, "224-226");
-			ret = -EINVAL;
-		}
-		break;
-	case 2:
-		/* 6G @ 4 Lanes */
-		if (xhdmi->frlclkfreqkhz < 199000 || xhdmi->frlclkfreqkhz > 201000) {
-			print_dt_clk_err_msg(xhdmi, 1, "199-201");
-			ret = -EINVAL;
-		}
-		if (xhdmi->vidclkfreqkhz < 174000 || xhdmi->vidclkfreqkhz > 176000) {
-			print_dt_clk_err_msg(xhdmi, 0, "174-176");
-			ret = -EINVAL;
-		}
-		break;
-	case 1:
-		/* 3G @ 3 Lanes */
-		if (xhdmi->frlclkfreqkhz < 149000 || xhdmi->frlclkfreqkhz > 151000) {
-			print_dt_clk_err_msg(xhdmi, 1, "149-151");
-			ret = -EINVAL;
-		}
-		if (xhdmi->vidclkfreqkhz < 149000 || xhdmi->vidclkfreqkhz > 151000) {
-			print_dt_clk_err_msg(xhdmi, 0, "149-151");
-			ret = -EINVAL;
-		}
-		break;
-	default:
-		/* TMDS */
-		if (xhdmi->frlclkfreqkhz < 149000 || xhdmi->frlclkfreqkhz > 151000) {
-			print_dt_clk_err_msg(xhdmi, 1, "149-151");
-			ret = -EINVAL;
-		}
-		if (xhdmi->vidclkfreqkhz < 149000 || xhdmi->vidclkfreqkhz > 151000) {
-			print_dt_clk_err_msg(xhdmi, 0, "149-151");
-			ret = -EINVAL;
-		}
-	}
-
-	return ret;
-}
-
-static void xhdmirx_phy_release(struct xhdmirx_state *xhdmi)
-{
-	int i, ret;
-
-	for (i = 0; i < XHDMI_MAX_LANES; i++) {
-		ret = phy_exit(xhdmi->phy[i]);
-		if (ret)
-			dev_err(xhdmi->dev, "fail to exit phy(%d) %d\n", i, ret);
-
-		xhdmi->phy[i] = NULL;
-	}
-}
+/* -----------------------------------------------------------------------------
+ * V4L2 subdev operations
+ */
 
 /**
  * xhdmirx_dv_timings_cap - function to get the dv timings capabilities
@@ -3278,16 +3114,6 @@ static int xhdmirx_get_edid(struct v4l2_subdev *subdev, struct v4l2_edid *edid)
 	mutex_unlock(&xhdmi->xhdmi_mutex);
 
 	return 0;
-}
-
-static void xhdmirx_delayed_work_enable_hotplug(struct work_struct *work)
-{
-	struct delayed_work *dwork = to_delayed_work(work);
-	struct xhdmirx_state *xhdmi = container_of(dwork,
-						       struct xhdmirx_state,
-						       delayed_work_enable_hotplug);
-
-	xhdmirx_set_hpd(xhdmi, 1);
 }
 
 /**
@@ -3520,14 +3346,31 @@ static const struct v4l2_subdev_pad_ops xpad_ops = {
 };
 
 static const struct v4l2_subdev_ops xhdmirx_ops = {
-	.pad = &xpad_ops,
-	.video = &xvideo_ops,
-	.core = &xcore_ops,
+	.pad			= &xpad_ops,
+	.video			= &xvideo_ops,
+	.core			= &xcore_ops,
 };
 
 static const struct media_entity_operations xmedia_ops = {
-	.link_validate = v4l2_subdev_link_validate,
+	.link_validate		= v4l2_subdev_link_validate,
 };
+
+/* -----------------------------------------------------------------------------
+ * Platform Device Driver
+ */
+
+static void xhdmirx_phy_release(struct xhdmirx_state *xhdmi)
+{
+	int i, ret;
+
+	for (i = 0; i < XHDMI_MAX_LANES; i++) {
+		ret = phy_exit(xhdmi->phy[i]);
+		if (ret)
+			dev_err(xhdmi->dev, "fail to exit phy(%d) %d\n", i, ret);
+
+		xhdmi->phy[i] = NULL;
+	}
+}
 
 static int xhdmirx_probe_load_edid(struct xhdmirx_state *xhdmi)
 {
@@ -3559,6 +3402,170 @@ static int xhdmirx_probe_load_edid(struct xhdmirx_state *xhdmi)
 		dev_info(xhdmi->dev, "Loading Xilinx default edid\n");
 
 	return xhdmirx_load_edid(xhdmi, edidbufptr, edidsize);
+}
+
+static void print_dt_clk_err_msg(struct xhdmirx_state *xhdmi, u8 isfrlclk, const char *range)
+{
+	dev_err(xhdmi->dev, "The %s port is driven by a clock outside the valid range (%s MHz)",
+		isfrlclk ? "frl_clk" : "vid_clk", range);
+}
+
+static int xhdmirx_parse_of(struct xhdmirx_state *xhdmi)
+{
+	struct device_node *node = xhdmi->dev->of_node;
+	struct device *dev = xhdmi->dev;
+	int ret;
+
+	ret = of_property_read_u16(node, "xlnx,edid-ram-size",
+				   &xhdmi->edid_ram_size);
+	if (ret) {
+		dev_err(dev, "xlnx,edid-ram-size property not found.\n");
+		return ret;
+	}
+
+	if (xhdmi->edid_ram_size != 256 && xhdmi->edid_ram_size != 512 &&
+	    xhdmi->edid_ram_size != 1024 && xhdmi->edid_ram_size != 4096) {
+		dev_err(dev, "invalid edid ram size %d in dt\n",
+			xhdmi->edid_ram_size);
+		return -EINVAL;
+	}
+
+	xhdmi->edid_blocks_max = xhdmi->edid_ram_size / XEDID_BLOCK_SIZE;
+
+	ret = of_property_read_u8(node, "xlnx,input-pixels-per-clock",
+				  &xhdmi->max_ppc);
+	if (ret) {
+		dev_err(dev, "xlnx,input-pixels-per-clock property not found.\n");
+		return ret;
+	}
+
+	if (xhdmi->max_ppc != 4 && xhdmi->max_ppc != 8) {
+		dev_err(dev, "dt pixels per clock %d  is invalid.\n",
+			xhdmi->max_ppc);
+		return -EINVAL;
+	}
+
+	ret = of_property_read_u8(node, "xlnx,max-bits-per-component",
+				  &xhdmi->max_bpc);
+	if (ret) {
+		dev_err(dev, "xlnx,max-bit-per-component property not found.\n");
+		return ret;
+	}
+
+	if (xhdmi->max_bpc != 8 && xhdmi->max_bpc != 10 &&
+	    xhdmi->max_bpc != 12 && xhdmi->max_bpc != 16) {
+		dev_err(dev, "dt max bits per component %d is invalid.\n",
+			xhdmi->max_bpc);
+		return -EINVAL;
+	}
+
+	ret = of_property_read_u8(node, "xlnx,max-frl-rate",
+				  &xhdmi->max_frl_rate);
+	if (ret) {
+		dev_err(dev, "xlnx,max-frl-rate property not found.\n");
+		return ret;
+	}
+
+	if (xhdmi->max_frl_rate != 4 && xhdmi->max_frl_rate != 5 &&
+	    xhdmi->max_frl_rate != 6) {
+		dev_err(dev, "dt max frl rate %d is invalid.\n", xhdmi->max_frl_rate);
+		return -EINVAL;
+	}
+
+	ret = of_property_read_u32(node, "xlnx,frl-clk-freq-khz",
+				   &xhdmi->frlclkfreqkhz);
+	if (ret) {
+		dev_err(dev, "frl clk freq khz property not found!");
+		return ret;
+	}
+
+	ret = of_property_read_u32(node, "xlnx,vid-clk-freq-khz",
+				   &xhdmi->vidclkfreqkhz);
+	if (ret) {
+		dev_err(dev, "video clk freq khz property not found!");
+		return ret;
+	}
+
+	switch (xhdmi->max_frl_rate) {
+	case 6:
+		/* 12G @ 4 Lanes */
+		if (xhdmi->frlclkfreqkhz < 449000 || xhdmi->frlclkfreqkhz > 451000) {
+			print_dt_clk_err_msg(xhdmi, 1, "449-451");
+			ret = -EINVAL;
+		}
+		if (xhdmi->vidclkfreqkhz < 399000 || xhdmi->vidclkfreqkhz > 401000) {
+			print_dt_clk_err_msg(xhdmi, 0, "399-401");
+			ret = -EINVAL;
+		}
+		break;
+	case 5:
+		/* 10G @ 4 Lanes */
+		if (xhdmi->frlclkfreqkhz < 379000 || xhdmi->frlclkfreqkhz > 381000) {
+			print_dt_clk_err_msg(xhdmi, 1, "379-381");
+			ret = -EINVAL;
+		}
+		if (xhdmi->vidclkfreqkhz < 374000 || xhdmi->vidclkfreqkhz > 376000) {
+			print_dt_clk_err_msg(xhdmi, 0, "374-376");
+			ret = -EINVAL;
+		}
+		break;
+	case 4:
+		/* 8G @ 4 Lanes */
+		if (xhdmi->frlclkfreqkhz < 324000 || xhdmi->frlclkfreqkhz > 326000) {
+			print_dt_clk_err_msg(xhdmi, 1, "324-326");
+			ret = -EINVAL;
+		}
+		if (xhdmi->vidclkfreqkhz < 299000 || xhdmi->vidclkfreqkhz > 301000) {
+			print_dt_clk_err_msg(xhdmi, 0, "299-301");
+			ret = -EINVAL;
+		}
+		break;
+	case 3:
+		/* 6G @ 4 Lanes */
+		if (xhdmi->frlclkfreqkhz < 249000 || xhdmi->frlclkfreqkhz > 251000) {
+			print_dt_clk_err_msg(xhdmi, 1, "249-251");
+			ret = -EINVAL;
+		}
+		if (xhdmi->vidclkfreqkhz < 224000 || xhdmi->vidclkfreqkhz > 226000) {
+			print_dt_clk_err_msg(xhdmi, 0, "224-226");
+			ret = -EINVAL;
+		}
+		break;
+	case 2:
+		/* 6G @ 4 Lanes */
+		if (xhdmi->frlclkfreqkhz < 199000 || xhdmi->frlclkfreqkhz > 201000) {
+			print_dt_clk_err_msg(xhdmi, 1, "199-201");
+			ret = -EINVAL;
+		}
+		if (xhdmi->vidclkfreqkhz < 174000 || xhdmi->vidclkfreqkhz > 176000) {
+			print_dt_clk_err_msg(xhdmi, 0, "174-176");
+			ret = -EINVAL;
+		}
+		break;
+	case 1:
+		/* 3G @ 3 Lanes */
+		if (xhdmi->frlclkfreqkhz < 149000 || xhdmi->frlclkfreqkhz > 151000) {
+			print_dt_clk_err_msg(xhdmi, 1, "149-151");
+			ret = -EINVAL;
+		}
+		if (xhdmi->vidclkfreqkhz < 149000 || xhdmi->vidclkfreqkhz > 151000) {
+			print_dt_clk_err_msg(xhdmi, 0, "149-151");
+			ret = -EINVAL;
+		}
+		break;
+	default:
+		/* TMDS */
+		if (xhdmi->frlclkfreqkhz < 149000 || xhdmi->frlclkfreqkhz > 151000) {
+			print_dt_clk_err_msg(xhdmi, 1, "149-151");
+			ret = -EINVAL;
+		}
+		if (xhdmi->vidclkfreqkhz < 149000 || xhdmi->vidclkfreqkhz > 151000) {
+			print_dt_clk_err_msg(xhdmi, 0, "149-151");
+			ret = -EINVAL;
+		}
+	}
+
+	return ret;
 }
 
 static int xhdmirx_probe(struct platform_device *pdev)

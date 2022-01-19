@@ -1485,6 +1485,30 @@ static irqreturn_t xdprxss_irq_handler(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+/* -----------------------------------------------------------------------------
+ * xvip operations
+ */
+
+static int xdprxss_enable_streams(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *state, u32 pad,
+				  u64 streams_mask)
+{
+	struct xdprxss_state *xdprxss = to_xdprxssstate(sd);
+
+	if (!xdprxss->valid_stream)
+		return -EINVAL;
+
+	return 0;
+}
+
+static const struct xvip_device_ops xdprxss_xvip_device_ops = {
+	.enable_streams = xdprxss_enable_streams,
+};
+
+/* -----------------------------------------------------------------------------
+ * V4L2 subdev operations
+ */
+
 /**
  * xdprxss_subscribe_event - Subscribe to video source change event
  * @sd: V4L2 Sub device
@@ -1511,22 +1535,6 @@ static int xdprxss_subscribe_event(struct v4l2_subdev *sd,
 	}
 
 	return ret;
-}
-
-static int xdprxss_s_stream(struct v4l2_subdev *sd, int enable)
-{
-	struct xdprxss_state *xdprxss = to_xdprxssstate(sd);
-
-	/* DP does not need to be enabled when we start streaming */
-	if (enable == xdprxss->streaming)
-		return 0;
-
-	if (enable && !xdprxss->valid_stream)
-		return -EINVAL;
-
-	xdprxss->streaming = enable;
-
-	return 0;
 }
 
 /**
@@ -2060,7 +2068,7 @@ static const struct v4l2_subdev_core_ops xdprxss_core_ops = {
 
 static const struct v4l2_subdev_video_ops xdprxss_video_ops = {
 	.query_dv_timings	= xdprxss_query_dv_timings,
-	.s_stream		= xdprxss_s_stream,
+	.s_stream		= xvip_s_stream,
 	.g_input_status		= xdprxss_g_input_status,
 };
 
@@ -2071,6 +2079,8 @@ static const struct v4l2_subdev_pad_ops xdprxss_pad_ops = {
 	.set_fmt		= xdprxss_getset_format,
 	.enum_dv_timings	= xdprxss_enum_dv_timings,
 	.dv_timings_cap         = xdprxss_get_dv_timings_cap,
+	.enable_streams		= xvip_enable_streams,
+	.disable_streams	= xvip_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xdprxss_ops = {
@@ -2502,6 +2512,7 @@ static int xdprxss_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	xdprxss->xvip.dev = dev;
+	xdprxss->xvip.ops = &xdprxss_xvip_device_ops;
 
 	ret = xlnx_find_device(pdev, xdprxss, "xlnx,dp-retimer");
 	if (ret)

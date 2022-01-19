@@ -353,6 +353,7 @@ static struct v4l2_subdev_core_ops xremap_core_ops = {
 };
 
 static struct v4l2_subdev_video_ops xremap_video_ops = {
+	.s_stream = xvip_s_stream,
 };
 
 static struct v4l2_subdev_pad_ops xremap_pad_ops = {
@@ -360,6 +361,8 @@ static struct v4l2_subdev_pad_ops xremap_pad_ops = {
 	.enum_frame_size = xremap_enum_frame_size,
 	.get_fmt = xremap_get_format,
 	.set_fmt = xremap_set_format,
+	.enable_streams = xvip_enable_streams,
+	.disable_streams = xvip_disable_streams,
 };
 
 static struct v4l2_subdev_ops xremap_ops = {

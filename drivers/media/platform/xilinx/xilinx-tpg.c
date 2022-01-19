@@ -119,7 +119,6 @@
  * @hblank: horizontal blanking control
  * @vblank: vertical blanking control
  * @pattern: test pattern control
- * @streaming: is the video stream active
  * @is_hls: whether the IP core is HLS based
  * @vtc: video timing controller
  * @vtmux_gpio: video timing mux GPIO
@@ -143,7 +142,6 @@ struct xtpg_device {
 	struct v4l2_ctrl *hblank;
 	struct v4l2_ctrl *vblank;
 	struct v4l2_ctrl *pattern;
-	bool streaming;
 	bool is_hls;
 
 	struct xvtc_device *vtc;
@@ -237,73 +235,18 @@ static void xtpg_update_pattern_control(struct xtpg_device *xtpg,
 }
 
 /* -----------------------------------------------------------------------------
- * V4L2 Subdevice Video Operations
+ * xvip operations
  */
 
-static int xtpg_g_frame_interval(struct v4l2_subdev *subdev,
-				 struct v4l2_subdev_frame_interval *fi)
+static int xtpg_enable_streams(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
 {
-	struct xtpg_device *xtpg = to_tpg(subdev);
-
-	fi->interval.numerator = xtpg->fi_n;
-	fi->interval.denominator = xtpg->fi_d;
-
-	return 0;
-}
-
-static int xtpg_s_frame_interval(struct v4l2_subdev *subdev,
-				 struct v4l2_subdev_frame_interval *fi)
-{
-	struct xtpg_device *xtpg = to_tpg(subdev);
-
-	if (!fi->interval.numerator || !fi->interval.denominator) {
-		xtpg->fi_n = XTPG_MIN_FRM_INT;
-		xtpg->fi_d = XTPG_MIN_FRM_INT;
-	} else {
-		xtpg->fi_n = fi->interval.numerator;
-		xtpg->fi_d = fi->interval.denominator;
-	}
-
-	return 0;
-}
-
-static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
-{
-	struct xtpg_device *xtpg = to_tpg(subdev);
+	struct xtpg_device *xtpg = to_tpg(sd);
 	unsigned int width = xtpg->formats[0].width;
 	unsigned int height = xtpg->formats[0].height;
 	bool passthrough;
 	u32 bayer_phase;
-
-	if (!enable) {
-		if (!xtpg->is_hls) {
-			xvip_stop(&xtpg->xvip);
-		} else {
-			int ret;
-			/*
-			 * There is an known issue in TPG v7.0 that on
-			 * resolution change it doesn't generates pattern
-			 * correctly i.e some hor/ver offset is added.
-			 * As a workaround issue reset on stop.
-			 */
-			gpiod_set_value_cansleep(xtpg->rst_gpio, 0x1);
-			gpiod_set_value_cansleep(xtpg->rst_gpio, 0x0);
-			ret = v4l2_ctrl_handler_setup(&xtpg->ctrl_handler);
-			if (ret) {
-				struct device *dev = xtpg->xvip.dev;
-
-				dev_err(dev, "failed to set controls\n");
-				return ret;
-			}
-		}
-
-		if (xtpg->vtc)
-			xvtc_generator_stop(xtpg->vtc);
-
-		xtpg_update_pattern_control(xtpg, true, true);
-		xtpg->streaming = false;
-		return 0;
-	}
 
 	if (xtpg->is_hls) {
 		u32 fmt = 0;
@@ -357,8 +300,6 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 	passthrough = xtpg->pattern->cur.val == 0;
 	__xtpg_update_pattern_control(xtpg, passthrough, !passthrough);
 
-	xtpg->streaming = true;
-
 	mutex_unlock(xtpg->ctrl_handler.lock);
 
 	if (xtpg->vtmux_gpio)
@@ -380,6 +321,77 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 			    : xtpg_get_bayer_phase(xtpg->formats[0].code);
 		xvip_write(&xtpg->xvip, XTPG_BAYER_PHASE, bayer_phase);
 		xvip_start(&xtpg->xvip);
+	}
+
+	return 0;
+}
+
+static int xtpg_disable_streams(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xtpg_device *xtpg = to_tpg(sd);
+
+	if (!xtpg->is_hls) {
+		xvip_stop(&xtpg->xvip);
+	} else {
+		int ret;
+		/*
+		 * There is an known issue in TPG v7.0 that on
+		 * resolution change it doesn't generates pattern
+		 * correctly i.e some hor/ver offset is added.
+		 * As a workaround issue reset on stop.
+		 */
+		gpiod_set_value_cansleep(xtpg->rst_gpio, 0x1);
+		gpiod_set_value_cansleep(xtpg->rst_gpio, 0x0);
+		ret = v4l2_ctrl_handler_setup(&xtpg->ctrl_handler);
+		if (ret) {
+			struct device *dev = xtpg->xvip.dev;
+
+			dev_err(dev, "failed to set controls\n");
+			return ret;
+		}
+	}
+
+	if (xtpg->vtc)
+		xvtc_generator_stop(xtpg->vtc);
+
+	xtpg_update_pattern_control(xtpg, true, true);
+
+	return 0;
+}
+
+static const struct xvip_device_ops xtpg_xvip_device_ops = {
+	.enable_streams = xtpg_enable_streams,
+	.disable_streams = xtpg_disable_streams,
+};
+
+/* -----------------------------------------------------------------------------
+ * V4L2 Subdevice Video Operations
+ */
+
+static int xtpg_g_frame_interval(struct v4l2_subdev *subdev,
+				 struct v4l2_subdev_frame_interval *fi)
+{
+	struct xtpg_device *xtpg = to_tpg(subdev);
+
+	fi->interval.numerator = xtpg->fi_n;
+	fi->interval.denominator = xtpg->fi_d;
+
+	return 0;
+}
+
+static int xtpg_s_frame_interval(struct v4l2_subdev *subdev,
+				 struct v4l2_subdev_frame_interval *fi)
+{
+	struct xtpg_device *xtpg = to_tpg(subdev);
+
+	if (!fi->interval.numerator || !fi->interval.denominator) {
+		xtpg->fi_n = XTPG_MIN_FRM_INT;
+		xtpg->fi_d = XTPG_MIN_FRM_INT;
+	} else {
+		xtpg->fi_n = fi->interval.numerator;
+		xtpg->fi_d = fi->interval.denominator;
 	}
 
 	return 0;
@@ -696,7 +708,7 @@ static const struct v4l2_subdev_core_ops xtpg_core_ops = {
 static const struct v4l2_subdev_video_ops xtpg_video_ops = {
 	.g_frame_interval = xtpg_g_frame_interval,
 	.s_frame_interval = xtpg_s_frame_interval,
-	.s_stream = xtpg_s_stream,
+	.s_stream = xvip_s_stream,
 };
 
 static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {
@@ -704,6 +716,8 @@ static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {
 	.enum_frame_size	= xtpg_enum_frame_size,
 	.get_fmt		= xtpg_get_format,
 	.set_fmt		= xtpg_set_format,
+	.enable_streams		= xvip_enable_streams,
+	.disable_streams	= xvip_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xtpg_ops = {
@@ -1067,6 +1081,7 @@ static int xtpg_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	xtpg->xvip.dev = &pdev->dev;
+	xtpg->xvip.ops = &xtpg_xvip_device_ops;
 
 	ret = xtpg_parse_of(xtpg, &xtpg_info);
 	if (ret < 0)

@@ -43,26 +43,20 @@ static inline struct xswitch_device *to_xsw(struct v4l2_subdev *subdev)
 }
 
 /* -----------------------------------------------------------------------------
- * V4L2 Subdevice Video Operations
+ * xvip operations
  */
 
-static int xsw_s_stream(struct v4l2_subdev *subdev, int enable)
+static int xsw_enable_streams(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_state *state, u32 pad,
+			      u64 streams_mask)
 {
-	struct xswitch_device *xsw = to_xsw(subdev);
-	struct v4l2_subdev_state *state;
+	struct xswitch_device *xsw = to_xsw(sd);
 	struct v4l2_subdev_route *route;
 	unsigned long unused_outputs;
 	u32 unused_inputs;
 	unsigned int unused_input;
 	u32 routing;
 	unsigned int i;
-
-	if (!enable) {
-		xvip_stop(&xsw->xvip);
-		return 0;
-	}
-
-	state = v4l2_subdev_lock_and_get_active_state(subdev);
 
 	/*
 	 * The hardware routing table stores in a register the input number at
@@ -98,8 +92,6 @@ static int xsw_s_stream(struct v4l2_subdev *subdev, int enable)
 	for_each_set_bit(i, &unused_outputs, 8)
 		routing |= (XSW_CORE_CH_CTRL_FORCE | unused_input) << (i * 4);
 
-	v4l2_subdev_unlock_state(state);
-
 	xvip_write(&xsw->xvip, XSW_CORE_CH_CTRL, routing);
 
 	xvip_write(&xsw->xvip, XVIP_CTRL_CONTROL,
@@ -108,6 +100,22 @@ static int xsw_s_stream(struct v4l2_subdev *subdev, int enable)
 
 	return 0;
 }
+
+static int xsw_disable_streams(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
+{
+	struct xswitch_device *xsw = to_xsw(sd);
+
+	xvip_stop(&xsw->xvip);
+
+	return 0;
+}
+
+static const struct xvip_device_ops xsw_xvip_device_ops = {
+	.enable_streams = xsw_enable_streams,
+	.disable_streams = xsw_disable_streams,
+};
 
 /* -----------------------------------------------------------------------------
  * V4L2 Subdevice Pad Operations
@@ -235,7 +243,7 @@ static int xsw_set_routing(struct v4l2_subdev *subdev,
  */
 
 static const struct v4l2_subdev_video_ops xsw_video_ops = {
-	.s_stream = xsw_s_stream,
+	.s_stream = xvip_s_stream,
 };
 
 static const struct v4l2_subdev_pad_ops xsw_pad_ops = {
@@ -245,6 +253,8 @@ static const struct v4l2_subdev_pad_ops xsw_pad_ops = {
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xsw_set_format,
 	.set_routing = xsw_set_routing,
+	.enable_streams = xvip_enable_streams,
+	.disable_streams = xvip_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xsw_ops = {
@@ -303,6 +313,7 @@ static int xsw_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	xsw->xvip.dev = &pdev->dev;
+	xsw->xvip.ops = &xsw_xvip_device_ops;
 
 	ret = xsw_parse_of(xsw, &xsw_info);
 	if (ret < 0)

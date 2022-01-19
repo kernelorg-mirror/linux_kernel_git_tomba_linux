@@ -63,13 +63,14 @@ static inline void xvswitch_write(struct xvswitch_device *xvsw, u32 addr,
 }
 
 /* -----------------------------------------------------------------------------
- * V4L2 Subdevice Video Operations
+ * xvip operations
  */
 
-static int xvsw_s_stream(struct v4l2_subdev *subdev, int enable)
+static int xvsw_enable_streams(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
 {
-	struct xvswitch_device *xvsw = to_xvsw(subdev);
-	struct v4l2_subdev_state *state;
+	struct xvswitch_device *xvsw = to_xvsw(sd);
 	struct v4l2_subdev_route *route;
 	unsigned long unused_sources;
 	unsigned int i;
@@ -84,16 +85,6 @@ static int xvsw_s_stream(struct v4l2_subdev *subdev, int enable)
 	if (xvsw->tdest_routing)
 		return 0;
 
-	if (!enable) {
-		/* In control reg routing, disable all master ports */
-		for (i = 0; i < xvsw->xvip.num_sources; i++) {
-			xvswitch_write(xvsw, XVSW_MI_MUX_REG_BASE + (i * 4),
-				       XVSW_MI_MUX_DISABLE_MASK);
-		}
-		xvswitch_write(xvsw, XVSW_CTRL_REG, XVSW_CTRL_REG_UPDATE_MASK);
-		return 0;
-	}
-
 	/*
 	 * In case of control reg routing, from routing table write the values
 	 * into respective reg and enable.
@@ -103,8 +94,6 @@ static int xvsw_s_stream(struct v4l2_subdev *subdev, int enable)
 	 * multiple streams flow through the same source pad). Finally,
 	 * configure Unused outputs as disabled.
 	 */
-
-	state = v4l2_subdev_lock_and_get_active_state(subdev);
 
 	unused_sources = (1 << MAX_VSW_SRCS) - 1;
 
@@ -124,12 +113,43 @@ static int xvsw_s_stream(struct v4l2_subdev *subdev, int enable)
 		xvswitch_write(xvsw, XVSW_MI_MUX_REG_BASE + (i * 4),
 			       XVSW_MI_MUX_DISABLE_MASK);
 
-	v4l2_subdev_unlock_state(state);
+	xvswitch_write(xvsw, XVSW_CTRL_REG, XVSW_CTRL_REG_UPDATE_MASK);
+
+	return 0;
+}
+
+static int xvsw_disable_streams(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xvswitch_device *xvsw = to_xvsw(sd);
+	unsigned int i;
+
+	/*
+	 * In TDEST routing mode the hardware doesn't need to be configured.
+	 *
+	 * TODO: Validate the routing configuration by checking the frame
+	 * descriptors (this requires specifying the TDEST routing table in the
+	 * device tree).
+	 */
+	if (xvsw->tdest_routing)
+		return 0;
+
+	/* In control reg routing, disable all master ports */
+	for (i = 0; i < xvsw->xvip.num_sources; i++) {
+		xvswitch_write(xvsw, XVSW_MI_MUX_REG_BASE + (i * 4),
+			       XVSW_MI_MUX_DISABLE_MASK);
+	}
 
 	xvswitch_write(xvsw, XVSW_CTRL_REG, XVSW_CTRL_REG_UPDATE_MASK);
 
 	return 0;
 }
+
+static const struct xvip_device_ops xvsw_xvip_device_ops = {
+	.enable_streams = xvsw_enable_streams,
+	.disable_streams = xvsw_disable_streams,
+};
 
 /* -----------------------------------------------------------------------------
  * V4L2 Subdevice Pad Operations
@@ -267,7 +287,7 @@ static int xvsw_set_routing(struct v4l2_subdev *subdev,
 }
 
 static const struct v4l2_subdev_video_ops xvsw_video_ops = {
-	.s_stream = xvsw_s_stream,
+	.s_stream = xvip_s_stream,
 };
 
 static const struct v4l2_subdev_pad_ops xvsw_pad_ops = {
@@ -279,6 +299,8 @@ static const struct v4l2_subdev_pad_ops xvsw_pad_ops = {
 	.link_validate = xvip_link_validate,
 	.set_routing = xvsw_set_routing,
 	.get_mbus_config = xvip_get_mbus_config,
+	.enable_streams = xvip_enable_streams,
+	.disable_streams = xvip_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xvsw_ops = {
@@ -375,6 +397,7 @@ static int xvsw_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	xvsw->xvip.dev = &pdev->dev;
+	xvsw->xvip.ops = &xvsw_xvip_device_ops;
 
 	ret = xvsw_parse_of(xvsw, &xvsw_info);
 	if (ret < 0)

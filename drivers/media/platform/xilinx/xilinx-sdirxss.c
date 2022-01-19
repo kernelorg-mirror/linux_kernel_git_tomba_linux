@@ -1677,6 +1677,52 @@ static irqreturn_t xsdirxss_irq_handler(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+/* -----------------------------------------------------------------------------
+ * xvip operations
+ */
+
+static int xsdirxss_enable_streams(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_state *state, u32 pad,
+				   u64 streams_mask)
+{
+	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
+	struct xsdirxss_core *core = &xsdirxss->core;
+
+	if (!xsdirxss->vidlocked) {
+		dev_dbg(core->xvip.dev, "Video is not locked\n");
+		return -EINVAL;
+	}
+
+	xsdirx_streamflow_control(core, true);
+	xsdirxss->streaming = true;
+	dev_dbg(core->xvip.dev, "Streaming started\n");
+
+	return 0;
+}
+
+static int xsdirxss_disable_streams(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *state, u32 pad,
+				    u64 streams_mask)
+{
+	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
+	struct xsdirxss_core *core = &xsdirxss->core;
+
+	xsdirx_streamflow_control(core, false);
+	xsdirxss->streaming = false;
+	dev_dbg(core->xvip.dev, "Streaming stopped\n");
+
+	return 0;
+}
+
+static const struct xvip_device_ops xsdirxss_xvip_device_ops = {
+	.enable_streams = xsdirxss_enable_streams,
+	.disable_streams = xsdirxss_disable_streams,
+};
+
+/* -----------------------------------------------------------------------------
+ * V4L2 subdev operations
+ */
+
 /**
  * xsdirxss_subscribe_event - Subscribe to video lock and unlock event
  * @sd: V4L2 Sub device
@@ -1967,50 +2013,6 @@ static int xsdirxss_g_frame_interval(struct v4l2_subdev *sd,
 	dev_dbg(core->xvip.dev, "frame rate numerator = %d denominator = %d\n",
 		xsdirxss->frame_interval.numerator,
 		xsdirxss->frame_interval.denominator);
-	return 0;
-}
-
-/**
- * xsdirxss_s_stream - It is used to start/stop the streaming.
- * @sd: V4L2 Sub device
- * @enable: Flag (True / False)
- *
- * This function controls the start or stop of streaming for the
- * Xilinx SDI Rx Subsystem.
- *
- * Return: 0 on success, errors otherwise
- */
-static int xsdirxss_s_stream(struct v4l2_subdev *sd, int enable)
-{
-	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
-	struct xsdirxss_core *core = &xsdirxss->core;
-
-	if (enable) {
-		if (!xsdirxss->vidlocked) {
-			dev_dbg(core->xvip.dev, "Video is not locked\n");
-			return -EINVAL;
-		}
-		if (xsdirxss->streaming) {
-			dev_dbg(core->xvip.dev, "Already streaming\n");
-			return -EINVAL;
-		}
-
-		xsdirx_streamflow_control(core, true);
-		xsdirxss->streaming = true;
-		xsdirxss->s_stream = true;
-		dev_dbg(core->xvip.dev, "Streaming started\n");
-	} else {
-		xsdirxss->s_stream = false;
-		if (!xsdirxss->streaming) {
-			dev_dbg(core->xvip.dev, "Stopped streaming already\n");
-			return 0;
-		}
-
-		xsdirx_streamflow_control(core, false);
-		xsdirxss->streaming = false;
-		dev_dbg(core->xvip.dev, "Streaming stopped\n");
-	}
-
 	return 0;
 }
 
@@ -2391,7 +2393,7 @@ static const struct v4l2_subdev_core_ops xsdirxss_core_ops = {
 
 static const struct v4l2_subdev_video_ops xsdirxss_video_ops = {
 	.g_frame_interval = xsdirxss_g_frame_interval,
-	.s_stream = xsdirxss_s_stream,
+	.s_stream = xvip_s_stream,
 	.g_input_status = xsdirxss_g_input_status,
 	.query_dv_timings = xsdirxss_query_dv_timings,
 };
@@ -2401,6 +2403,8 @@ static const struct v4l2_subdev_pad_ops xsdirxss_pad_ops = {
 	.set_fmt = xsdirxss_set_format,
 	.enum_mbus_code = xsdirxss_enum_mbus_code,
 	.enum_dv_timings = xsdirxss_enum_dv_timings,
+	.enable_streams = xvip_enable_streams,
+	.disable_streams = xvip_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xsdirxss_ops = {
@@ -2517,6 +2521,7 @@ static int xsdirxss_probe(struct platform_device *pdev)
 
 	core = &xsdirxss->core;
 	core->xvip.dev = &pdev->dev;
+	core->xvip.ops = &xsdirxss_xvip_device_ops;
 
 	ret = xvip_device_init(&core->xvip, &xsdirxss_info);
 	if (ret < 0)

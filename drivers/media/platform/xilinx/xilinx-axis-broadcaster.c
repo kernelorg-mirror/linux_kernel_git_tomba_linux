@@ -37,15 +37,6 @@ static inline struct xvbroadcaster_device *to_xvbr(struct v4l2_subdev *subdev)
 }
 
 /* -----------------------------------------------------------------------------
- * V4L2 Subdevice Video Operations
- */
-
-static int xvbr_s_stream(struct v4l2_subdev *subdev, int enable)
-{
-	return 0;
-}
-
-/* -----------------------------------------------------------------------------
  * V4L2 Subdevice Pad Operations
  */
 
@@ -117,7 +108,7 @@ static int xvbr_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 }
 
 static struct v4l2_subdev_video_ops xvbr_video_ops = {
-	.s_stream = xvbr_s_stream,
+	.s_stream = xvip_s_stream,
 };
 
 static struct v4l2_subdev_pad_ops xvbr_pad_ops = {
@@ -125,6 +116,8 @@ static struct v4l2_subdev_pad_ops xvbr_pad_ops = {
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = xvbr_get_format,
 	.set_fmt = xvbr_set_format,
+	.enable_streams = xvip_enable_streams,
+	.disable_streams = xvip_disable_streams,
 };
 
 static struct v4l2_subdev_ops xvbr_ops = {

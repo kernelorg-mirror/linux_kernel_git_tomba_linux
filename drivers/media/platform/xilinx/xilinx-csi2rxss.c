@@ -360,118 +360,6 @@ static void xcsi2rxss_reset_event_counters(struct xcsi2rxss_state *csi2rx)
 		csi2rx->vcx_events[i] = 0;
 }
 
-/* Print event counters */
-static void xcsi2rxss_log_counters(struct xcsi2rxss_state *csi2rx)
-{
-	struct device *dev = csi2rx->xvip.dev;
-	unsigned int i;
-
-	for (i = 0; i < XCSI_NUM_EVENTS; i++) {
-		if (csi2rx->events[i] > 0) {
-			dev_info(dev, "%s events: %d\n",
-				 xcsi2rxss_events[i].name,
-				 csi2rx->events[i]);
-		}
-	}
-
-	if (csi2rx->en_vcx) {
-		for (i = 0; i < XCSI_VCX_NUM_EVENTS; i++) {
-			if (csi2rx->vcx_events[i] > 0) {
-				dev_info(dev,
-					 "VC %d Frame %s err vcx events: %d\n",
-					 (i / 2) + XCSI_VCX_START,
-					 i & 1 ? "Sync" : "Level",
-					 csi2rx->vcx_events[i]);
-			}
-		}
-	}
-}
-
-/**
- * xcsi2rxss_log_status - Logs the status of the CSI-2 Receiver
- * @sd: Pointer to V4L2 subdevice structure
- *
- * This function prints the current status of Xilinx MIPI CSI-2
- *
- * Return: 0 on success
- */
-static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
-{
-	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
-	struct device *dev = csi2rx->xvip.dev;
-	u32 reg, data;
-	unsigned int i, max_vc;
-
-	mutex_lock(&csi2rx->lock);
-
-	xcsi2rxss_log_counters(csi2rx);
-
-	dev_info(dev, "***** Core Status *****\n");
-	data = xcsi2rxss_read(csi2rx, XCSI_CSR_OFFSET);
-	dev_info(dev, "Short Packet FIFO Full = %s\n",
-		 data & XCSI_CSR_SPFIFOFULL ? "true" : "false");
-	dev_info(dev, "Short Packet FIFO Not Empty = %s\n",
-		 data & XCSI_CSR_SPFIFONE ? "true" : "false");
-	dev_info(dev, "Stream line buffer full = %s\n",
-		 data & XCSI_CSR_SLBF ? "true" : "false");
-	dev_info(dev, "Soft reset/Core disable in progress = %s\n",
-		 data & XCSI_CSR_RIPCD ? "true" : "false");
-
-	/* Clk & Lane Info  */
-	dev_info(dev, "******** Clock Lane Info *********\n");
-	data = xcsi2rxss_read(csi2rx, XCSI_CLKINFR_OFFSET);
-	dev_info(dev, "Clock Lane in Stop State = %s\n",
-		 data & XCSI_CLKINFR_STOP ? "true" : "false");
-
-	dev_info(dev, "******** Data Lane Info *********\n");
-	dev_info(dev, "Lane\tSoT Error\tSoT Sync Error\tStop State\n");
-	reg = XCSI_DLXINFR_OFFSET;
-	for (i = 0; i < XCSI_MAXDL_COUNT; i++) {
-		data = xcsi2rxss_read(csi2rx, reg);
-
-		dev_info(dev, "%d\t%s\t\t%s\t\t%s\n", i,
-			 data & XCSI_DLXINFR_SOTERR ? "true" : "false",
-			 data & XCSI_DLXINFR_SOTSYNCERR ? "true" : "false",
-			 data & XCSI_DLXINFR_STOP ? "true" : "false");
-
-		reg += XCSI_NEXTREG_OFFSET;
-	}
-
-	/* Virtual Channel Image Information */
-	dev_info(dev, "********** Virtual Channel Info ************\n");
-	dev_info(dev, "VC\tLine Count\tByte Count\tData Type\n");
-	if (csi2rx->en_vcx)
-		max_vc = XCSI_MAX_VCX;
-	else
-		max_vc = XCSI_MAX_VC;
-
-	reg = XCSI_VCXINF1R_OFFSET;
-	for (i = 0; i < max_vc; i++) {
-		u32 line_count, byte_count, data_type;
-
-		/* Get line and byte count from VCXINFR1 Register */
-		data = xcsi2rxss_read(csi2rx, reg);
-		byte_count = data & XCSI_VCXINF1R_BYTECOUNT;
-		line_count = data & XCSI_VCXINF1R_LINECOUNT;
-		line_count >>= XCSI_VCXINF1R_LINECOUNT_SHIFT;
-
-		/* Get data type from VCXINFR2 Register */
-		reg += XCSI_NEXTREG_OFFSET;
-		data = xcsi2rxss_read(csi2rx, reg);
-		data_type = data & XCSI_VCXINF2R_DT;
-
-		dev_info(dev, "%d\t%d\t\t%d\t\t0x%x\n", i, line_count,
-			 byte_count, data_type);
-
-		/* Move to next pair of VC Info registers */
-		reg += XCSI_NEXTREG_OFFSET;
-	}
-
-	mutex_unlock(&csi2rx->lock);
-
-	return 0;
-}
-
 static struct v4l2_subdev *xcsi2rxss_get_remote_subdev(struct media_pad *local)
 {
 	struct media_pad *remote;
@@ -646,37 +534,164 @@ static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-/**
- * xcsi2rxss_s_stream - It is used to start/stop the streaming.
- * @sd: V4L2 Sub device
- * @enable: Flag (True / False)
- *
- * This function controls the start or stop of streaming for the
- * Xilinx MIPI CSI-2 Rx Subsystem.
- *
- * Return: 0 on success, errors otherwise
+/* -----------------------------------------------------------------------------
+ * xvip Operations
  */
-static int xcsi2rxss_s_stream(struct v4l2_subdev *sd, int enable)
+
+static int xcsi2rxss_enable_streams(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *state, u32 pad,
+				    u64 streams_mask)
 {
 	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
 	int ret = 0;
 
 	mutex_lock(&csi2rx->lock);
 
-	if (enable == csi2rx->streaming)
-		goto stream_done;
-
-	if (enable) {
+	if (!csi2rx->streaming) {
 		xcsi2rxss_reset_event_counters(csi2rx);
 		ret = xcsi2rxss_start_stream(csi2rx);
-	} else {
+	}
+
+	mutex_unlock(&csi2rx->lock);
+	return ret;
+}
+
+static int xcsi2rxss_disable_streams(struct v4l2_subdev *sd,
+				     struct v4l2_subdev_state *state, u32 pad,
+				     u64 streams_mask)
+{
+	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
+
+	mutex_lock(&csi2rx->lock);
+
+	if (csi2rx->streaming) {
 		xcsi2rxss_stop_stream(csi2rx);
 		xcsi2rxss_hard_reset(csi2rx);
 	}
 
-stream_done:
 	mutex_unlock(&csi2rx->lock);
-	return ret;
+	return 0;
+}
+
+static const struct xvip_device_ops xcsi2rxss_xvip_device_ops = {
+	.enable_streams = xcsi2rxss_enable_streams,
+	.disable_streams = xcsi2rxss_disable_streams,
+};
+
+/* -----------------------------------------------------------------------------
+ * V4L2 Subdev Operations
+ */
+
+/* Print event counters */
+static void xcsi2rxss_log_counters(struct xcsi2rxss_state *csi2rx)
+{
+	struct device *dev = csi2rx->xvip.dev;
+	unsigned int i;
+
+	for (i = 0; i < XCSI_NUM_EVENTS; i++) {
+		if (csi2rx->events[i] > 0) {
+			dev_info(dev, "%s events: %d\n",
+				 xcsi2rxss_events[i].name,
+				 csi2rx->events[i]);
+		}
+	}
+
+	if (csi2rx->en_vcx) {
+		for (i = 0; i < XCSI_VCX_NUM_EVENTS; i++) {
+			if (csi2rx->vcx_events[i] > 0) {
+				dev_info(dev,
+					 "VC %d Frame %s err vcx events: %d\n",
+					 (i / 2) + XCSI_VCX_START,
+					 i & 1 ? "Sync" : "Level",
+					 csi2rx->vcx_events[i]);
+			}
+		}
+	}
+}
+
+/**
+ * xcsi2rxss_log_status - Logs the status of the CSI-2 Receiver
+ * @sd: Pointer to V4L2 subdevice structure
+ *
+ * This function prints the current status of Xilinx MIPI CSI-2
+ *
+ * Return: 0 on success
+ */
+static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
+{
+	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
+	struct device *dev = csi2rx->xvip.dev;
+	u32 reg, data;
+	unsigned int i, max_vc;
+
+	mutex_lock(&csi2rx->lock);
+
+	xcsi2rxss_log_counters(csi2rx);
+
+	dev_info(dev, "***** Core Status *****\n");
+	data = xcsi2rxss_read(csi2rx, XCSI_CSR_OFFSET);
+	dev_info(dev, "Short Packet FIFO Full = %s\n",
+		 data & XCSI_CSR_SPFIFOFULL ? "true" : "false");
+	dev_info(dev, "Short Packet FIFO Not Empty = %s\n",
+		 data & XCSI_CSR_SPFIFONE ? "true" : "false");
+	dev_info(dev, "Stream line buffer full = %s\n",
+		 data & XCSI_CSR_SLBF ? "true" : "false");
+	dev_info(dev, "Soft reset/Core disable in progress = %s\n",
+		 data & XCSI_CSR_RIPCD ? "true" : "false");
+
+	/* Clk & Lane Info  */
+	dev_info(dev, "******** Clock Lane Info *********\n");
+	data = xcsi2rxss_read(csi2rx, XCSI_CLKINFR_OFFSET);
+	dev_info(dev, "Clock Lane in Stop State = %s\n",
+		 data & XCSI_CLKINFR_STOP ? "true" : "false");
+
+	dev_info(dev, "******** Data Lane Info *********\n");
+	dev_info(dev, "Lane\tSoT Error\tSoT Sync Error\tStop State\n");
+	reg = XCSI_DLXINFR_OFFSET;
+	for (i = 0; i < XCSI_MAXDL_COUNT; i++) {
+		data = xcsi2rxss_read(csi2rx, reg);
+
+		dev_info(dev, "%d\t%s\t\t%s\t\t%s\n", i,
+			 data & XCSI_DLXINFR_SOTERR ? "true" : "false",
+			 data & XCSI_DLXINFR_SOTSYNCERR ? "true" : "false",
+			 data & XCSI_DLXINFR_STOP ? "true" : "false");
+
+		reg += XCSI_NEXTREG_OFFSET;
+	}
+
+	/* Virtual Channel Image Information */
+	dev_info(dev, "********** Virtual Channel Info ************\n");
+	dev_info(dev, "VC\tLine Count\tByte Count\tData Type\n");
+	if (csi2rx->en_vcx)
+		max_vc = XCSI_MAX_VCX;
+	else
+		max_vc = XCSI_MAX_VC;
+
+	reg = XCSI_VCXINF1R_OFFSET;
+	for (i = 0; i < max_vc; i++) {
+		u32 line_count, byte_count, data_type;
+
+		/* Get line and byte count from VCXINFR1 Register */
+		data = xcsi2rxss_read(csi2rx, reg);
+		byte_count = data & XCSI_VCXINF1R_BYTECOUNT;
+		line_count = data & XCSI_VCXINF1R_LINECOUNT;
+		line_count >>= XCSI_VCXINF1R_LINECOUNT_SHIFT;
+
+		/* Get data type from VCXINFR2 Register */
+		reg += XCSI_NEXTREG_OFFSET;
+		data = xcsi2rxss_read(csi2rx, reg);
+		data_type = data & XCSI_VCXINF2R_DT;
+
+		dev_info(dev, "%d\t%d\t\t%d\t\t0x%x\n", i, line_count,
+			 byte_count, data_type);
+
+		/* Move to next pair of VC Info registers */
+		reg += XCSI_NEXTREG_OFFSET;
+	}
+
+	mutex_unlock(&csi2rx->lock);
+
+	return 0;
 }
 
 static int __xcsi2rxss_set_routing(struct v4l2_subdev *sd,
@@ -838,7 +853,7 @@ static const struct v4l2_subdev_core_ops xcsi2rxss_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops xcsi2rxss_video_ops = {
-	.s_stream = xcsi2rxss_s_stream
+	.s_stream = xvip_s_stream,
 };
 
 static const struct v4l2_subdev_pad_ops xcsi2rxss_pad_ops = {
@@ -848,6 +863,8 @@ static const struct v4l2_subdev_pad_ops xcsi2rxss_pad_ops = {
 	.set_fmt = xcsi2rxss_set_format,
 	.link_validate = v4l2_subdev_link_validate_default,
 	.set_routing = xcsi2rxss_set_routing,
+	.enable_streams = xvip_enable_streams,
+	.disable_streams = xvip_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xcsi2rxss_ops = {
@@ -976,6 +993,7 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	csi2rx->xvip.dev = dev;
+	csi2rx->xvip.ops = &xcsi2rxss_xvip_device_ops;
 
 	ret = xvip_device_init(&csi2rx->xvip, &xcsi2rxss_info);
 	if (ret)

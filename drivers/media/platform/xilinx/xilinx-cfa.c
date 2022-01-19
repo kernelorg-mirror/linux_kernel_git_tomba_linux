@@ -51,10 +51,6 @@ static inline struct xcfa_device *to_cfa(struct v4l2_subdev *subdev)
 	return container_of(subdev, struct xcfa_device, xvip.subdev);
 }
 
-/*
- * V4L2 Subdevice Video Operations
- */
-
 static int xcfa_get_bayer_phase(const unsigned int code)
 {
 	switch (code) {
@@ -71,16 +67,17 @@ static int xcfa_get_bayer_phase(const unsigned int code)
 	return -EINVAL;
 }
 
-static int xcfa_s_stream(struct v4l2_subdev *subdev, int enable)
+/* -----------------------------------------------------------------------------
+ * xvip operations
+ */
+
+static int xcfa_enable_streams(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
 {
-	struct xcfa_device *xcfa = to_cfa(subdev);
+	struct xcfa_device *xcfa = to_cfa(sd);
 	const unsigned int code = xcfa->formats[XVIP_PAD_SINK].code;
 	u32 bayer_phase;
-
-	if (!enable) {
-		xvip_stop(&xcfa->xvip);
-		return 0;
-	}
 
 	/* This always returns the valid bayer phase value */
 	bayer_phase = xcfa_get_bayer_phase(code);
@@ -93,6 +90,22 @@ static int xcfa_s_stream(struct v4l2_subdev *subdev, int enable)
 
 	return 0;
 }
+
+static int xcfa_disable_streams(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xcfa_device *xcfa = to_cfa(sd);
+
+	xvip_stop(&xcfa->xvip);
+
+	return 0;
+}
+
+static const struct xvip_device_ops xcfa_xvip_device_ops = {
+	.enable_streams = xcfa_enable_streams,
+	.disable_streams = xcfa_disable_streams,
+};
 
 /*
  * V4L2 Subdevice Pad Operations
@@ -196,7 +209,7 @@ static int xcfa_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 }
 
 static struct v4l2_subdev_video_ops xcfa_video_ops = {
-	.s_stream = xcfa_s_stream,
+	.s_stream = xvip_s_stream,
 };
 
 static struct v4l2_subdev_pad_ops xcfa_pad_ops = {
@@ -204,6 +217,8 @@ static struct v4l2_subdev_pad_ops xcfa_pad_ops = {
 	.enum_frame_size	= xvip_enum_frame_size,
 	.get_fmt		= xcfa_get_format,
 	.set_fmt		= xcfa_set_format,
+	.enable_streams		= xvip_enable_streams,
+	.disable_streams	= xvip_disable_streams,
 };
 
 static struct v4l2_subdev_ops xcfa_ops = {
@@ -269,6 +284,7 @@ static int xcfa_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	xcfa->xvip.dev = &pdev->dev;
+	xcfa->xvip.ops = &xcfa_xvip_device_ops;
 
 	ret = xvip_device_init(&xcfa->xvip, &xcfa_info);
 	if (ret < 0)

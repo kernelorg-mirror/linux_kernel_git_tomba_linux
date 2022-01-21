@@ -211,8 +211,7 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  * @datatype: Data type filter
  * @enable_active_lanes: If number of active lanes can be modified
  * @en_vcx: If more than 4 VC are enabled
- * @rsubdev: Remote subdev connected to sink pad
- * @streaming: Flag for storing streaming state
+ * @@enabled_source_streams: Mask of enabled source streams
  * @events: counter for events
  * @vcx_events: counter for vcx_events
  *
@@ -233,8 +232,7 @@ struct xcsi2rxss_state {
 	bool enable_active_lanes;
 	bool en_vcx;
 
-	struct v4l2_subdev *rsubdev;
-	bool streaming;
+	u64 enabled_source_streams;
 
 	u32 events[XCSI_NUM_EVENTS];
 	u32 vcx_events[XCSI_VCX_NUM_EVENTS];
@@ -360,30 +358,17 @@ static void xcsi2rxss_reset_event_counters(struct xcsi2rxss_state *csi2rx)
 		csi2rx->vcx_events[i] = 0;
 }
 
-static struct v4l2_subdev *xcsi2rxss_get_remote_subdev(struct media_pad *local)
-{
-	struct media_pad *remote;
-	struct v4l2_subdev *sd;
-
-	remote = media_pad_remote_pad_first(local);
-	if (!remote || !is_media_entity_v4l2_subdev(remote->entity))
-		sd = NULL;
-	else
-		sd = media_entity_to_v4l2_subdev(remote->entity);
-
-	return sd;
-}
-
 static int xcsi2rxss_start_stream(struct xcsi2rxss_state *csi2rx)
 {
-	int ret = 0;
+	int ret;
 
 	/* enable core */
 	xcsi2rxss_set(csi2rx, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
 
 	ret = xcsi2rxss_soft_reset(csi2rx);
 	if (ret) {
-		csi2rx->streaming = false;
+		/* disable core */
+		xcsi2rxss_clr(csi2rx, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
 		return ret;
 	}
 
@@ -392,43 +377,17 @@ static int xcsi2rxss_start_stream(struct xcsi2rxss_state *csi2rx)
 	xcsi2rxss_write(csi2rx, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
 	xcsi2rxss_set(csi2rx, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
 
-	csi2rx->streaming = true;
-
-	csi2rx->rsubdev =
-		xcsi2rxss_get_remote_subdev(&csi2rx->xvip.pads[XVIP_PAD_SINK]);
-
-	if (!csi2rx->rsubdev) {
-		ret = -ENODEV;
-		goto exit_start_stream;
-	}
-
-	ret = v4l2_subdev_call(csi2rx->rsubdev, video, s_stream, 1);
-
-exit_start_stream:
-	if (ret) {
-		/* disable interrupts */
-		xcsi2rxss_clr(csi2rx, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
-		xcsi2rxss_clr(csi2rx, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
-
-		/* disable core */
-		xcsi2rxss_clr(csi2rx, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
-		csi2rx->streaming = false;
-	}
-
-	return ret;
+	return 0;
 }
 
 static void xcsi2rxss_stop_stream(struct xcsi2rxss_state *csi2rx)
 {
-	v4l2_subdev_call(csi2rx->rsubdev, video, s_stream, 0);
-
 	/* disable interrupts */
 	xcsi2rxss_clr(csi2rx, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
 	xcsi2rxss_clr(csi2rx, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
 
 	/* disable core */
 	xcsi2rxss_clr(csi2rx, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
-	csi2rx->streaming = false;
 }
 
 /**
@@ -545,13 +504,22 @@ static int xcsi2rxss_enable_streams(struct v4l2_subdev *sd,
 	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
 	int ret = 0;
 
+	if (pad != XVIP_PAD_SOURCE)
+		return -EINVAL;
+
 	mutex_lock(&csi2rx->lock);
 
-	if (!csi2rx->streaming) {
+	/* Enable the HW if not yet enabled. */
+	if (!csi2rx->enabled_source_streams) {
 		xcsi2rxss_reset_event_counters(csi2rx);
 		ret = xcsi2rxss_start_stream(csi2rx);
+		if (ret)
+			goto done;
 	}
 
+	csi2rx->enabled_source_streams |= streams_mask;
+
+done:
 	mutex_unlock(&csi2rx->lock);
 	return ret;
 }
@@ -562,14 +530,21 @@ static int xcsi2rxss_disable_streams(struct v4l2_subdev *sd,
 {
 	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
 
+	if (pad != XVIP_PAD_SOURCE)
+		return -EINVAL;
+
 	mutex_lock(&csi2rx->lock);
 
-	if (csi2rx->streaming) {
+	/* Disable the HW is no streams are left enabled. */
+	if (csi2rx->enabled_source_streams == streams_mask) {
 		xcsi2rxss_stop_stream(csi2rx);
 		xcsi2rxss_hard_reset(csi2rx);
 	}
 
+	csi2rx->enabled_source_streams &= ~streams_mask;
+
 	mutex_unlock(&csi2rx->lock);
+
 	return 0;
 }
 

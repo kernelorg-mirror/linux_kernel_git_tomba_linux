@@ -869,10 +869,6 @@ static int xcsc_set_format(struct v4l2_subdev *subdev,
 	return 0;
 }
 
-static const struct v4l2_subdev_video_ops xcsc_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static const struct v4l2_subdev_pad_ops xcsc_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
@@ -883,7 +879,6 @@ static const struct v4l2_subdev_pad_ops xcsc_pad_ops = {
 };
 
 static const struct v4l2_subdev_ops xcsc_ops = {
-	.video = &xcsc_video_ops,
 	.pad = &xcsc_pad_ops
 };
 

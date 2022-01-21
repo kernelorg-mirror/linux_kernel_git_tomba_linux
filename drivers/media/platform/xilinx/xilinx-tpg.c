@@ -708,7 +708,6 @@ static const struct v4l2_subdev_core_ops xtpg_core_ops = {
 static const struct v4l2_subdev_video_ops xtpg_video_ops = {
 	.g_frame_interval = xtpg_g_frame_interval,
 	.s_frame_interval = xtpg_s_frame_interval,
-	.s_stream = xvip_s_stream,
 };
 
 static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {

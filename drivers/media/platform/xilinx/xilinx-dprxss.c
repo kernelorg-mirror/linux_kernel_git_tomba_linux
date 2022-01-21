@@ -2068,7 +2068,6 @@ static const struct v4l2_subdev_core_ops xdprxss_core_ops = {
 
 static const struct v4l2_subdev_video_ops xdprxss_video_ops = {
 	.query_dv_timings	= xdprxss_query_dv_timings,
-	.s_stream		= xvip_s_stream,
 	.g_input_status		= xdprxss_g_input_status,
 };
 

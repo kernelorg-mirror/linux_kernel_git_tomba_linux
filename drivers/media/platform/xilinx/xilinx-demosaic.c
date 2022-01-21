@@ -269,10 +269,6 @@ static const struct v4l2_subdev_internal_ops xdmsc_internal_ops = {
 	.close = xdmsc_close,
 };
 
-static const struct v4l2_subdev_video_ops xdmsc_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static const struct v4l2_subdev_pad_ops xdmsc_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
@@ -283,7 +279,6 @@ static const struct v4l2_subdev_pad_ops xdmsc_pad_ops = {
 };
 
 static const struct v4l2_subdev_ops xdmsc_ops = {
-	.video = &xdmsc_video_ops,
 	.pad = &xdmsc_pad_ops,
 };
 

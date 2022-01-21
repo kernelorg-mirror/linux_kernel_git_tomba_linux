@@ -32,6 +32,7 @@ struct xvip_video_format;
  * @lock: protects the pipeline @stream_count
  * @use_count: number of DMA engines using the pipeline
  * @stream_count: number of DMA engines currently streaming
+ * @dmas: list of xvip_dma in the pipeline
  * @num_dmas: number of DMA engines in the pipeline
  * @xdev: Composite device the pipe belongs to
  */
@@ -42,6 +43,7 @@ struct xvip_pipeline {
 	unsigned int use_count;
 	unsigned int stream_count;
 
+	struct list_head dmas;
 	unsigned int num_dmas;
 	struct xvip_composite_device *xdev;
 };
@@ -59,6 +61,7 @@ static inline struct xvip_pipeline *to_xvip_pipeline(struct video_device *vdev)
 /**
  * struct xvip_dma - Video DMA channel
  * @list: list entry in a composite device dmas list
+ * @pipe_list: list entry in the xvip_pipeline.dmas list
  * @video: V4L2 video device associated with the DMA channel
  * @pad: media pad for the video device entity
  * @remote_subdev_med_bus: media bus format of sub-device
@@ -86,6 +89,7 @@ static inline struct xvip_pipeline *to_xvip_pipeline(struct video_device *vdev)
  */
 struct xvip_dma {
 	struct list_head list;
+	struct list_head pipe_list;
 	struct video_device video;
 	struct media_pad pad;
 	u32 remote_subdev_med_bus;

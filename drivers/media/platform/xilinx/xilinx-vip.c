@@ -762,6 +762,154 @@ int xvip_get_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
 }
 EXPORT_SYMBOL_GPL(xvip_get_mbus_config);
 
+static int __xvip_enable_connected_streams(struct v4l2_subdev *sd,
+					   struct v4l2_subdev_state *state,
+					   u32 pad, u64 streams_mask,
+					   bool enable)
+{
+	struct xvip_device *xvip = to_xvip_device(sd);
+	struct media_link *link;
+	u64 *streams;
+	int ret = 0;
+
+	streams = kcalloc(sd->entity.num_pads, sizeof(*streams), GFP_KERNEL);
+	if (!streams)
+		return -ENOMEM;
+
+	if (state) {
+		struct v4l2_subdev_route *route;
+
+		/* Collect the routed pads and their streams. */
+		for_each_active_route(&state->routing, route) {
+			if (route->sink_pad == pad &&
+			    (streams_mask & BIT(route->sink_stream))) {
+				streams[route->source_pad] |=
+					BIT(route->source_stream);
+
+				dev_dbg(xvip->dev,
+					"Collected stream %u on pad %s/%u\n",
+					route->source_stream, sd->entity.name,
+					route->source_pad);
+			}
+
+			if (route->source_pad == pad &&
+			    (streams_mask & BIT(route->source_stream))) {
+				streams[route->sink_pad] |=
+					BIT(route->sink_stream);
+
+				dev_dbg(xvip->dev,
+					"Collected stream %u on pad %s/%u\n",
+					route->sink_stream, sd->entity.name,
+					route->sink_pad);
+			}
+		}
+	} else {
+		struct media_pad *local_pad = &sd->entity.pads[pad];
+		struct media_pad *other_pad;
+
+		/*
+		 * Not all Xilinx subdev have transitioned to active state
+		 * management. Handle the legacy case by collecting all pads on
+		 * the other side of the subdev.
+		 */
+		media_entity_for_each_pad(&sd->entity, other_pad) {
+			if ((local_pad->flags ^ other_pad->flags) !=
+			    (MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_SOURCE))
+				continue;
+
+			streams[other_pad->index] = streams_mask;
+
+			dev_dbg(xvip->dev,
+				"Collected pad %s/%u with streams 0x%llx\n",
+				sd->entity.name, other_pad->index,
+				streams_mask);
+		}
+	}
+
+	/*
+	 * Enable/disable streams on all remote pads connected to the collected
+	 * local pads.
+	 */
+	list_for_each_entry(link, &sd->entity.links, list) {
+		struct media_pad *local_pad;
+		struct media_pad *remote_pad;
+		struct v4l2_subdev *remote_sd;
+		u64 link_streams;
+
+		dev_dbg(xvip->dev, "Processing link %s/%u -> %s/%u\n",
+			link->source->entity->name, link->source->index,
+			link->sink->entity->name, link->sink->index);
+
+		/* Skip disabled links and non-data links. */
+		if (!(link->flags & MEDIA_LNK_FL_ENABLED) ||
+		    (link->flags & MEDIA_LNK_FL_LINK_TYPE) !=
+		    MEDIA_LNK_FL_DATA_LINK)
+			continue;
+
+		if (link->source->entity == &sd->entity) {
+			local_pad = link->source;
+			remote_pad = link->sink;
+		} else {
+			local_pad = link->sink;
+			remote_pad = link->source;
+		}
+
+		/* Skip pads that we haven't collected. */
+		if (!streams[local_pad->index])
+			continue;
+
+		link_streams = streams[local_pad->index];
+
+		/* Skip remote entities that are not subdevs. */
+		if (!is_media_entity_v4l2_subdev(remote_pad->entity))
+			continue;
+
+		remote_sd = media_entity_to_v4l2_subdev(remote_pad->entity);
+
+		dev_dbg(xvip->dev, "%s streams 0x%llx on %s/%u\n",
+			enable ? "Enabling" : "Disabling", link_streams,
+			remote_sd->entity.name, remote_pad->index);
+
+		/* Enable/disable streams on the remote subdev. */
+		if (enable)
+			ret = v4l2_subdev_enable_streams(remote_sd,
+							 remote_pad->index,
+							 link_streams);
+		else
+			ret = v4l2_subdev_disable_streams(remote_sd,
+							  remote_pad->index,
+							  link_streams);
+
+		if (ret) {
+			/*
+			 * TODO: Handle errors correctly by stopping all
+			 * subdevs that have been successfully started.
+			 */
+			break;
+		}
+	}
+
+	kfree(streams);
+
+	return ret;
+}
+
+static int xvip_enable_connected_streams(struct v4l2_subdev *sd,
+					 struct v4l2_subdev_state *state,
+					 u32 pad, u64 streams_mask)
+{
+	return __xvip_enable_connected_streams(sd, state, pad, streams_mask,
+					       true);
+}
+
+static int xvip_disable_connected_streams(struct v4l2_subdev *sd,
+					  struct v4l2_subdev_state *state,
+					  u32 pad, u64 streams_mask)
+{
+	return __xvip_enable_connected_streams(sd, state, pad, streams_mask,
+					       false);
+}
+
 /**
  * xvip_enable_streams - Enable streams on a subdevice
  * @sd: The V4L2 subdevice
@@ -770,9 +918,12 @@ EXPORT_SYMBOL_GPL(xvip_get_mbus_config);
  * @streams_mask: The streams mask
  *
  * This function is a drop-in implementation of the subdev enable_streams pad
- * operation. It currently just delegates enabling of the streams to the
- * &xvip_device_ops.enable_streams operation, and will be expanded when
- * reworking the stream control implementation.
+ * operation. It delegates enabling of the streams to the
+ * &xvip_device_ops.enable_streams operation, and then forwards the call to
+ * connected subdevs. If a device needs finer grained control on how the
+ * connected subdevs are enabled, it should implement the
+ * &v4l2_subdev_pad_ops.enable_streams operation directly instead of using this
+ * helper.
  *
  * Device that don't need to perform any operation when enabling streams may
  * leave the &xvip_device_ops.enable_streams operation unimplemented.
@@ -783,12 +934,25 @@ int xvip_enable_streams(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
 			u32 pad, u64 streams_mask)
 {
 	struct xvip_device *xvip = to_xvip_device(sd);
-	int ret = 0;
+	int ret;
 
-	if (xvip->ops && xvip->ops->enable_streams)
+	if (xvip->ops && xvip->ops->enable_streams) {
+		dev_dbg(xvip->dev, "Enabling streams 0x%llx on xvip %s/%u\n",
+			streams_mask, sd->entity.name, pad);
+
 		ret = xvip->ops->enable_streams(sd, state, pad, streams_mask);
+		if (ret)
+			return ret;
+	}
 
-	return ret;
+	ret = xvip_enable_connected_streams(sd, state, pad, streams_mask);
+	if (ret) {
+		if (xvip->ops && xvip->ops->disable_streams)
+			xvip->ops->disable_streams(sd, state, pad, streams_mask);
+		return ret;
+	}
+
+	return 0;
 }
 EXPORT_SYMBOL_GPL(xvip_enable_streams);
 
@@ -800,9 +964,11 @@ EXPORT_SYMBOL_GPL(xvip_enable_streams);
  * @streams_mask: The streams mask
  *
  * This function is a drop-in implementation of the subdev disable_streams pad
- * operation. It currently just delegates disabling of the device to the
- * &xvip_device_ops.disable_streams operation, and will be expanded when
- * reworking the stream control implementation.
+ * operation. It forwards the call to connected subdevs, and then delegates
+ * disabling of the streams to the &xvip_device_ops.disable_streams operation.
+ * If a device needs finer grained control on how the connected subdevs are
+ * disabled, it should implement the &v4l2_subdev_pad_ops.disable_streams
+ * operation directly instead of using this helper.
  *
  * Device that don't need to perform any operation when disabling streams may
  * leave the &xvip_device_ops.disable_streams operation unimplemented.
@@ -813,12 +979,22 @@ int xvip_disable_streams(struct v4l2_subdev *sd, struct v4l2_subdev_state *state
 			u32 pad, u64 streams_mask)
 {
 	struct xvip_device *xvip = to_xvip_device(sd);
-	int ret = 0;
+	int ret;
 
-	if (xvip->ops && xvip->ops->disable_streams)
+	ret = xvip_disable_connected_streams(sd, state, pad, streams_mask);
+	if (ret)
+		return ret;
+
+	if (xvip->ops && xvip->ops->disable_streams) {
+		dev_dbg(xvip->dev, "Disabling streams 0x%llx on xvip %s/%u\n",
+			streams_mask, sd->entity.name, pad);
+
 		ret = xvip->ops->disable_streams(sd, state, pad, streams_mask);
+		if (ret)
+			return ret;
+	}
 
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(xvip_disable_streams);
 

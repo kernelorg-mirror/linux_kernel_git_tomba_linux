@@ -208,10 +208,6 @@ static int xcfa_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 	return 0;
 }
 
-static struct v4l2_subdev_video_ops xcfa_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static struct v4l2_subdev_pad_ops xcfa_pad_ops = {
 	.enum_mbus_code		= xvip_enum_mbus_code,
 	.enum_frame_size	= xvip_enum_frame_size,
@@ -222,7 +218,6 @@ static struct v4l2_subdev_pad_ops xcfa_pad_ops = {
 };
 
 static struct v4l2_subdev_ops xcfa_ops = {
-	.video  = &xcfa_video_ops,
 	.pad    = &xcfa_pad_ops,
 };
 

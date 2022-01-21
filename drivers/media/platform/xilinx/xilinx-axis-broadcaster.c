@@ -107,10 +107,6 @@ static int xvbr_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 	return 0;
 }
 
-static struct v4l2_subdev_video_ops xvbr_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static struct v4l2_subdev_pad_ops xvbr_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
@@ -121,7 +117,6 @@ static struct v4l2_subdev_pad_ops xvbr_pad_ops = {
 };
 
 static struct v4l2_subdev_ops xvbr_ops = {
-	.video = &xvbr_video_ops,
 	.pad = &xvbr_pad_ops,
 };
 

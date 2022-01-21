@@ -305,10 +305,6 @@ static struct v4l2_subdev_core_ops xhls_core_ops = {
 	.ioctl = xhls_ioctl,
 };
 
-static struct v4l2_subdev_video_ops xhls_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static struct v4l2_subdev_pad_ops xhls_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
@@ -320,7 +316,6 @@ static struct v4l2_subdev_pad_ops xhls_pad_ops = {
 
 static struct v4l2_subdev_ops xhls_ops = {
 	.core   = &xhls_core_ops,
-	.video  = &xhls_video_ops,
 	.pad    = &xhls_pad_ops,
 };
 

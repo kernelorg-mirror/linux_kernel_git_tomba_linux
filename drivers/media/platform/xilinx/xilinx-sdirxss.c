@@ -2393,7 +2393,6 @@ static const struct v4l2_subdev_core_ops xsdirxss_core_ops = {
 
 static const struct v4l2_subdev_video_ops xsdirxss_video_ops = {
 	.g_frame_interval = xsdirxss_g_frame_interval,
-	.s_stream = xvip_s_stream,
 	.g_input_status = xsdirxss_g_input_status,
 	.query_dv_timings = xsdirxss_query_dv_timings,
 };

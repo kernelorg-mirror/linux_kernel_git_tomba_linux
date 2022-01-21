@@ -250,10 +250,6 @@ static const struct v4l2_ctrl_ops xrgb2yuv_ctrl_ops = {
 	.s_ctrl	= xrgb2yuv_s_ctrl,
 };
 
-static struct v4l2_subdev_video_ops xrgb2yuv_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static struct v4l2_subdev_pad_ops xrgb2yuv_pad_ops = {
 	.enum_mbus_code		= xvip_enum_mbus_code,
 	.enum_frame_size	= xvip_enum_frame_size,
@@ -264,7 +260,6 @@ static struct v4l2_subdev_pad_ops xrgb2yuv_pad_ops = {
 };
 
 static struct v4l2_subdev_ops xrgb2yuv_ops = {
-	.video  = &xrgb2yuv_video_ops,
 	.pad    = &xrgb2yuv_pad_ops,
 };
 

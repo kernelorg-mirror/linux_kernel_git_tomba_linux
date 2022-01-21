@@ -217,7 +217,6 @@ int xvip_enable_streams(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
 			u32 pad, u64 streams_mask);
 int xvip_disable_streams(struct v4l2_subdev *sd, struct v4l2_subdev_state *state,
 			u32 pad, u64 streams_mask);
-int xvip_s_stream(struct v4l2_subdev *sd, int enable);
 
 static inline u32 xvip_read(struct xvip_device *xvip, u32 addr)
 {

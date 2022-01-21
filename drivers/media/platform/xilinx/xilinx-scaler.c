@@ -507,10 +507,6 @@ static int xscaler_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 	return 0;
 }
 
-static struct v4l2_subdev_video_ops xscaler_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static struct v4l2_subdev_pad_ops xscaler_pad_ops = {
 	.enum_mbus_code		= xvip_enum_mbus_code,
 	.enum_frame_size	= xscaler_enum_frame_size,
@@ -523,7 +519,6 @@ static struct v4l2_subdev_pad_ops xscaler_pad_ops = {
 };
 
 static struct v4l2_subdev_ops xscaler_ops = {
-	.video  = &xscaler_video_ops,
 	.pad    = &xscaler_pad_ops,
 };
 

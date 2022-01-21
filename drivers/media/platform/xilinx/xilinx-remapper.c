@@ -352,10 +352,6 @@ static int xremap_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 static struct v4l2_subdev_core_ops xremap_core_ops = {
 };
 
-static struct v4l2_subdev_video_ops xremap_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static struct v4l2_subdev_pad_ops xremap_pad_ops = {
 	.enum_mbus_code = xremap_enum_mbus_code,
 	.enum_frame_size = xremap_enum_frame_size,
@@ -367,7 +363,6 @@ static struct v4l2_subdev_pad_ops xremap_pad_ops = {
 
 static struct v4l2_subdev_ops xremap_ops = {
 	.core   = &xremap_core_ops,
-	.video  = &xremap_video_ops,
 	.pad    = &xremap_pad_ops,
 };
 

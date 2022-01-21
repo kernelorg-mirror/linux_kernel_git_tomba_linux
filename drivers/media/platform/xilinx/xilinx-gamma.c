@@ -273,10 +273,6 @@ static const struct v4l2_subdev_internal_ops xg_internal_ops = {
 	.close = xg_close,
 };
 
-static const struct v4l2_subdev_video_ops xg_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static const struct v4l2_subdev_pad_ops xg_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
@@ -287,7 +283,6 @@ static const struct v4l2_subdev_pad_ops xg_pad_ops = {
 };
 
 static const struct v4l2_subdev_ops xg_ops = {
-	.video = &xg_video_ops,
 	.pad = &xg_pad_ops,
 };
 

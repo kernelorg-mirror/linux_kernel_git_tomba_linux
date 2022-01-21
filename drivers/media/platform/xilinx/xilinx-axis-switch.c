@@ -286,10 +286,6 @@ static int xvsw_set_routing(struct v4l2_subdev *subdev,
 	return __xvsw_set_routing(subdev, state, routing);
 }
 
-static const struct v4l2_subdev_video_ops xvsw_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static const struct v4l2_subdev_pad_ops xvsw_pad_ops = {
 	.init_cfg = xvsw_init_cfg,
 	.enum_mbus_code = xvip_enum_mbus_code,
@@ -304,7 +300,6 @@ static const struct v4l2_subdev_pad_ops xvsw_pad_ops = {
 };
 
 static const struct v4l2_subdev_ops xvsw_ops = {
-	.video = &xvsw_video_ops,
 	.pad = &xvsw_pad_ops,
 };
 

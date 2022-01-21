@@ -3324,7 +3324,6 @@ static int xhdmirx_subscribe_event(struct v4l2_subdev *sd, struct v4l2_fh *fh,
 }
 
 static const struct v4l2_subdev_video_ops xvideo_ops = {
-	.s_stream		= xvip_s_stream,
 	.query_dv_timings	= xhdmirx_query_dv_timings,
 	.g_input_status		= xhdmirx_g_input_status,
 };

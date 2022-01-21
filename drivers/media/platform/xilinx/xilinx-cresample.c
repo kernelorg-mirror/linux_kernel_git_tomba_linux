@@ -212,10 +212,6 @@ static const struct v4l2_ctrl_ops xcresample_ctrl_ops = {
 	.s_ctrl	= xcresample_s_ctrl,
 };
 
-static struct v4l2_subdev_video_ops xcresample_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static struct v4l2_subdev_pad_ops xcresample_pad_ops = {
 	.enum_mbus_code		= xvip_enum_mbus_code,
 	.enum_frame_size	= xvip_enum_frame_size,
@@ -226,7 +222,6 @@ static struct v4l2_subdev_pad_ops xcresample_pad_ops = {
 };
 
 static struct v4l2_subdev_ops xcresample_ops = {
-	.video  = &xcresample_video_ops,
 	.pad    = &xcresample_pad_ops,
 };
 

@@ -796,10 +796,6 @@ static const struct v4l2_subdev_core_ops xcsi2rxss_core_ops = {
 	.log_status = xcsi2rxss_log_status,
 };
 
-static const struct v4l2_subdev_video_ops xcsi2rxss_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static const struct v4l2_subdev_pad_ops xcsi2rxss_pad_ops = {
 	.enum_mbus_code = xcsi2rxss_enum_mbus_code,
 	.get_fmt = v4l2_subdev_get_fmt,
@@ -812,7 +808,6 @@ static const struct v4l2_subdev_pad_ops xcsi2rxss_pad_ops = {
 
 static const struct v4l2_subdev_ops xcsi2rxss_ops = {
 	.core = &xcsi2rxss_core_ops,
-	.video = &xcsi2rxss_video_ops,
 	.pad = &xcsi2rxss_pad_ops
 };
 

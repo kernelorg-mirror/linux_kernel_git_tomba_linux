@@ -242,10 +242,6 @@ static int xsw_set_routing(struct v4l2_subdev *subdev,
  * V4L2 Subdevice Operations
  */
 
-static const struct v4l2_subdev_video_ops xsw_video_ops = {
-	.s_stream = xvip_s_stream,
-};
-
 static const struct v4l2_subdev_pad_ops xsw_pad_ops = {
 	.init_cfg = xsw_init_cfg,
 	.enum_mbus_code = xvip_enum_mbus_code,
@@ -258,7 +254,6 @@ static const struct v4l2_subdev_pad_ops xsw_pad_ops = {
 };
 
 static const struct v4l2_subdev_ops xsw_ops = {
-	.video = &xsw_video_ops,
 	.pad = &xsw_pad_ops,
 };
 

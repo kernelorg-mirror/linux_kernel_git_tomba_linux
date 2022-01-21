@@ -163,6 +163,8 @@ static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
 			num_outputs++;
 		else
 			num_inputs++;
+
+		list_add_tail(&dma->pipe_list, &pipe->dmas);
 	}
 
 	/* We need at least one DMA to proceed */
@@ -177,6 +179,9 @@ static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
 
 static void __xvip_pipeline_cleanup(struct xvip_pipeline *pipe)
 {
+	while (!list_empty(&pipe->dmas))
+		list_del(pipe->dmas.next);
+
 	pipe->num_dmas = 0;
 }
 
@@ -1265,6 +1270,7 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	mutex_init(&dma->lock);
 	mutex_init(&dma->pipe.lock);
 	INIT_LIST_HEAD(&dma->queued_bufs);
+	INIT_LIST_HEAD(&dma->pipe.dmas);
 	spin_lock_init(&dma->queued_lock);
 
 	dma->fmtinfo = xvip_get_format_by_fourcc(XVIP_DMA_DEF_FORMAT);

@@ -91,6 +91,75 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  */
 
 /**
+ * xvip_pipeline_start_stop_dma - Start or stop a DMA engine in the pipeline
+ * @pipe: The pipeline
+ * @dma: The DMA engine
+ * @on: True to start, false to stop
+ *
+ * Return: 0 for success, otherwise error code
+ */
+static int xvip_pipeline_start_stop_dma(struct xvip_pipeline *pipe,
+					struct xvip_dma *dma, bool on)
+{
+	struct v4l2_subdev *sd;
+	u32 pad;
+	int ret;
+
+	dev_dbg(dma->xdev->dev, "%s streams on %s\n",
+		on ? "Enabling" : "Disabling",
+		dma->video.entity.name);
+
+	sd = xvip_dma_remote_subdev(&dma->pad, &pad);
+	if (!sd)
+		return -ENXIO;
+
+	if (on)
+		ret = v4l2_subdev_enable_streams(sd, pad, BIT(0));
+	else
+		ret = v4l2_subdev_disable_streams(sd, pad, BIT(0));
+
+	if (ret)
+		dev_err(dma->xdev->dev, "Failed to %s streams for %s\n",
+			on ? "enable" : "disable", dma->video.entity.name);
+
+	return ret;
+}
+
+/**
+ * xvip_pipeline_start_stop_dmas - Start or stop all DMA engines in the pipeline
+ * @pipe: The pipeline
+ * @on: True to start, false to stop
+ *
+ * Return: 0 for success, otherwise error code
+ */
+static int xvip_pipeline_start_stop_dmas(struct xvip_pipeline *pipe, bool on)
+{
+	struct xvip_dma *err_dma;
+	struct xvip_dma *dma;
+	int ret;
+
+	list_for_each_entry(dma, &pipe->dmas, pipe_list) {
+		ret = xvip_pipeline_start_stop_dma(pipe, dma, on);
+		if (ret && on)
+			goto error;
+
+		/* There's no meaningful way to handle errors when disabling. */
+	}
+
+	return 0;
+
+error:
+	list_for_each_entry(err_dma, &pipe->dmas, pipe_list) {
+		if (err_dma == dma)
+			break;
+
+		xvip_pipeline_start_stop_dma(pipe, err_dma, false);
+	}
+
+	return ret;
+}
+
+/**
  * xvip_pipeline_set_stream - Enable/disable streaming on a pipeline
  * @pipe: The pipeline
  * @on: Turn the stream on when true or off when false
@@ -118,22 +187,20 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  */
 static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe, bool on)
 {
-	struct xvip_composite_device *xdev;
 	int ret = 0;
 
 	mutex_lock(&pipe->lock);
-	xdev = pipe->xdev;
 
 	if (on) {
-		if (pipe->stream_count == pipe->num_dmas - 1 || xdev->atomic_streamon) {
-			ret = xvip_graph_pipeline_start_stop(xdev, pipe, true);
+		if (pipe->stream_count == pipe->num_dmas - 1) {
+			ret = xvip_pipeline_start_stop_dmas(pipe, true);
 			if (ret < 0)
 				goto done;
 		}
 		pipe->stream_count++;
 	} else {
 		if (--pipe->stream_count == 0)
-			xvip_graph_pipeline_start_stop(xdev, pipe, false);
+			xvip_pipeline_start_stop_dmas(pipe, false);
 	}
 
 done:

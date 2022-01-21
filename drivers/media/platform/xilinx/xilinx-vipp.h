@@ -44,7 +44,4 @@ struct xvip_composite_device {
 	bool atomic_streamon;
 };
 
-int xvip_graph_pipeline_start_stop(struct xvip_composite_device *xdev,
-				   struct xvip_pipeline *pipe, bool on);
-
 #endif /* __XILINX_VIPP_H__ */

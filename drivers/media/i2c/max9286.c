@@ -1375,7 +1375,11 @@ static int max9286_setup(struct max9286_priv *priv)
 	max9286_configure_i2c(priv, true);
 	max9286_reverse_channel_setup(priv, priv->init_rev_chan_mv);
 
-	max9286_config_links(priv);
+	/*
+	 * Enable links to all connected cameras by default, to enable I2C
+	 * communication.
+	 */
+	max9286_write(priv, 0x00, MAX9286_MSTLINKSEL_AUTO | priv->route_mask);
 
 	cfg = max9286_read(priv, 0x1c);
 	if (cfg < 0)

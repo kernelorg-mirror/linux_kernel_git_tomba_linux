@@ -640,19 +640,14 @@ static void max9286_set_fsync_period(struct max9286_priv *priv)
 static void max9286_config_links(struct max9286_priv *priv,
 				 struct v4l2_subdev_state *state)
 {
-	const struct v4l2_subdev_krouting *routing = &state->routing;
 	const struct v4l2_mbus_framefmt *format;
+	struct v4l2_subdev_route *route;
 	unsigned int pad;
 	u8 link_order = 0;
 	u8 vc_mask = 0xf;
 	unsigned int i;
 
-	for (i = 0; i < routing->num_routes; ++i) {
-		struct v4l2_subdev_route *route = &routing->routes[i];
-
-		if (!(priv->route_mask & BIT(i)))
-			continue;
-
+	for_each_active_route(&state->routing, route) {
 		/* Assign the CSI-2 VC using the source stream number. */
 		link_order |= route->source_stream << (2 * route->sink_pad);
 		vc_mask &= ~BIT(route->source_stream);

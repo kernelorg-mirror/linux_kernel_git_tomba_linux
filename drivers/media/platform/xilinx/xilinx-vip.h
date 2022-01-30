@@ -197,6 +197,7 @@ static inline struct xvip_device *to_xvip_device(struct v4l2_subdev *sd)
 
 const struct xvip_video_format *xvip_get_format_by_code(unsigned int code);
 const struct xvip_video_format *xvip_get_format_by_fourcc(u32 fourcc);
+const struct xvip_video_format *xvip_get_format_by_index(unsigned int index);
 const struct xvip_video_format *xvip_of_get_format(struct device_node *node);
 void xvip_bpl_scaling_factor(u32 fourcc, u32 *numerator, u32 *denominator);
 void xvip_width_padding_factor(u32 fourcc, u32 *numerator, u32 *denominator);

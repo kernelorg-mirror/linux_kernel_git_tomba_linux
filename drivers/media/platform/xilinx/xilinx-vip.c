@@ -205,6 +205,22 @@ const struct xvip_video_format *xvip_get_format_by_fourcc(u32 fourcc)
 EXPORT_SYMBOL_GPL(xvip_get_format_by_fourcc);
 
 /**
+ * xvip_get_format_by_index - Retrieve format information by index
+ * @index: the index
+ *
+ * Return: a pointer to the format information structure for the @index'th
+ * format, or ERR_PTR if @index exceeds the number of supported formats.
+ */
+const struct xvip_video_format *xvip_get_format_by_index(unsigned int index)
+{
+	if (index >= ARRAY_SIZE(xvip_video_formats))
+		return ERR_PTR(-EINVAL);
+
+	return &xvip_video_formats[index];
+}
+EXPORT_SYMBOL_GPL(xvip_get_format_by_index);
+
+/**
  * xvip_bpl_scaling_factor - Retrieve bpl scaling factor for a 4CC
  * @fourcc: the format 4CC
  * @numerator: returning numerator of scaling factor

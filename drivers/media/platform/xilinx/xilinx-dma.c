@@ -833,7 +833,8 @@ xvip_dma_enum_format(struct file *file, void *fh, struct v4l2_fmtdesc *f)
 }
 
 static int
-xvip_dma_get_format(struct file *file, void *fh, struct v4l2_format *format)
+xvip_dma_get_format_mplane(struct file *file, void *fh,
+			   struct v4l2_format *format)
 {
 	struct v4l2_fh *vfh = file->private_data;
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
@@ -985,7 +986,8 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 }
 
 static int
-xvip_dma_try_format(struct file *file, void *fh, struct v4l2_format *format)
+xvip_dma_try_format_mplane(struct file *file, void *fh,
+			   struct v4l2_format *format)
 {
 	struct v4l2_fh *vfh = file->private_data;
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
@@ -995,7 +997,8 @@ xvip_dma_try_format(struct file *file, void *fh, struct v4l2_format *format)
 }
 
 static int
-xvip_dma_set_format(struct file *file, void *fh, struct v4l2_format *format)
+xvip_dma_set_format_mplane(struct file *file, void *fh,
+			   struct v4l2_format *format)
 {
 	struct v4l2_fh *vfh = file->private_data;
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
@@ -1022,6 +1025,121 @@ xvip_dma_set_format(struct file *file, void *fh, struct v4l2_format *format)
 	}
 
 	dma->fmtinfo = info;
+
+	return 0;
+}
+
+/* Emulate the legacy single-planar API using the multi-planar operations. */
+static void
+xvip_dma_single_to_multi_planar(const struct v4l2_format *fmt,
+				struct v4l2_format *fmt_mp)
+{
+	const struct v4l2_pix_format *pix = &fmt->fmt.pix;
+	struct v4l2_pix_format_mplane *pix_mp = &fmt_mp->fmt.pix_mp;
+
+	memset(fmt_mp, 0, sizeof(*fmt_mp));
+
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+		fmt_mp->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+		break;
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		fmt_mp->type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+		break;
+	}
+
+	pix_mp->width = pix->width;
+	pix_mp->height = pix->height;
+	pix_mp->pixelformat = pix->pixelformat;
+	pix_mp->field = pix->field;
+	pix_mp->colorspace = pix->colorspace;
+	pix_mp->plane_fmt[0].sizeimage = pix->sizeimage;
+	pix_mp->plane_fmt[0].bytesperline = pix->bytesperline;
+	pix_mp->num_planes = 1;
+	pix_mp->flags = pix->flags;
+	pix_mp->ycbcr_enc = pix->ycbcr_enc;
+	pix_mp->quantization = pix->quantization;
+	pix_mp->xfer_func = pix->xfer_func;
+}
+
+static void
+xvip_dma_multi_to_single_planar(const struct v4l2_format *fmt_mp,
+				struct v4l2_format *fmt)
+{
+	const struct v4l2_pix_format_mplane *pix_mp = &fmt_mp->fmt.pix_mp;
+	struct v4l2_pix_format *pix = &fmt->fmt.pix;
+
+	memset(fmt, 0, sizeof(*fmt));
+
+	switch (fmt->type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
+		fmt->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		break;
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
+		fmt->type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+		break;
+	}
+
+	pix->width = pix_mp->width;
+	pix->height = pix_mp->height;
+	pix->pixelformat = pix_mp->pixelformat;
+	pix->field = pix_mp->field;
+	pix->colorspace = pix_mp->colorspace;
+	pix->sizeimage = pix_mp->plane_fmt[0].sizeimage;
+	pix->bytesperline = pix_mp->plane_fmt[0].bytesperline;
+	pix->flags = pix_mp->flags;
+	pix->ycbcr_enc = pix_mp->ycbcr_enc;
+	pix->quantization = pix_mp->quantization;
+	pix->xfer_func = pix_mp->xfer_func;
+}
+
+static int
+xvip_dma_get_format(struct file *file, void *fh, struct v4l2_format *format)
+{
+	struct v4l2_format fmt_mp;
+	int ret;
+
+	xvip_dma_single_to_multi_planar(format, &fmt_mp);
+
+	ret = xvip_dma_get_format(file, fh, &fmt_mp);
+	if (ret)
+		return ret;
+
+	xvip_dma_multi_to_single_planar(&fmt_mp, format);
+
+	return 0;
+}
+
+static int
+xvip_dma_try_format(struct file *file, void *fh, struct v4l2_format *format)
+{
+	struct v4l2_format fmt_mp;
+	int ret;
+
+	xvip_dma_single_to_multi_planar(format, &fmt_mp);
+
+	ret = xvip_dma_try_format(file, fh, &fmt_mp);
+	if (ret)
+		return ret;
+
+	xvip_dma_multi_to_single_planar(&fmt_mp, format);
+
+	return 0;
+}
+
+static int
+xvip_dma_set_format(struct file *file, void *fh, struct v4l2_format *format)
+{
+	struct v4l2_format fmt_mp;
+	int ret;
+
+	xvip_dma_single_to_multi_planar(format, &fmt_mp);
+
+	ret = xvip_dma_set_format(file, fh, &fmt_mp);
+	if (ret)
+		return ret;
+
+	xvip_dma_multi_to_single_planar(&fmt_mp, format);
 
 	return 0;
 }
@@ -1131,17 +1249,17 @@ static const struct v4l2_ioctl_ops xvip_dma_ioctl_ops = {
 	.vidioc_enum_fmt_vid_cap	= xvip_dma_enum_format,
 	.vidioc_enum_fmt_vid_out	= xvip_dma_enum_format,
 	.vidioc_g_fmt_vid_cap		= xvip_dma_get_format,
-	.vidioc_g_fmt_vid_cap_mplane	= xvip_dma_get_format,
+	.vidioc_g_fmt_vid_cap_mplane	= xvip_dma_get_format_mplane,
 	.vidioc_g_fmt_vid_out		= xvip_dma_get_format,
-	.vidioc_g_fmt_vid_out_mplane	= xvip_dma_get_format,
+	.vidioc_g_fmt_vid_out_mplane	= xvip_dma_get_format_mplane,
 	.vidioc_s_fmt_vid_cap		= xvip_dma_set_format,
-	.vidioc_s_fmt_vid_cap_mplane	= xvip_dma_set_format,
+	.vidioc_s_fmt_vid_cap_mplane	= xvip_dma_set_format_mplane,
 	.vidioc_s_fmt_vid_out		= xvip_dma_set_format,
-	.vidioc_s_fmt_vid_out_mplane	= xvip_dma_set_format,
+	.vidioc_s_fmt_vid_out_mplane	= xvip_dma_set_format_mplane,
 	.vidioc_try_fmt_vid_cap		= xvip_dma_try_format,
-	.vidioc_try_fmt_vid_cap_mplane	= xvip_dma_try_format,
+	.vidioc_try_fmt_vid_cap_mplane	= xvip_dma_try_format_mplane,
 	.vidioc_try_fmt_vid_out		= xvip_dma_try_format,
-	.vidioc_try_fmt_vid_out_mplane	= xvip_dma_try_format,
+	.vidioc_try_fmt_vid_out_mplane	= xvip_dma_try_format_mplane,
 	.vidioc_s_selection		= xvip_dma_s_selection,
 	.vidioc_g_selection		= xvip_dma_g_selection,
 	.vidioc_reqbufs			= vb2_ioctl_reqbufs,

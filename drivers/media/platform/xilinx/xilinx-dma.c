@@ -729,59 +729,6 @@ xvip_dma_querycap(struct file *file, void *fh, struct v4l2_capability *cap)
 	return 0;
 }
 
-static int xvip_xdma_enum_fmt(struct xvip_dma *dma, struct v4l2_fmtdesc *f,
-			      struct v4l2_subdev_format *v4l_fmt)
-{
-	const struct xvip_video_format *fmt;
-	int ret;
-	u32 i, fmt_cnt = 0, *fmts = NULL;
-
-	ret = xilinx_xdma_get_v4l2_vid_fmts(dma->dma, &fmt_cnt, &fmts);
-	if (ret)
-		return ret;
-
-	/* Has media pad value changed? */
-	if (v4l_fmt->format.code != dma->remote_subdev_med_bus ||
-	    !dma->remote_subdev_med_bus) {
-		/* Re-generate legal list of fourcc codes */
-		dma->poss_v4l2_fmt_cnt = 0;
-		dma->remote_subdev_med_bus = v4l_fmt->format.code;
-
-		if (!dma->poss_v4l2_fmts) {
-			dma->poss_v4l2_fmts =
-				devm_kzalloc(&dma->video.dev,
-					     sizeof(u32) * fmt_cnt,
-					     GFP_KERNEL);
-			if (!dma->poss_v4l2_fmts)
-				return -ENOMEM;
-		}
-
-		for (i = 0; i < fmt_cnt; i++) {
-			fmt = xvip_get_format_by_fourcc(fmts[i]);
-			if (IS_ERR(fmt))
-				return PTR_ERR(fmt);
-
-			if (fmt->code != dma->remote_subdev_med_bus)
-				continue;
-
-			dma->poss_v4l2_fmts[dma->poss_v4l2_fmt_cnt++] =	fmts[i];
-		}
-	}
-
-	/* Return err if index is greater than count of legal values */
-	if (f->index >= dma->poss_v4l2_fmt_cnt)
-		return -EINVAL;
-
-	/* Else return pix format in table */
-	fmt = xvip_get_format_by_fourcc(dma->poss_v4l2_fmts[f->index]);
-	if (IS_ERR(fmt))
-		return PTR_ERR(fmt);
-
-	f->pixelformat = fmt->fourcc;
-
-	return 0;
-}
-
 static int
 xvip_dma_enum_input(struct file *file, void *priv, struct v4l2_input *i)
 {
@@ -833,41 +780,52 @@ xvip_dma_enum_format(struct file *file, void *fh, struct v4l2_fmtdesc *f)
 {
 	struct v4l2_fh *vfh = file->private_data;
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
-	struct v4l2_subdev *subdev;
-	struct v4l2_subdev_format v4l_fmt;
 	const struct xvip_video_format *fmt;
-	int err, ret;
+	unsigned int i;
+	u32 fmt_cnt = 0;
+	u32 *fmts;
 
-	/* Establish media pad format */
-	subdev = xvip_dma_remote_subdev(&dma->pad, &v4l_fmt.pad);
-	if (!subdev)
-		return -EPIPE;
+	xilinx_xdma_get_v4l2_vid_fmts(dma->dma, &fmt_cnt, &fmts);
 
-	v4l_fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-	ret = v4l2_subdev_call(subdev, pad, get_fmt, NULL, &v4l_fmt);
-	if (ret < 0)
-		return ret == -ENOIOCTLCMD ? -EINVAL : ret;
+	if (f->mbus_code) {
+		/* A single 4CC is supported per media bus code. */
+		if (f->index > 0)
+			return -EINVAL;
 
-	/*
-	 * In case of frmbuf DMA, this will invoke frambuf driver specific APIs
-	 * to enumerate formats otherwise return the pix format corresponding
-	 * to subdev's media bus format. This kind of separation would be
-	 * helpful for clean up and upstreaming.
-	 */
-	err = xvip_xdma_enum_fmt(dma, f, &v4l_fmt);
-	if (!err)
-		return err;
+		/*
+		 * If the DMA engine returned a list of formats, find the one
+		 * that matches the media bus code. Otherwise, search all the
+		 * formats supported by this driver.
+		 */
+		if (fmt_cnt) {
+			for (i = 0; i < fmt_cnt; ++i) {
+				fmt = xvip_get_format_by_fourcc(fmts[i]);
+				if (!IS_ERR(fmt) && fmt->code == f->mbus_code)
+					break;
+			}
 
-	/*
-	 * This logic will just return one pix format based on subdev's
-	 * media bus format
-	 */
-	if (f->index > 0)
-		return -EINVAL;
+			if (i == fmt_cnt)
+				return -EINVAL;
+		} else {
+			fmt = xvip_get_format_by_code(f->mbus_code);
+		}
+	} else {
+		/*
+		 * If the DMA engine returned a list of formats, enumerate them,
+		 * otherwise enumerate all the formats supported by this driver.
+		 */
+		if (fmt_cnt) {
+			if (f->index >= fmt_cnt)
+				return -EINVAL;
 
-	fmt = xvip_get_format_by_code(v4l_fmt.format.code);
+			fmt = xvip_get_format_by_fourcc(fmts[f->index]);
+		} else {
+			fmt = xvip_get_format_by_index(f->index);
+		}
+	}
+
 	if (IS_ERR(fmt))
-		return PTR_ERR(fmt);
+		return -EINVAL;
 
 	f->pixelformat = fmt->fourcc;
 

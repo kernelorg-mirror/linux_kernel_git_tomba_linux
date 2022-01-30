@@ -885,31 +885,10 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_ctx *ctx, struct v4l2_format *f)
 	u32 padding_factor_nume, padding_factor_deno;
 	u32 bpl_nume, bpl_deno;
 	u32 i, plane_width, plane_height;
-	struct v4l2_subdev_format fmt;
-	struct v4l2_subdev *subdev;
-	struct xvip_m2m_dev *xdev = ctx->xdev;
-	int ret;
 
 	if (f->type != V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE &&
 	    f->type != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
 		return -EINVAL;
-
-	if (xdev->num_subdevs) {
-		if (f->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
-			subdev = xvip_dma_remote_subdev
-				(&dma->pads[XVIP_PAD_SOURCE], &fmt.pad);
-		else
-			subdev = xvip_dma_remote_subdev
-				(&dma->pads[XVIP_PAD_SINK], &fmt.pad);
-
-		if (!subdev)
-			return -EPIPE;
-
-		fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-		ret = v4l2_subdev_call(subdev, pad, get_fmt, NULL, &fmt);
-		if (ret < 0)
-			return -EINVAL;
-	}
 
 	pix_mp = &f->fmt.pix_mp;
 	plane_fmt = pix_mp->plane_fmt;
@@ -921,22 +900,6 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_ctx *ctx, struct v4l2_format *f)
 			dma->capinfo = info;
 	} else {
 		info = xvip_get_format_by_fourcc(XVIP_M2M_DEFAULT_FMT);
-	}
-
-	if (xdev->num_subdevs) {
-		if (info->code != fmt.format.code ||
-		    fmt.format.width != pix_mp->width ||
-		    fmt.format.height != pix_mp->height) {
-			dev_err(xdev->dev, "Failed to set format\n");
-			dev_info(xdev->dev,
-				 "Reqed Code = %d, Width = %d, Height = %d\n",
-				 info->code, pix_mp->width, pix_mp->height);
-			dev_info(xdev->dev,
-				 "Subdev Code = %d, Width = %d, Height = %d",
-				 fmt.format.code, fmt.format.width,
-				 fmt.format.height);
-			return -EINVAL;
-		}
 	}
 
 	xvip_width_padding_factor(info->fourcc, &padding_factor_nume,

@@ -64,7 +64,6 @@ static inline struct xvip_pipeline *to_xvip_pipeline(struct video_device *vdev)
  * @pipe_list: list entry in the xvip_pipeline.dmas list
  * @video: V4L2 video device associated with the DMA channel
  * @pad: media pad for the video device entity
- * @remote_subdev_med_bus: media bus format of sub-device
  * @ctrl_handler: V4L2 ctrl_handler for inheritance ctrls from subdev
  * @xdev: composite device the DMA channel belongs to
  * @pipe: pipeline belonging to the DMA channel
@@ -73,8 +72,6 @@ static inline struct xvip_pipeline *to_xvip_pipeline(struct video_device *vdev)
  * @format: active V4L2 pixel format
  * @r: crop rectangle parameters
  * @fmtinfo: format information corresponding to the active @format
- * @poss_v4l2_fmts: All possible v4l formats supported
- * @poss_v4l2_fmt_cnt: number of supported v4l formats
  * @queue: vb2 buffers queue
  * @sequence: V4L2 buffers sequence number
  * @queued_bufs: list of queued buffers
@@ -92,7 +89,6 @@ struct xvip_dma {
 	struct list_head pipe_list;
 	struct video_device video;
 	struct media_pad pad;
-	u32 remote_subdev_med_bus;
 
 	struct v4l2_ctrl_handler ctrl_handler;
 
@@ -104,8 +100,6 @@ struct xvip_dma {
 	struct v4l2_format format;
 	struct v4l2_rect r;
 	const struct xvip_video_format *fmtinfo;
-	u32 *poss_v4l2_fmts;
-	u32 poss_v4l2_fmt_cnt;
 
 	struct vb2_queue queue;
 	unsigned int sequence;

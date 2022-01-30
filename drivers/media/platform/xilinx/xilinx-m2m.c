@@ -874,9 +874,8 @@ static int xvip_m2m_get_fmt(struct file *file, void *fh, struct v4l2_format *f)
 	return 0;
 }
 
-static int __xvip_m2m_try_fmt(struct xvip_m2m_ctx *ctx, struct v4l2_format *f)
+static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 {
-	struct xvip_m2m_dma *dma = ctx->xdev->dma;
 	const struct xvip_video_format *info;
 	struct v4l2_pix_format_mplane *pix_mp;
 	struct v4l2_plane_pix_format *plane_fmt;
@@ -970,7 +969,7 @@ static int xvip_m2m_try_fmt(struct file *file, void *fh, struct v4l2_format *f)
 	struct xvip_m2m_ctx *ctx = file2ctx(file);
 	int ret;
 
-	ret = __xvip_m2m_try_fmt(ctx, f);
+	ret = __xvip_m2m_try_fmt(ctx->xdev->dma, f);
 	if (ret < 0)
 		return ret;
 
@@ -993,7 +992,7 @@ static int xvip_m2m_set_fmt(struct file *file, void *fh, struct v4l2_format *f)
 		return -EBUSY;
 	}
 
-	ret = __xvip_m2m_try_fmt(ctx, f);
+	ret = __xvip_m2m_try_fmt(ctx->xdev->dma, f);
 	if (ret < 0)
 		return ret;
 
@@ -1521,30 +1520,25 @@ static int xvip_m2m_dma_init(struct xvip_m2m_dma *dma)
 
 	/* Format info on capture port - NV12 is the default format */
 	dma->capinfo = xvip_get_format_by_fourcc(XVIP_M2M_DEFAULT_FMT);
+	dma->capfmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	pix_mp = &dma->capfmt.fmt.pix_mp;
 	pix_mp->pixelformat = dma->capinfo->fourcc;
-
 	pix_mp->field = V4L2_FIELD_NONE;
 	pix_mp->width = XVIP_M2M_DEF_WIDTH;
 	pix_mp->height = XVIP_M2M_DEF_HEIGHT;
-	pix_mp->plane_fmt[0].bytesperline = pix_mp->width *
-					    dma->capinfo->bpl_factor;
-	pix_mp->plane_fmt[0].sizeimage =
-			DIV_ROUND_UP(pix_mp->plane_fmt[0].bytesperline *
-				     pix_mp->height * dma->capinfo->bpp, 8);
+
+	__xvip_m2m_try_fmt(dma, &dma->capfmt);
 
 	/* Format info on output port - NV12 is the default format */
 	dma->outinfo = xvip_get_format_by_fourcc(XVIP_M2M_DEFAULT_FMT);
+	dma->outfmt.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
 	pix_mp = &dma->outfmt.fmt.pix_mp;
 	pix_mp->pixelformat = dma->outinfo->fourcc;
 	pix_mp->field = V4L2_FIELD_NONE;
 	pix_mp->width = XVIP_M2M_DEF_WIDTH;
 	pix_mp->height = XVIP_M2M_DEF_HEIGHT;
-	pix_mp->plane_fmt[0].bytesperline = pix_mp->width *
-					    dma->outinfo->bpl_factor;
-	pix_mp->plane_fmt[0].sizeimage =
-			DIV_ROUND_UP(pix_mp->plane_fmt[0].bytesperline *
-				     pix_mp->height * dma->outinfo->bpp, 8);
+
+	__xvip_m2m_try_fmt(dma, &dma->outfmt);
 
 	/* DMA channels for mem2mem */
 	dma->chan_tx = dma_request_chan(xdev->dev, "tx");

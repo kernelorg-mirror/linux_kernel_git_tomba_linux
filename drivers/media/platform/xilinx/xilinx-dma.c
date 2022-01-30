@@ -847,7 +847,7 @@ xvip_dma_get_format(struct file *file, void *fh, struct v4l2_format *format)
 }
 
 static void
-__xvip_dma_try_format(struct xvip_dma *dma,
+__xvip_dma_try_format(const struct xvip_dma *dma,
 		      struct v4l2_format *format,
 		      const struct xvip_video_format **fmtinfo)
 {
@@ -864,15 +864,11 @@ __xvip_dma_try_format(struct xvip_dma *dma,
 	unsigned int bpl_nume, bpl_deno;
 
 	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
-		if (format->fmt.pix_mp.field == V4L2_FIELD_ALTERNATE)
-			dma->format.fmt.pix_mp.field = V4L2_FIELD_ALTERNATE;
-		else
-			dma->format.fmt.pix_mp.field = V4L2_FIELD_NONE;
+		if (format->fmt.pix_mp.field != V4L2_FIELD_ALTERNATE)
+			format->fmt.pix_mp.field = V4L2_FIELD_NONE;
 	} else {
-		if (format->fmt.pix.field == V4L2_FIELD_ALTERNATE)
-			dma->format.fmt.pix.field = V4L2_FIELD_ALTERNATE;
-		else
-			dma->format.fmt.pix.field = V4L2_FIELD_NONE;
+		if (format->fmt.pix.field != V4L2_FIELD_ALTERNATE)
+			format->fmt.pix.field = V4L2_FIELD_NONE;
 	}
 
 	/* Retrieve format information and select the default format if the
@@ -905,7 +901,6 @@ __xvip_dma_try_format(struct xvip_dma *dma,
 
 		pix_mp = &format->fmt.pix_mp;
 		plane_fmt = pix_mp->plane_fmt;
-		pix_mp->field = dma->format.fmt.pix_mp.field;
 		width = rounddown(pix_mp->width * info->bpl_factor,
 				  dma->width_align);
 		pix_mp->width = clamp(width, min_width, max_width) /
@@ -968,7 +963,6 @@ __xvip_dma_try_format(struct xvip_dma *dma,
 		struct v4l2_pix_format *pix;
 
 		pix = &format->fmt.pix;
-		pix->field = dma->format.fmt.pix.field;
 		width = rounddown(pix->width * info->bpl_factor,
 				  dma->width_align);
 		pix->width = clamp(width, min_width, max_width) /

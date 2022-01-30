@@ -61,7 +61,6 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
 {
 	struct v4l2_subdev_format fmt;
 	struct v4l2_subdev *subdev;
-	u32 field;
 	int ret;
 
 	subdev = xvip_dma_remote_subdev(&dma->pad, &fmt.pad);
@@ -84,9 +83,7 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
 	    dma->r.height != fmt.format.height)
 		return -EINVAL;
 
-	field = V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)
-	      ? dma->format.fmt.pix_mp.field : dma->format.fmt.pix.field;
-	if (fmt.format.field != field)
+	if (fmt.format.field != dma->format.fmt.pix_mp.field)
 		return -EINVAL;
 
 	return 0;
@@ -348,8 +345,8 @@ static void xvip_dma_complete(void *param)
 {
 	struct xvip_dma_buffer *buf = param;
 	struct xvip_dma *dma = buf->dma;
-	int i, sizeimage;
-	u32 fid = 0;
+	unsigned int i;
+	u32 fid;
 	int status;
 
 	spin_lock(&dma->queued_lock);
@@ -362,9 +359,7 @@ static void xvip_dma_complete(void *param)
 
 	status = xilinx_xdma_get_fid(dma->dma, buf->desc, &fid);
 	if (!status) {
-		if (((V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) &&
-		     dma->format.fmt.pix_mp.field == V4L2_FIELD_ALTERNATE) ||
-		     dma->format.fmt.pix.field == V4L2_FIELD_ALTERNATE) {
+		if (dma->format.fmt.pix_mp.field == V4L2_FIELD_ALTERNATE) {
 			/*
 			 * fid = 1 is odd field i.e. V4L2_FIELD_TOP.
 			 * fid = 0 is even field i.e. V4L2_FIELD_BOTTOM.
@@ -380,15 +375,10 @@ static void xvip_dma_complete(void *param)
 		}
 	}
 
-	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
-		for (i = 0; i < dma->fmtinfo->buffers; i++) {
-			sizeimage =
-				dma->format.fmt.pix_mp.plane_fmt[i].sizeimage;
-			vb2_set_plane_payload(&buf->buf.vb2_buf, i, sizeimage);
-		}
-	} else {
-		sizeimage = dma->format.fmt.pix.sizeimage;
-		vb2_set_plane_payload(&buf->buf.vb2_buf, 0, sizeimage);
+	for (i = 0; i < dma->fmtinfo->buffers; i++) {
+		u32 sizeimage = dma->format.fmt.pix_mp.plane_fmt[i].sizeimage;
+
+		vb2_set_plane_payload(&buf->buf.vb2_buf, i, sizeimage);
 	}
 
 	vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_DONE);
@@ -403,36 +393,25 @@ xvip_dma_queue_setup(struct vb2_queue *vq,
 	unsigned int i;
 	int sizeimage;
 
-	/* Multi planar case: Make sure the image size is large enough */
-	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
-		if (*nplanes) {
-			if (*nplanes != dma->format.fmt.pix_mp.num_planes)
+	/* Make sure the image size is large enough. */
+	if (*nplanes) {
+		if (*nplanes != dma->format.fmt.pix_mp.num_planes)
+			return -EINVAL;
+
+		for (i = 0; i < *nplanes; i++) {
+			sizeimage =
+			  dma->format.fmt.pix_mp.plane_fmt[i].sizeimage;
+			if (sizes[i] < sizeimage)
 				return -EINVAL;
-
-			for (i = 0; i < *nplanes; i++) {
-				sizeimage =
-				  dma->format.fmt.pix_mp.plane_fmt[i].sizeimage;
-				if (sizes[i] < sizeimage)
-					return -EINVAL;
-			}
-		} else {
-			*nplanes = dma->fmtinfo->buffers;
-			for (i = 0; i < dma->fmtinfo->buffers; i++) {
-				sizeimage =
-				  dma->format.fmt.pix_mp.plane_fmt[i].sizeimage;
-				sizes[i] = sizeimage;
-			}
 		}
-		return 0;
+	} else {
+		*nplanes = dma->fmtinfo->buffers;
+		for (i = 0; i < dma->fmtinfo->buffers; i++) {
+			sizeimage =
+			  dma->format.fmt.pix_mp.plane_fmt[i].sizeimage;
+			sizes[i] = sizeimage;
+		}
 	}
-
-	/* Single planar case: Make sure the image size is large enough */
-	sizeimage = dma->format.fmt.pix.sizeimage;
-	if (*nplanes == 1)
-		return sizes[0] < sizeimage ? -EINVAL : 0;
-
-	*nplanes = 1;
-	sizes[0] = sizeimage;
 
 	return 0;
 }
@@ -455,6 +434,8 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 	struct xvip_dma_buffer *buf = to_xvip_dma_buffer(vbuf);
 	struct dma_async_tx_descriptor *desc;
 	dma_addr_t addr = vb2_dma_contig_plane_dma_addr(vb, 0);
+	struct v4l2_pix_format_mplane *pix_mp;
+	size_t size;
 	u32 flags = 0;
 	u32 luma_size;
 	u32 padding_factor_nume, padding_factor_deno, bpl_nume, bpl_deno;
@@ -481,84 +462,44 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 	 * DMA IP supports only 2 planes, so one datachunk is sufficient
 	 * to get start address of 2nd plane
 	 */
-	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
-		struct v4l2_pix_format_mplane *pix_mp;
-		size_t size;
+	pix_mp = &dma->format.fmt.pix_mp;
+	bpl = pix_mp->plane_fmt[0].bytesperline;
 
-		pix_mp = &dma->format.fmt.pix_mp;
-		bpl = pix_mp->plane_fmt[0].bytesperline;
+	xilinx_xdma_v4l2_config(dma->dma, pix_mp->pixelformat);
+	xvip_width_padding_factor(pix_mp->pixelformat,
+				  &padding_factor_nume,
+				  &padding_factor_deno);
+	xvip_bpl_scaling_factor(pix_mp->pixelformat, &bpl_nume,
+				&bpl_deno);
+	dma->xt.frame_size = dma->fmtinfo->num_planes;
 
-		xilinx_xdma_v4l2_config(dma->dma, pix_mp->pixelformat);
-		xvip_width_padding_factor(pix_mp->pixelformat,
-					  &padding_factor_nume,
-					  &padding_factor_deno);
-		xvip_bpl_scaling_factor(pix_mp->pixelformat, &bpl_nume,
-					&bpl_deno);
-		dma->xt.frame_size = dma->fmtinfo->num_planes;
+	size = ((size_t)dma->r.width * dma->fmtinfo->bpl_factor *
+		padding_factor_nume * bpl_nume) /
+		((size_t)padding_factor_deno * bpl_deno);
+	dma->sgl[0].size = size;
 
-		size = ((size_t)dma->r.width * dma->fmtinfo->bpl_factor *
-			padding_factor_nume * bpl_nume) /
-			((size_t)padding_factor_deno * bpl_deno);
-		dma->sgl[0].size = size;
+	dma->sgl[0].icg = bpl - dma->sgl[0].size;
+	dma->xt.numf = dma->r.height;
 
-		dma->sgl[0].icg = bpl - dma->sgl[0].size;
-		dma->xt.numf = dma->r.height;
+	/*
+	 * dst_icg is the number of bytes to jump after last luma addr
+	 * and before first chroma addr
+	 */
 
-		/*
-		 * dst_icg is the number of bytes to jump after last luma addr
-		 * and before first chroma addr
-		 */
-
-		/* Handling contiguous data with mplanes */
-		if (dma->fmtinfo->buffers == 1) {
-			dma->sgl[0].dst_icg = (size_t)bpl *
-					      (pix_mp->height - dma->r.height);
-		} else {
-			/* Handling non-contiguous data with mplanes */
-			if (dma->fmtinfo->buffers == 2 || dma->fmtinfo->buffers == 3) {
-				dma_addr_t chroma_addr =
-					vb2_dma_contig_plane_dma_addr(vb, 1);
-				luma_size = bpl * dma->xt.numf;
-				if (chroma_addr > addr)
-					dma->sgl[0].dst_icg = chroma_addr -
-						addr - luma_size;
-			}
-			/* Handle the 3rd plane for Y_U_V8 */
-			if (dma->fmtinfo->buffers == 3) {
-				dma_addr_t chroma_addr =
-					vb2_dma_contig_plane_dma_addr(vb, 1);
-				dma_addr_t third_plane_addr =
-					vb2_dma_contig_plane_dma_addr(vb, 2);
-				u32 chroma_size = bpl * dma->xt.numf;
-
-				if (third_plane_addr > chroma_addr)
-					dma->sgl[0].dst_icg = third_plane_addr -
-						chroma_addr - chroma_size;
-			}
-		}
+	/* Handling contiguous data with mplanes */
+	if (dma->fmtinfo->buffers == 1) {
+		dma->sgl[0].dst_icg = (size_t)bpl *
+				      (pix_mp->height - dma->r.height);
 	} else {
-		struct v4l2_pix_format *pix;
-		size_t size;
-		size_t dst_icg;
-
-		pix = &dma->format.fmt.pix;
-		bpl = pix->bytesperline;
-		xilinx_xdma_v4l2_config(dma->dma, pix->pixelformat);
-		xvip_width_padding_factor(pix->pixelformat,
-					  &padding_factor_nume,
-					  &padding_factor_deno);
-		xvip_bpl_scaling_factor(pix->pixelformat, &bpl_nume,
-					&bpl_deno);
-		dma->xt.frame_size = dma->fmtinfo->num_planes;
-		size = ((size_t)dma->r.width * dma->fmtinfo->bpl_factor *
-			padding_factor_nume * bpl_nume) /
-			((size_t)padding_factor_deno * bpl_deno);
-		dma->sgl[0].size = size;
-		dma->sgl[0].icg = bpl - dma->sgl[0].size;
-		dma->xt.numf = dma->r.height;
-		dma->sgl[0].dst_icg = 0;
-		dst_icg = (size_t)bpl * (pix->height - dma->r.height);
-		dma->sgl[0].dst_icg = dst_icg;
+		/* Handling non-contiguous data with mplanes */
+		if (dma->fmtinfo->buffers == 2) {
+			dma_addr_t chroma_addr =
+				vb2_dma_contig_plane_dma_addr(vb, 1);
+			luma_size = bpl * dma->xt.numf;
+			if (chroma_addr > addr)
+				dma->sgl[0].dst_icg = chroma_addr -
+						      addr - luma_size;
+			}
 	}
 
 	desc = dmaengine_prep_interleaved_dma(dma->dma, &dma->xt, flags);
@@ -839,10 +780,7 @@ xvip_dma_get_format_mplane(struct file *file, void *fh,
 	struct v4l2_fh *vfh = file->private_data;
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
 
-	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type))
-		format->fmt.pix_mp = dma->format.fmt.pix_mp;
-	else
-		format->fmt.pix = dma->format.fmt.pix;
+	format->fmt.pix_mp = dma->format.fmt.pix_mp;
 
 	return 0;
 }
@@ -853,6 +791,8 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 		      const struct xvip_video_format **fmtinfo)
 {
 	const struct xvip_video_format *info;
+	struct v4l2_plane_pix_format *plane_fmt;
+	struct v4l2_pix_format_mplane *pix_mp;
 	unsigned int min_width;
 	unsigned int max_width;
 	unsigned int min_bpl;
@@ -864,21 +804,14 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 	unsigned int padding_factor_nume, padding_factor_deno;
 	unsigned int bpl_nume, bpl_deno;
 
-	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
-		if (format->fmt.pix_mp.field != V4L2_FIELD_ALTERNATE)
-			format->fmt.pix_mp.field = V4L2_FIELD_NONE;
-	} else {
-		if (format->fmt.pix.field != V4L2_FIELD_ALTERNATE)
-			format->fmt.pix.field = V4L2_FIELD_NONE;
-	}
+
+	if (format->fmt.pix_mp.field != V4L2_FIELD_ALTERNATE)
+		format->fmt.pix_mp.field = V4L2_FIELD_NONE;
 
 	/* Retrieve format information and select the default format if the
 	 * requested format isn't supported.
 	 */
-	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type))
-		fourcc = format->fmt.pix_mp.pixelformat;
-	else
-		fourcc = format->fmt.pix.pixelformat;
+	fourcc = format->fmt.pix_mp.pixelformat;
 
 	info = xvip_get_format_by_fourcc(fourcc);
 
@@ -896,89 +829,65 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 	min_width = roundup(XVIP_DMA_MIN_WIDTH, dma->width_align);
 	max_width = rounddown(XVIP_DMA_MAX_WIDTH, dma->width_align);
 
-	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
-		struct v4l2_pix_format_mplane *pix_mp;
-		struct v4l2_plane_pix_format *plane_fmt;
+	pix_mp = &format->fmt.pix_mp;
+	plane_fmt = pix_mp->plane_fmt;
+	width = rounddown(pix_mp->width * info->bpl_factor,
+			  dma->width_align);
+	pix_mp->width = clamp(width, min_width, max_width) /
+			info->bpl_factor;
+	pix_mp->height = clamp(pix_mp->height, XVIP_DMA_MIN_HEIGHT,
+			       XVIP_DMA_MAX_HEIGHT);
 
-		pix_mp = &format->fmt.pix_mp;
-		plane_fmt = pix_mp->plane_fmt;
-		width = rounddown(pix_mp->width * info->bpl_factor,
-				  dma->width_align);
-		pix_mp->width = clamp(width, min_width, max_width) /
-				info->bpl_factor;
-		pix_mp->height = clamp(pix_mp->height, XVIP_DMA_MIN_HEIGHT,
-				       XVIP_DMA_MAX_HEIGHT);
+	/*
+	 * Clamp the requested bytes per line value. If the maximum
+	 * bytes per line value is zero, the module doesn't support
+	 * user configurable line sizes. Override the requested value
+	 * with the minimum in that case.
+	 */
 
-		/*
-		 * Clamp the requested bytes per line value. If the maximum
-		 * bytes per line value is zero, the module doesn't support
-		 * user configurable line sizes. Override the requested value
-		 * with the minimum in that case.
-		 */
+	max_bpl = rounddown(XVIP_DMA_MAX_WIDTH, dma->align);
 
-		max_bpl = rounddown(XVIP_DMA_MAX_WIDTH, dma->align);
+	/* Handling contiguous data with mplanes */
+	if (info->buffers == 1) {
+		min_bpl = (pix_mp->width * info->bpl_factor *
+			   padding_factor_nume * bpl_nume) /
+			   (padding_factor_deno * bpl_deno);
+		min_bpl = roundup(min_bpl, dma->align);
+		bpl = roundup(plane_fmt[0].bytesperline, dma->align);
+		plane_fmt[0].bytesperline = clamp(bpl, min_bpl,
+						  max_bpl);
 
-		/* Handling contiguous data with mplanes */
-		if (info->buffers == 1) {
-			min_bpl = (pix_mp->width * info->bpl_factor *
+		if (info->num_planes == 1) {
+			/* Single plane formats */
+			plane_fmt[0].sizeimage =
+					plane_fmt[0].bytesperline *
+					pix_mp->height;
+		} else {
+			/* Multi plane formats */
+			plane_fmt[0].sizeimage =
+				DIV_ROUND_UP(plane_fmt[0].bytesperline *
+					     pix_mp->height *
+					     info->bpp, 8);
+		}
+	} else {
+		/* Handling non-contiguous data with mplanes */
+		hsub = info->hsub;
+		vsub = info->vsub;
+		for (i = 0; i < info->num_planes; i++) {
+			plane_width = pix_mp->width / (i ? hsub : 1);
+			plane_height = pix_mp->height / (i ? vsub : 1);
+			min_bpl = (plane_width * info->bpl_factor *
 				   padding_factor_nume * bpl_nume) /
 				   (padding_factor_deno * bpl_deno);
 			min_bpl = roundup(min_bpl, dma->align);
-			bpl = roundup(plane_fmt[0].bytesperline, dma->align);
-			plane_fmt[0].bytesperline = clamp(bpl, min_bpl,
-							  max_bpl);
-
-			if (info->num_planes == 1) {
-				/* Single plane formats */
-				plane_fmt[0].sizeimage =
-						plane_fmt[0].bytesperline *
-						pix_mp->height;
-			} else {
-				/* Multi plane formats */
-				plane_fmt[0].sizeimage =
-					DIV_ROUND_UP(plane_fmt[0].bytesperline *
-						     pix_mp->height *
-						     info->bpp, 8);
-			}
-		} else {
-			/* Handling non-contiguous data with mplanes */
-			hsub = info->hsub;
-			vsub = info->vsub;
-			for (i = 0; i < info->num_planes; i++) {
-				plane_width = pix_mp->width / (i ? hsub : 1);
-				plane_height = pix_mp->height / (i ? vsub : 1);
-				min_bpl = (plane_width * info->bpl_factor *
-					   padding_factor_nume * bpl_nume) /
-					   (padding_factor_deno * bpl_deno);
-				min_bpl = roundup(min_bpl, dma->align);
-				bpl = rounddown(plane_fmt[i].bytesperline,
-						dma->align);
-				plane_fmt[i].bytesperline =
-						clamp(bpl, min_bpl, max_bpl);
-				plane_fmt[i].sizeimage =
-						plane_fmt[i].bytesperline *
-						plane_height;
-			}
+			bpl = rounddown(plane_fmt[i].bytesperline,
+					dma->align);
+			plane_fmt[i].bytesperline =
+					clamp(bpl, min_bpl, max_bpl);
+			plane_fmt[i].sizeimage =
+					plane_fmt[i].bytesperline *
+					plane_height;
 		}
-	} else {
-		struct v4l2_pix_format *pix;
-
-		pix = &format->fmt.pix;
-		width = rounddown(pix->width * info->bpl_factor,
-				  dma->width_align);
-		pix->width = clamp(width, min_width, max_width) /
-			     info->bpl_factor;
-		pix->height = clamp(pix->height, XVIP_DMA_MIN_HEIGHT,
-				    XVIP_DMA_MAX_HEIGHT);
-
-		min_bpl = (pix->width * info->bpl_factor *
-			  padding_factor_nume * bpl_nume) /
-			  (padding_factor_deno * bpl_deno);
-		min_bpl = roundup(min_bpl, dma->align);
-		max_bpl = rounddown(XVIP_DMA_MAX_WIDTH, dma->align);
-		bpl = rounddown(pix->bytesperline, dma->align);
-		pix->bytesperline = clamp(bpl, min_bpl, max_bpl);
-		pix->sizeimage = pix->width * pix->height * info->bpp / 8;
 	}
 
 	if (fmtinfo)
@@ -1009,20 +918,14 @@ xvip_dma_set_format_mplane(struct file *file, void *fh,
 	if (vb2_is_busy(&dma->queue))
 		return -EBUSY;
 
-	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
-		dma->format.fmt.pix_mp = format->fmt.pix_mp;
+	dma->format.fmt.pix_mp = format->fmt.pix_mp;
 
-		/*
-		 * Save format resolution in crop rectangle. This will be
-		 * updated when s_slection is called.
-		 */
-		dma->r.width = format->fmt.pix_mp.width;
-		dma->r.height = format->fmt.pix_mp.height;
-	} else {
-		dma->format.fmt.pix = format->fmt.pix;
-		dma->r.width = format->fmt.pix.width;
-		dma->r.height = format->fmt.pix.height;
-	}
+	/*
+	 * Save format resolution in crop rectangle. This will be
+	 * updated when s_slection is called.
+	 */
+	dma->r.width = format->fmt.pix_mp.width;
+	dma->r.height = format->fmt.pix_mp.height;
 
 	dma->fmtinfo = info;
 
@@ -1101,7 +1004,7 @@ xvip_dma_get_format(struct file *file, void *fh, struct v4l2_format *format)
 
 	xvip_dma_single_to_multi_planar(format, &fmt_mp);
 
-	ret = xvip_dma_get_format(file, fh, &fmt_mp);
+	ret = xvip_dma_get_format_mplane(file, fh, &fmt_mp);
 	if (ret)
 		return ret;
 
@@ -1118,7 +1021,7 @@ xvip_dma_try_format(struct file *file, void *fh, struct v4l2_format *format)
 
 	xvip_dma_single_to_multi_planar(format, &fmt_mp);
 
-	ret = xvip_dma_try_format(file, fh, &fmt_mp);
+	ret = xvip_dma_try_format_mplane(file, fh, &fmt_mp);
 	if (ret)
 		return ret;
 
@@ -1135,7 +1038,7 @@ xvip_dma_set_format(struct file *file, void *fh, struct v4l2_format *format)
 
 	xvip_dma_single_to_multi_planar(format, &fmt_mp);
 
-	ret = xvip_dma_set_format(file, fh, &fmt_mp);
+	ret = xvip_dma_set_format_mplane(file, fh, &fmt_mp);
 	if (ret)
 		return ret;
 
@@ -1149,7 +1052,6 @@ xvip_dma_g_selection(struct file *file, void *fh, struct v4l2_selection *sel)
 {
 	struct v4l2_fh *vfh = file->private_data;
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
-	u32 width, height;
 	bool crop_frame = false;
 
 	switch (sel->target) {
@@ -1186,16 +1088,8 @@ xvip_dma_g_selection(struct file *file, void *fh, struct v4l2_selection *sel)
 		sel->r.width = dma->r.width;
 		sel->r.height = dma->r.height;
 	} else {
-		if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
-			width = dma->format.fmt.pix_mp.width;
-			height = dma->format.fmt.pix_mp.height;
-		} else {
-			width = dma->format.fmt.pix.width;
-			height = dma->format.fmt.pix.height;
-		}
-
-		sel->r.width = width;
-		sel->r.height = height;
+		sel->r.width = dma->format.fmt.pix_mp.width;
+		sel->r.height = dma->format.fmt.pix_mp.height;
 	}
 
 	return 0;
@@ -1223,13 +1117,8 @@ xvip_dma_s_selection(struct file *file, void *fh, struct v4l2_selection *sel)
 		return -EINVAL;
 	}
 
-	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
-		width = dma->format.fmt.pix_mp.width;
-		height = dma->format.fmt.pix_mp.height;
-	} else {
-		width = dma->format.fmt.pix.width;
-		height = dma->format.fmt.pix.height;
-	}
+	width = dma->format.fmt.pix_mp.width;
+	height = dma->format.fmt.pix_mp.height;
 
 	if (sel->r.width > width || sel->r.height > height ||
 	    sel->r.top != 0 || sel->r.left != 0)
@@ -1407,6 +1296,7 @@ static const struct v4l2_file_operations xvip_dma_fops = {
 int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 		  enum v4l2_buf_type type, unsigned int port)
 {
+	struct v4l2_pix_format_mplane *pix_mp;
 	char name[16];
 	int ret;
 	u32 i;
@@ -1442,25 +1332,12 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	dma->fmtinfo = xvip_get_format_by_fourcc(XVIP_DMA_DEF_FORMAT);
 	dma->format.type = type;
 
-	if (V4L2_TYPE_IS_MULTIPLANAR(type)) {
-		struct v4l2_pix_format_mplane *pix_mp;
-
-		pix_mp = &dma->format.fmt.pix_mp;
-		pix_mp->pixelformat = dma->fmtinfo->fourcc;
-		pix_mp->colorspace = V4L2_COLORSPACE_SRGB;
-		pix_mp->field = V4L2_FIELD_NONE;
-		pix_mp->width = XVIP_DMA_DEF_WIDTH;
-		pix_mp->height = XVIP_DMA_DEF_HEIGHT;
-	} else {
-		struct v4l2_pix_format *pix;
-
-		pix = &dma->format.fmt.pix;
-		pix->pixelformat = dma->fmtinfo->fourcc;
-		pix->colorspace = V4L2_COLORSPACE_SRGB;
-		pix->field = V4L2_FIELD_NONE;
-		pix->width = XVIP_DMA_DEF_WIDTH;
-		pix->height = XVIP_DMA_DEF_HEIGHT;
-	}
+	pix_mp = &dma->format.fmt.pix_mp;
+	pix_mp->pixelformat = dma->fmtinfo->fourcc;
+	pix_mp->colorspace = V4L2_COLORSPACE_SRGB;
+	pix_mp->field = V4L2_FIELD_NONE;
+	pix_mp->width = XVIP_DMA_DEF_WIDTH;
+	pix_mp->height = XVIP_DMA_DEF_HEIGHT;
 
 	__xvip_dma_try_format(dma, &dma->format, NULL);
 

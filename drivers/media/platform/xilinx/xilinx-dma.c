@@ -1291,7 +1291,7 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 {
 	char name[16];
 	int ret;
-	u32 i, hsub, vsub, width, height;
+	u32 i;
 
 	dma->xdev = xdev;
 	dma->port = port;
@@ -1301,6 +1301,26 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	INIT_LIST_HEAD(&dma->pipe.dmas);
 	spin_lock_init(&dma->queued_lock);
 
+	/* Request the DMA channel. */
+	snprintf(name, sizeof(name), "port%u", port);
+	dma->dma = dma_request_chan(dma->xdev->dev, name);
+	if (IS_ERR(dma->dma)) {
+		ret = PTR_ERR(dma->dma);
+		if (ret != -EPROBE_DEFER)
+			dev_err(dma->xdev->dev, "no VDMA channel found\n");
+		goto error;
+	}
+
+	xilinx_xdma_get_width_align(dma->dma, &dma->width_align);
+	if (!dma->width_align) {
+		dev_dbg(dma->xdev->dev,
+			"Using width align %d\n", XVIP_DMA_DEF_WIDTH_ALIGN);
+		dma->width_align = XVIP_DMA_DEF_WIDTH_ALIGN;
+	}
+
+	dma->align = 1 << dma->dma->device->copy_align;
+
+	/* Initialize the default format. */
 	dma->fmtinfo = xvip_get_format_by_fourcc(XVIP_DMA_DEF_FORMAT);
 	dma->format.type = type;
 
@@ -1312,26 +1332,7 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 		pix_mp->colorspace = V4L2_COLORSPACE_SRGB;
 		pix_mp->field = V4L2_FIELD_NONE;
 		pix_mp->width = XVIP_DMA_DEF_WIDTH;
-
-		/* Handling contiguous data with mplanes */
-		if (dma->fmtinfo->buffers == 1) {
-			pix_mp->plane_fmt[0].bytesperline =
-				pix_mp->width * dma->fmtinfo->bpl_factor;
-			pix_mp->plane_fmt[0].sizeimage =
-					pix_mp->width * pix_mp->height *
-					dma->fmtinfo->bpp / 8;
-		} else {
-		    /* Handling non-contiguous data with mplanes */
-			hsub = dma->fmtinfo->hsub;
-			vsub = dma->fmtinfo->vsub;
-			for (i = 0; i < dma->fmtinfo->buffers; i++) {
-				width = pix_mp->width / (i ? hsub : 1);
-				height = pix_mp->height / (i ? vsub : 1);
-				pix_mp->plane_fmt[i].bytesperline =
-					width *	dma->fmtinfo->bpl_factor;
-				pix_mp->plane_fmt[i].sizeimage = width * height;
-			}
-		}
+		pix_mp->height = XVIP_DMA_DEF_HEIGHT;
 	} else {
 		struct v4l2_pix_format *pix;
 
@@ -1341,10 +1342,9 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 		pix->field = V4L2_FIELD_NONE;
 		pix->width = XVIP_DMA_DEF_WIDTH;
 		pix->height = XVIP_DMA_DEF_HEIGHT;
-		pix->bytesperline = pix->width * dma->fmtinfo->bpl_factor;
-		pix->sizeimage =
-			pix->width * pix->height * dma->fmtinfo->bpp / 8;
 	}
+
+	__xvip_dma_try_format(dma, &dma->format, NULL);
 
 	/* Initialize the media entity... */
 	if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE ||
@@ -1430,8 +1430,10 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 
 	video_set_drvdata(&dma->video, dma);
 
-	/* ... and the buffers queue... */
-	/* Don't enable VB2_READ and VB2_WRITE, as using the read() and write()
+	/* ... and the buffers queue. */
+
+	/*
+	 * Don't enable VB2_READ and VB2_WRITE, as using the read() and write()
 	 * V4L2 APIs would be inefficient. Testing on the command line with a
 	 * 'cat /dev/video?' thus won't be possible, but given that the driver
 	 * anyway requires a test tool to setup the pipeline before any video
@@ -1453,25 +1455,6 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 		dev_err(dma->xdev->dev, "failed to initialize VB2 queue\n");
 		goto error;
 	}
-
-	/* ... and the DMA channel. */
-	snprintf(name, sizeof(name), "port%u", port);
-	dma->dma = dma_request_chan(dma->xdev->dev, name);
-	if (IS_ERR(dma->dma)) {
-		ret = PTR_ERR(dma->dma);
-		if (ret != -EPROBE_DEFER)
-			dev_err(dma->xdev->dev, "no VDMA channel found\n");
-		goto error;
-	}
-
-	xilinx_xdma_get_width_align(dma->dma, &dma->width_align);
-	if (!dma->width_align) {
-		dev_dbg(dma->xdev->dev,
-			"Using width align %d\n", XVIP_DMA_DEF_WIDTH_ALIGN);
-		dma->width_align = XVIP_DMA_DEF_WIDTH_ALIGN;
-	}
-
-	dma->align = 1 << dma->dma->device->copy_align;
 
 	ret = video_register_device(&dma->video, VFL_TYPE_VIDEO, -1);
 	if (ret < 0) {

@@ -61,6 +61,7 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
 {
 	struct v4l2_subdev_format fmt;
 	struct v4l2_subdev *subdev;
+	u32 field;
 	int ret;
 
 	subdev = xvip_dma_remote_subdev(&dma->pad, &fmt.pad);
@@ -81,6 +82,11 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
 	 */
 	if (dma->r.width != fmt.format.width ||
 	    dma->r.height != fmt.format.height)
+		return -EINVAL;
+
+	field = V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)
+	      ? dma->format.fmt.pix_mp.field : dma->format.fmt.pix.field;
+	if (fmt.format.field != field)
 		return -EINVAL;
 
 	return 0;
@@ -898,27 +904,15 @@ __xvip_dma_try_format(struct xvip_dma *dma,
 	unsigned int fourcc;
 	unsigned int padding_factor_nume, padding_factor_deno;
 	unsigned int bpl_nume, bpl_deno;
-	struct v4l2_subdev_format fmt;
-	struct v4l2_subdev *subdev;
-	int ret;
 
-	subdev = xvip_dma_remote_subdev(&dma->pad, &fmt.pad);
-	if (!subdev)
-		return;
-
-	fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-	ret = v4l2_subdev_call(subdev, pad, get_fmt, NULL, &fmt);
-	if (ret < 0)
-		return;
-
-	if (fmt.format.field == V4L2_FIELD_ALTERNATE) {
-		if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type))
+	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
+		if (format->fmt.pix_mp.field == V4L2_FIELD_ALTERNATE)
 			dma->format.fmt.pix_mp.field = V4L2_FIELD_ALTERNATE;
 		else
-			dma->format.fmt.pix.field = V4L2_FIELD_ALTERNATE;
-	} else {
-		if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type))
 			dma->format.fmt.pix_mp.field = V4L2_FIELD_NONE;
+	} else {
+		if (format->fmt.pix.field == V4L2_FIELD_ALTERNATE)
+			dma->format.fmt.pix.field = V4L2_FIELD_ALTERNATE;
 		else
 			dma->format.fmt.pix.field = V4L2_FIELD_NONE;
 	}

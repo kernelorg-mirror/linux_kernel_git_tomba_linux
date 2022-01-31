@@ -97,7 +97,9 @@ struct clk;
  * @bpl_factor: Bytes per line factor
  * @bits_per_pixel: bits per pixel
  * @bytes_per_pixel: Bytes per pixel for the first plane expressed as a
- *	fraction.
+ *	fraction. The denominator is the minimum number of pixels that a row
+ *	must be a multiple of, and the numerator the number of bytes those
+ *	pixels occupy in the first plane of the image.
  * @num_planes: number of planes w.r.t. color format
  * @buffers: number of buffers per format
  * @hsub: Horizontal sampling factor of Chroma

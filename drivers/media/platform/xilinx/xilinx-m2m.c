@@ -881,8 +881,6 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 	struct v4l2_plane_pix_format *plane_fmt;
 	u32 align, min_width, max_width;
 	u32 bpl, min_bpl, max_bpl;
-	u32 padding_factor_nume, padding_factor_deno;
-	u32 bpl_nume, bpl_deno;
 	u32 i, plane_width, plane_height;
 
 	if (f->type != V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE &&
@@ -900,10 +898,6 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 	} else {
 		info = xvip_get_format_by_fourcc(XVIP_M2M_DEFAULT_FMT);
 	}
-
-	xvip_width_padding_factor(info->fourcc, &padding_factor_nume,
-				  &padding_factor_deno);
-	xvip_bpl_scaling_factor(info->fourcc, &bpl_nume, &bpl_deno);
 
 	/*
 	 * V4L2 specification suggests the driver corrects the format struct
@@ -927,8 +921,8 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 	if (info->buffers == 1) {
 		/* Handling contiguous data with mplanes */
 		min_bpl = (pix_mp->width * info->bpl_factor *
-			   padding_factor_nume * bpl_nume) /
-			   (padding_factor_deno * bpl_deno);
+			   info->width_padding.numerator * info->bpl_scaling.numerator) /
+			   (info->width_padding.denominator * info->bpl_scaling.denominator);
 		min_bpl = roundup(min_bpl, align);
 		bpl = roundup(plane_fmt[0].bytesperline, align);
 		plane_fmt[0].bytesperline = clamp(bpl, min_bpl, max_bpl);
@@ -950,8 +944,8 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 			plane_width = pix_mp->width / (i ? info->hsub : 1);
 			plane_height = pix_mp->height / (i ? info->vsub : 1);
 			min_bpl = (plane_width * info->bpl_factor *
-				   padding_factor_nume * bpl_nume) /
-				   (padding_factor_deno * bpl_deno);
+				   info->width_padding.numerator * info->bpl_scaling.numerator) /
+				   (info->width_padding.denominator * info->bpl_scaling.numerator);
 			min_bpl = roundup(min_bpl, align);
 			bpl = rounddown(plane_fmt[i].bytesperline, align);
 			plane_fmt[i].bytesperline = clamp(bpl, min_bpl,
@@ -1185,8 +1179,6 @@ static void xvip_m2m_prep_submit_dev2mem_desc(struct xvip_m2m_ctx *ctx,
 	dma_addr_t p_out;
 	const struct xvip_video_format *info;
 	struct v4l2_pix_format_mplane *pix_mp;
-	u32 padding_factor_nume, padding_factor_deno;
-	u32 bpl_nume, bpl_deno;
 	u32 luma_size;
 	u32 flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
 	enum operation_mode mode = DEFAULT;
@@ -1218,14 +1210,11 @@ static void xvip_m2m_prep_submit_dev2mem_desc(struct xvip_m2m_ctx *ctx,
 	info = dma->capinfo;
 	xilinx_xdma_set_mode(dma->chan_rx, mode);
 	xilinx_xdma_v4l2_config(dma->chan_rx, pix_mp->pixelformat);
-	xvip_width_padding_factor(pix_mp->pixelformat, &padding_factor_nume,
-				  &padding_factor_deno);
-	xvip_bpl_scaling_factor(pix_mp->pixelformat, &bpl_nume, &bpl_deno);
 
 	ctx->xt.frame_size = info->num_planes;
 	ctx->sgl[0].size = (dst_width * info->bpl_factor *
-			    padding_factor_nume * bpl_nume) /
-			    (padding_factor_deno * bpl_deno);
+			    info->width_padding.numerator * info->bpl_scaling.numerator) /
+			    (info->width_padding.denominator * info->bpl_scaling.denominator);
 	ctx->sgl[0].icg = bpl - ctx->sgl[0].size;
 	ctx->xt.numf = dst_height;
 
@@ -1275,8 +1264,6 @@ static void xvip_m2m_prep_submit_mem2dev_desc(struct xvip_m2m_ctx *ctx,
 	dma_addr_t p_in;
 	const struct xvip_video_format *info;
 	struct v4l2_pix_format_mplane *pix_mp;
-	u32 padding_factor_nume, padding_factor_deno;
-	u32 bpl_nume, bpl_deno;
 	u32 luma_size;
 	u32 flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
 	enum operation_mode mode = DEFAULT;
@@ -1308,14 +1295,11 @@ static void xvip_m2m_prep_submit_mem2dev_desc(struct xvip_m2m_ctx *ctx,
 	info = dma->outinfo;
 	xilinx_xdma_set_mode(dma->chan_tx, mode);
 	xilinx_xdma_v4l2_config(dma->chan_tx, pix_mp->pixelformat);
-	xvip_width_padding_factor(pix_mp->pixelformat, &padding_factor_nume,
-				  &padding_factor_deno);
-	xvip_bpl_scaling_factor(pix_mp->pixelformat, &bpl_nume, &bpl_deno);
 
 	ctx->xt.frame_size = info->num_planes;
 	ctx->sgl[0].size = (src_width * info->bpl_factor *
-			    padding_factor_nume * bpl_nume) /
-			    (padding_factor_deno * bpl_deno);
+			    info->width_padding.numerator * info->bpl_scaling.numerator) /
+			    (info->width_padding.denominator * info->bpl_scaling.denominator);
 	ctx->sgl[0].icg = bpl - ctx->sgl[0].size;
 	ctx->xt.numf = src_height;
 

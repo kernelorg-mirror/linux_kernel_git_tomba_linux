@@ -786,7 +786,6 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 	unsigned int min_width, max_width;
 	unsigned int min_bpl, max_bpl;
 	unsigned int width, height;
-	unsigned int bpl;
 	unsigned int i;
 
 
@@ -824,43 +823,34 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 	 */
 	max_bpl = rounddown(XVIP_DMA_MAX_WIDTH, dma->align);
 
-	if (info->buffers == 1) {
-		/* Handling contiguous data with mplanes */
-		struct v4l2_plane_pix_format *plane = &pix_mp->plane_fmt[0];
+	/* Calculate the bytesperline and sizeimage values for each plane. */
+	for (i = 0; i < info->num_planes; i++) {
+		struct v4l2_plane_pix_format *plane = &pix_mp->plane_fmt[i];
+		unsigned int bpl;
 
-		min_bpl = pix_mp->width * info->bpl_factor *
+		width = pix_mp->width / (i ? info->hsub : 1);
+		height = pix_mp->height / (i ? info->vsub : 1);
+
+		min_bpl = width * info->bpl_factor *
 			  info->bpl_scaling.numerator /
 			  info->bpl_scaling.denominator;
 		min_bpl = roundup(min_bpl, dma->align);
-		bpl = roundup(plane->bytesperline, dma->align);
-		plane->bytesperline = clamp(bpl, min_bpl, max_bpl);
 
-		if (info->num_planes == 1) {
-			/* Single plane formats */
-			plane->sizeimage = plane->bytesperline * pix_mp->height;
-		} else {
-			/* Multi plane formats */
-			plane->sizeimage = DIV_ROUND_UP(plane->bytesperline *
-							pix_mp->height *
-							info->bpp, 8);
-		}
-	} else {
-		/* Handling non-contiguous data with mplanes */
-		for (i = 0; i < info->num_planes; i++) {
+		bpl = rounddown(plane->bytesperline, dma->align);
+		plane->bytesperline = clamp(bpl, min_bpl, max_bpl);
+		plane->sizeimage = plane->bytesperline * height;
+	}
+
+	/*
+	 * When using single-planar formats with multiple planes, add up all
+	 * sizeimage values in the first plane.
+	 */
+	if (info->buffers == 1) {
+		for (i = 1; i < info->num_planes; ++i) {
 			struct v4l2_plane_pix_format *plane =
 				&pix_mp->plane_fmt[i];
 
-			width = pix_mp->width / (i ? info->hsub : 1);
-			height = pix_mp->height / (i ? info->vsub : 1);
-
-			min_bpl = width * info->bpl_factor *
-				  info->bpl_scaling.numerator /
-				  info->bpl_scaling.denominator;
-			min_bpl = roundup(min_bpl, dma->align);
-
-			bpl = rounddown(plane->bytesperline, dma->align);
-			plane->bytesperline = clamp(bpl, min_bpl, max_bpl);
-			plane->sizeimage = plane->bytesperline * height;
+			pix_mp->plane_fmt[0].sizeimage += plane->sizeimage;
 		}
 	}
 

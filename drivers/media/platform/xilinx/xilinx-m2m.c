@@ -927,9 +927,8 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 		width = pix_mp->width / (i ? info->hsub : 1);
 		height = pix_mp->height / (i ? info->vsub : 1);
 
-		min_bpl = width * info->bpl_factor *
-			  info->bytes_per_pixel.numerator /
-			  info->bytes_per_pixel.numerator;
+		min_bpl = width * info->bytes_per_pixel.numerator
+			/ info->bytes_per_pixel.denominator;
 		min_bpl = roundup(min_bpl, align);
 
 		bpl = rounddown(plane_fmt[i].bytesperline, align);
@@ -1207,9 +1206,8 @@ static void xvip_m2m_prep_submit_dev2mem_desc(struct xvip_m2m_ctx *ctx,
 	xilinx_xdma_v4l2_config(dma->chan_rx, pix_mp->pixelformat);
 
 	ctx->xt.frame_size = info->num_planes;
-	ctx->sgl[0].size = dst_width * info->bpl_factor *
-			   info->bytes_per_pixel.numerator /
-			   info->bytes_per_pixel.denominator;
+	ctx->sgl[0].size = dst_width * info->bytes_per_pixel.numerator
+			 / info->bytes_per_pixel.denominator;
 	ctx->sgl[0].icg = bpl - ctx->sgl[0].size;
 	ctx->xt.numf = dst_height;
 
@@ -1292,9 +1290,8 @@ static void xvip_m2m_prep_submit_mem2dev_desc(struct xvip_m2m_ctx *ctx,
 	xilinx_xdma_v4l2_config(dma->chan_tx, pix_mp->pixelformat);
 
 	ctx->xt.frame_size = info->num_planes;
-	ctx->sgl[0].size = src_width * info->bpl_factor *
-			   info->bytes_per_pixel.numerator /
-			   info->bytes_per_pixel.denominator;
+	ctx->sgl[0].size = src_width * info->bytes_per_pixel.numerator
+			 / info->bytes_per_pixel.denominator;
 	ctx->sgl[0].icg = bpl - ctx->sgl[0].size;
 	ctx->xt.numf = src_height;
 

@@ -96,7 +96,6 @@ struct clk;
  * @bpl_factor: Bytes per line factor
  * @bpp: bits per pixel
  * @bpl_scaling: Bytes per line scaling factor
- * @width_padding: Width padding factor
  * @fourcc: V4L2 pixel format FCC identifier
  * @num_planes: number of planes w.r.t. color format
  * @buffers: number of buffers per format
@@ -112,7 +111,6 @@ struct xvip_video_format {
 	unsigned int bpl_factor;
 	unsigned int bpp;
  	struct v4l2_fract bpl_scaling;
-	struct v4l2_fract width_padding;
 	u32 fourcc;
 	u8 num_planes;
 	u8 buffers;

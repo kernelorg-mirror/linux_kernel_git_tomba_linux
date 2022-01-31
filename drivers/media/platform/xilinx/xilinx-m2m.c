@@ -920,9 +920,9 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 
 	if (info->buffers == 1) {
 		/* Handling contiguous data with mplanes */
-		min_bpl = (pix_mp->width * info->bpl_factor *
-			   info->width_padding.numerator * info->bpl_scaling.numerator) /
-			   (info->width_padding.denominator * info->bpl_scaling.denominator);
+		min_bpl = pix_mp->width * info->bpl_factor *
+			  info->bpl_scaling.numerator /
+			  info->bpl_scaling.denominator;
 		min_bpl = roundup(min_bpl, align);
 		bpl = roundup(plane_fmt[0].bytesperline, align);
 		plane_fmt[0].bytesperline = clamp(bpl, min_bpl, max_bpl);
@@ -943,9 +943,9 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 		for (i = 0; i < info->num_planes; i++) {
 			plane_width = pix_mp->width / (i ? info->hsub : 1);
 			plane_height = pix_mp->height / (i ? info->vsub : 1);
-			min_bpl = (plane_width * info->bpl_factor *
-				   info->width_padding.numerator * info->bpl_scaling.numerator) /
-				   (info->width_padding.denominator * info->bpl_scaling.numerator);
+			min_bpl = plane_width * info->bpl_factor *
+				  info->bpl_scaling.numerator /
+				  info->bpl_scaling.numerator;
 			min_bpl = roundup(min_bpl, align);
 			bpl = rounddown(plane_fmt[i].bytesperline, align);
 			plane_fmt[i].bytesperline = clamp(bpl, min_bpl,
@@ -1212,9 +1212,9 @@ static void xvip_m2m_prep_submit_dev2mem_desc(struct xvip_m2m_ctx *ctx,
 	xilinx_xdma_v4l2_config(dma->chan_rx, pix_mp->pixelformat);
 
 	ctx->xt.frame_size = info->num_planes;
-	ctx->sgl[0].size = (dst_width * info->bpl_factor *
-			    info->width_padding.numerator * info->bpl_scaling.numerator) /
-			    (info->width_padding.denominator * info->bpl_scaling.denominator);
+	ctx->sgl[0].size = dst_width * info->bpl_factor *
+			   info->bpl_scaling.numerator /
+			   info->bpl_scaling.denominator;
 	ctx->sgl[0].icg = bpl - ctx->sgl[0].size;
 	ctx->xt.numf = dst_height;
 
@@ -1297,9 +1297,9 @@ static void xvip_m2m_prep_submit_mem2dev_desc(struct xvip_m2m_ctx *ctx,
 	xilinx_xdma_v4l2_config(dma->chan_tx, pix_mp->pixelformat);
 
 	ctx->xt.frame_size = info->num_planes;
-	ctx->sgl[0].size = (src_width * info->bpl_factor *
-			    info->width_padding.numerator * info->bpl_scaling.numerator) /
-			    (info->width_padding.denominator * info->bpl_scaling.denominator);
+	ctx->sgl[0].size = src_width * info->bpl_factor *
+			   info->bpl_scaling.numerator /
+			   info->bpl_scaling.denominator;
 	ctx->sgl[0].icg = bpl - ctx->sgl[0].size;
 	ctx->xt.numf = src_height;
 

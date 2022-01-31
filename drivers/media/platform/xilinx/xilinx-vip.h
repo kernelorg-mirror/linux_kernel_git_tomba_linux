@@ -94,7 +94,7 @@ struct clk;
  * @flavor:  media bus format code for the same pixel layout but
  *	shifted to be 8 bits per pixel. =0 if format is not shiftable.
  * @bpl_factor: Bytes per line factor
- * @bpp: bits per pixel
+ * @bits_per_pixel: bits per pixel
  * @bpl_scaling: Bytes per line scaling factor
  * @fourcc: V4L2 pixel format FCC identifier
  * @num_planes: number of planes w.r.t. color format
@@ -109,7 +109,7 @@ struct xvip_video_format {
 	unsigned int code;
 	unsigned int flavor;
 	unsigned int bpl_factor;
-	unsigned int bpp;
+	unsigned int bits_per_pixel;
  	struct v4l2_fract bpl_scaling;
 	u32 fourcc;
 	u8 num_planes;

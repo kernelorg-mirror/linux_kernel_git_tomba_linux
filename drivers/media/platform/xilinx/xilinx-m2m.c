@@ -903,7 +903,7 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 	 * V4L2 specification suggests the driver corrects the format struct
 	 * if any of the dimensions is unsupported
 	 */
-	align = lcm(dma->align, info->bpp >> 3);
+	align = lcm(dma->align, info->bits_per_pixel >> 3);
 	min_width = roundup(XVIP_M2M_MIN_WIDTH, align);
 	max_width = rounddown(XVIP_M2M_MAX_WIDTH, align);
 	pix_mp->width = clamp(pix_mp->width, min_width, max_width);

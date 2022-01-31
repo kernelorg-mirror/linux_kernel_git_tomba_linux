@@ -83,7 +83,7 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
 	    dma->r.height != fmt.format.height)
 		return -EINVAL;
 
-	if (fmt.format.field != dma->format.fmt.pix_mp.field)
+	if (fmt.format.field != dma->format.field)
 		return -EINVAL;
 
 	return 0;
@@ -359,7 +359,7 @@ static void xvip_dma_complete(void *param)
 
 	status = xilinx_xdma_get_fid(dma->dma, buf->desc, &fid);
 	if (!status) {
-		if (dma->format.fmt.pix_mp.field == V4L2_FIELD_ALTERNATE) {
+		if (dma->format.field == V4L2_FIELD_ALTERNATE) {
 			/*
 			 * fid = 1 is odd field i.e. V4L2_FIELD_TOP.
 			 * fid = 0 is even field i.e. V4L2_FIELD_BOTTOM.
@@ -376,7 +376,7 @@ static void xvip_dma_complete(void *param)
 	}
 
 	for (i = 0; i < dma->fmtinfo->buffers; i++) {
-		u32 sizeimage = dma->format.fmt.pix_mp.plane_fmt[i].sizeimage;
+		u32 sizeimage = dma->format.plane_fmt[i].sizeimage;
 
 		vb2_set_plane_payload(&buf->buf.vb2_buf, i, sizeimage);
 	}
@@ -395,20 +395,18 @@ xvip_dma_queue_setup(struct vb2_queue *vq,
 
 	/* Make sure the image size is large enough. */
 	if (*nplanes) {
-		if (*nplanes != dma->format.fmt.pix_mp.num_planes)
+		if (*nplanes != dma->format.num_planes)
 			return -EINVAL;
 
 		for (i = 0; i < *nplanes; i++) {
-			sizeimage =
-			  dma->format.fmt.pix_mp.plane_fmt[i].sizeimage;
+			sizeimage = dma->format.plane_fmt[i].sizeimage;
 			if (sizes[i] < sizeimage)
 				return -EINVAL;
 		}
 	} else {
 		*nplanes = dma->fmtinfo->buffers;
 		for (i = 0; i < dma->fmtinfo->buffers; i++) {
-			sizeimage =
-			  dma->format.fmt.pix_mp.plane_fmt[i].sizeimage;
+			sizeimage = dma->format.plane_fmt[i].sizeimage;
 			sizes[i] = sizeimage;
 		}
 	}
@@ -462,7 +460,7 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 	 * DMA IP supports only 2 planes, so one datachunk is sufficient
 	 * to get start address of 2nd plane
 	 */
-	pix_mp = &dma->format.fmt.pix_mp;
+	pix_mp = &dma->format;
 	bpl = pix_mp->plane_fmt[0].bytesperline;
 
 	xilinx_xdma_v4l2_config(dma->dma, pix_mp->pixelformat);
@@ -780,19 +778,18 @@ xvip_dma_get_format_mplane(struct file *file, void *fh,
 	struct v4l2_fh *vfh = file->private_data;
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
 
-	format->fmt.pix_mp = dma->format.fmt.pix_mp;
+	format->fmt.pix_mp = dma->format;
 
 	return 0;
 }
 
 static void
 __xvip_dma_try_format(const struct xvip_dma *dma,
-		      struct v4l2_format *format,
+		      struct v4l2_pix_format_mplane *pix_mp,
 		      const struct xvip_video_format **fmtinfo)
 {
 	const struct xvip_video_format *info;
 	struct v4l2_plane_pix_format *plane_fmt;
-	struct v4l2_pix_format_mplane *pix_mp;
 	unsigned int min_width;
 	unsigned int max_width;
 	unsigned int min_bpl;
@@ -800,20 +797,17 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 	unsigned int width;
 	unsigned int bpl;
 	unsigned int i, hsub, vsub, plane_width, plane_height;
-	unsigned int fourcc;
 	unsigned int padding_factor_nume, padding_factor_deno;
 	unsigned int bpl_nume, bpl_deno;
 
 
-	if (format->fmt.pix_mp.field != V4L2_FIELD_ALTERNATE)
-		format->fmt.pix_mp.field = V4L2_FIELD_NONE;
+	if (pix_mp->field != V4L2_FIELD_ALTERNATE)
+		pix_mp->field = V4L2_FIELD_NONE;
 
 	/* Retrieve format information and select the default format if the
 	 * requested format isn't supported.
 	 */
-	fourcc = format->fmt.pix_mp.pixelformat;
-
-	info = xvip_get_format_by_fourcc(fourcc);
+	info = xvip_get_format_by_fourcc(pix_mp->pixelformat);
 
 	if (IS_ERR(info))
 		info = xvip_get_format_by_fourcc(XVIP_DMA_DEF_FORMAT);
@@ -829,10 +823,9 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 	min_width = roundup(XVIP_DMA_MIN_WIDTH, dma->width_align);
 	max_width = rounddown(XVIP_DMA_MAX_WIDTH, dma->width_align);
 
-	pix_mp = &format->fmt.pix_mp;
 	plane_fmt = pix_mp->plane_fmt;
 	width = rounddown(pix_mp->width * info->bpl_factor,
-			  dma->width_align);
+			dma->width_align);
 	pix_mp->width = clamp(width, min_width, max_width) /
 			info->bpl_factor;
 	pix_mp->height = clamp(pix_mp->height, XVIP_DMA_MIN_HEIGHT,
@@ -901,7 +894,7 @@ xvip_dma_try_format_mplane(struct file *file, void *fh,
 	struct v4l2_fh *vfh = file->private_data;
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
 
-	__xvip_dma_try_format(dma, format, NULL);
+	__xvip_dma_try_format(dma, &format->fmt.pix_mp, NULL);
 	return 0;
 }
 
@@ -913,12 +906,12 @@ xvip_dma_set_format_mplane(struct file *file, void *fh,
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
 	const struct xvip_video_format *info = NULL;
 
-	__xvip_dma_try_format(dma, format, &info);
+	__xvip_dma_try_format(dma, &format->fmt.pix_mp, &info);
 
 	if (vb2_is_busy(&dma->queue))
 		return -EBUSY;
 
-	dma->format.fmt.pix_mp = format->fmt.pix_mp;
+	dma->format = format->fmt.pix_mp;
 
 	/*
 	 * Save format resolution in crop rectangle. This will be
@@ -1088,8 +1081,8 @@ xvip_dma_g_selection(struct file *file, void *fh, struct v4l2_selection *sel)
 		sel->r.width = dma->r.width;
 		sel->r.height = dma->r.height;
 	} else {
-		sel->r.width = dma->format.fmt.pix_mp.width;
-		sel->r.height = dma->format.fmt.pix_mp.height;
+		sel->r.width = dma->format.width;
+		sel->r.height = dma->format.height;
 	}
 
 	return 0;
@@ -1117,8 +1110,8 @@ xvip_dma_s_selection(struct file *file, void *fh, struct v4l2_selection *sel)
 		return -EINVAL;
 	}
 
-	width = dma->format.fmt.pix_mp.width;
-	height = dma->format.fmt.pix_mp.height;
+	width = dma->format.width;
+	height = dma->format.height;
 
 	if (sel->r.width > width || sel->r.height > height ||
 	    sel->r.top != 0 || sel->r.left != 0)
@@ -1330,9 +1323,8 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 
 	/* Initialize the default format. */
 	dma->fmtinfo = xvip_get_format_by_fourcc(XVIP_DMA_DEF_FORMAT);
-	dma->format.type = type;
 
-	pix_mp = &dma->format.fmt.pix_mp;
+	pix_mp = &dma->format;
 	pix_mp->pixelformat = dma->fmtinfo->fourcc;
 	pix_mp->colorspace = V4L2_COLORSPACE_SRGB;
 	pix_mp->field = V4L2_FIELD_NONE;
@@ -1408,7 +1400,7 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	dma->video.ioctl_ops = &xvip_dma_ioctl_ops;
 	dma->video.lock = &dma->lock;
 	dma->video.device_caps = V4L2_CAP_STREAMING;
-	switch (dma->format.type) {
+	switch (type) {
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
 		dma->video.device_caps |= V4L2_CAP_VIDEO_CAPTURE_MPLANE;
 		break;
@@ -1421,6 +1413,9 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
 		dma->video.device_caps |= V4L2_CAP_VIDEO_OUTPUT;
 		break;
+	default:
+		ret = -EINVAL;
+		goto error;
 	}
 
 	video_set_drvdata(&dma->video, dma);

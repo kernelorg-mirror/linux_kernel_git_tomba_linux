@@ -465,11 +465,9 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 	xilinx_xdma_v4l2_config(dma->dma, pix_mp->pixelformat);
 	dma->xt.frame_size = dma->fmtinfo->num_planes;
 
-	size = ((size_t)dma->r.width * dma->fmtinfo->bpl_factor *
-		dma->fmtinfo->width_padding.numerator *
-		dma->fmtinfo->bpl_scaling.numerator) /
-		((size_t)dma->fmtinfo->width_padding.denominator *
-		 dma->fmtinfo->bpl_scaling.denominator);
+	size = (size_t)dma->r.width * dma->fmtinfo->bpl_factor *
+	       dma->fmtinfo->bpl_scaling.numerator /
+	       (size_t)dma->fmtinfo->bpl_scaling.denominator;
 	dma->sgl[0].size = size;
 
 	dma->sgl[0].icg = bpl - dma->sgl[0].size;
@@ -830,11 +828,9 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 		/* Handling contiguous data with mplanes */
 		struct v4l2_plane_pix_format *plane = &pix_mp->plane_fmt[0];
 
-		min_bpl = (pix_mp->width * info->bpl_factor *
-			   info->width_padding.numerator *
-			   info->bpl_scaling.numerator) /
-			   (info->width_padding.denominator *
-			    info->bpl_scaling.denominator);
+		min_bpl = pix_mp->width * info->bpl_factor *
+			  info->bpl_scaling.numerator /
+			  info->bpl_scaling.denominator;
 		min_bpl = roundup(min_bpl, dma->align);
 		bpl = roundup(plane->bytesperline, dma->align);
 		plane->bytesperline = clamp(bpl, min_bpl, max_bpl);
@@ -857,11 +853,9 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 			width = pix_mp->width / (i ? info->hsub : 1);
 			height = pix_mp->height / (i ? info->vsub : 1);
 
-			min_bpl = (width * info->bpl_factor *
-				   info->width_padding.numerator *
-				   info->bpl_scaling.numerator) /
-				   (info->width_padding.denominator *
-				    info->bpl_scaling.denominator);
+			min_bpl = width * info->bpl_factor *
+				  info->bpl_scaling.numerator /
+				  info->bpl_scaling.denominator;
 			min_bpl = roundup(min_bpl, dma->align);
 
 			bpl = rounddown(plane->bytesperline, dma->align);

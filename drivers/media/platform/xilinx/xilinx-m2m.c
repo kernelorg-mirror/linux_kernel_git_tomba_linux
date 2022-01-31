@@ -880,8 +880,8 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 	struct v4l2_pix_format_mplane *pix_mp;
 	struct v4l2_plane_pix_format *plane_fmt;
 	u32 align, min_width, max_width;
-	u32 bpl, min_bpl, max_bpl;
-	u32 i, plane_width, plane_height;
+	u32 min_bpl, max_bpl;
+	unsigned int i;
 
 	if (f->type != V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE &&
 	    f->type != V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
@@ -918,40 +918,35 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 	 */
 	max_bpl = rounddown(XVIP_M2M_MAX_WIDTH, align);
 
-	if (info->buffers == 1) {
-		/* Handling contiguous data with mplanes */
-		min_bpl = pix_mp->width * info->bpl_factor *
-			  info->bpl_scaling.numerator /
-			  info->bpl_scaling.denominator;
-		min_bpl = roundup(min_bpl, align);
-		bpl = roundup(plane_fmt[0].bytesperline, align);
-		plane_fmt[0].bytesperline = clamp(bpl, min_bpl, max_bpl);
+	/* Calculate the bytesperline and sizeimage values for each plane. */
+	for (i = 0; i < info->num_planes; i++) {
+		struct v4l2_plane_pix_format *plane = &pix_mp->plane_fmt[i];
+		unsigned int width, height;
+		u32 bpl;
 
-		if (info->num_planes == 1) {
-			/* Single plane formats */
-			plane_fmt[0].sizeimage = plane_fmt[0].bytesperline *
-						 pix_mp->height;
-		} else {
-			/* Multi plane formats in contiguous buffer*/
-			plane_fmt[0].sizeimage =
-				DIV_ROUND_UP(plane_fmt[0].bytesperline *
-					     pix_mp->height *
-					     info->bpp, 8);
-		}
-	} else {
-		/* Handling non-contiguous data with mplanes */
-		for (i = 0; i < info->num_planes; i++) {
-			plane_width = pix_mp->width / (i ? info->hsub : 1);
-			plane_height = pix_mp->height / (i ? info->vsub : 1);
-			min_bpl = plane_width * info->bpl_factor *
-				  info->bpl_scaling.numerator /
-				  info->bpl_scaling.numerator;
-			min_bpl = roundup(min_bpl, align);
-			bpl = rounddown(plane_fmt[i].bytesperline, align);
-			plane_fmt[i].bytesperline = clamp(bpl, min_bpl,
-							  max_bpl);
-			plane_fmt[i].sizeimage = plane_fmt[i].bytesperline *
-						 plane_height;
+		width = pix_mp->width / (i ? info->hsub : 1);
+		height = pix_mp->height / (i ? info->vsub : 1);
+
+		min_bpl = width * info->bpl_factor *
+			  info->bpl_scaling.numerator /
+			  info->bpl_scaling.numerator;
+		min_bpl = roundup(min_bpl, align);
+
+		bpl = rounddown(plane_fmt[i].bytesperline, align);
+		plane->bytesperline = clamp(bpl, min_bpl, max_bpl);
+		plane->sizeimage = plane->bytesperline * height;
+	}
+
+	/*
+	 * When using single-planar formats with multiple planes, add up all
+	 * sizeimage values in the first plane.
+	 */
+	if (info->buffers == 1) {
+		for (i = 1; i < info->num_planes; ++i) {
+			struct v4l2_plane_pix_format *plane =
+				&pix_mp->plane_fmt[i];
+
+			pix_mp->plane_fmt[0].sizeimage += plane->sizeimage;
 		}
 	}
 

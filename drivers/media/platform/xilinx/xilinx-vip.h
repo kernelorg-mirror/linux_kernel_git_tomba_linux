@@ -96,7 +96,8 @@ struct clk;
  * @fourcc: V4L2 pixel format FCC identifier
  * @bpl_factor: Bytes per line factor
  * @bits_per_pixel: bits per pixel
- * @bpl_scaling: Bytes per line scaling factor
+ * @bytes_per_pixel: Bytes per pixel for the first plane expressed as a
+ *	fraction.
  * @num_planes: number of planes w.r.t. color format
  * @buffers: number of buffers per format
  * @hsub: Horizontal sampling factor of Chroma
@@ -111,7 +112,7 @@ struct xvip_video_format {
 	u32 fourcc;
 	unsigned int bpl_factor;
 	unsigned int bits_per_pixel;
- 	struct v4l2_fract bpl_scaling;
+	struct v4l2_fract bytes_per_pixel;
 	u8 num_planes;
 	u8 buffers;
 	u8 hsub;

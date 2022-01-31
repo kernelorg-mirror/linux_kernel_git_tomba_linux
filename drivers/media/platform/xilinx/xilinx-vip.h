@@ -95,6 +95,8 @@ struct clk;
  *	shifted to be 8 bits per pixel. =0 if format is not shiftable.
  * @bpl_factor: Bytes per line factor
  * @bpp: bits per pixel
+ * @bpl_scaling: Bytes per line scaling factor
+ * @width_padding: Width padding factor
  * @fourcc: V4L2 pixel format FCC identifier
  * @num_planes: number of planes w.r.t. color format
  * @buffers: number of buffers per format
@@ -109,6 +111,8 @@ struct xvip_video_format {
 	unsigned int flavor;
 	unsigned int bpl_factor;
 	unsigned int bpp;
+ 	struct v4l2_fract bpl_scaling;
+	struct v4l2_fract width_padding;
 	u32 fourcc;
 	u8 num_planes;
 	u8 buffers;
@@ -199,8 +203,6 @@ const struct xvip_video_format *xvip_get_format_by_code(unsigned int code);
 const struct xvip_video_format *xvip_get_format_by_fourcc(u32 fourcc);
 const struct xvip_video_format *xvip_get_format_by_index(unsigned int index);
 const struct xvip_video_format *xvip_of_get_format(struct device_node *node);
-void xvip_bpl_scaling_factor(u32 fourcc, u32 *numerator, u32 *denominator);
-void xvip_width_padding_factor(u32 fourcc, u32 *numerator, u32 *denominator);
 void xvip_set_format_size(struct v4l2_mbus_framefmt *format,
 			  const struct v4l2_subdev_format *fmt);
 int xvip_enum_mbus_code(struct v4l2_subdev *subdev,

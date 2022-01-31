@@ -32,6 +32,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 12,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_NV12,
 		.num_planes = 2,
 		.buffers = 1,
@@ -45,6 +47,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 12,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_NV12M,
 		.num_planes = 2,
 		.buffers = 2,
@@ -58,6 +62,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 12,
+		.bpl_scaling = { 10, 8 },
+		.width_padding = { 32, 30 },
 		.fourcc = V4L2_PIX_FMT_XV15,
 		.num_planes = 2,
 		.buffers = 1,
@@ -71,6 +77,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 12,
+		.bpl_scaling = { 10, 8 },
+		.width_padding = { 32, 30 },
 		.fourcc = V4L2_PIX_FMT_XV15M,
 		.num_planes = 2,
 		.buffers = 2,
@@ -84,6 +92,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 12,
+		.bpl_scaling = { 12, 8 },
+		.width_padding = { 40, 36 },
 		.fourcc = V4L2_PIX_FMT_X012,
 		.num_planes = 2,
 		.buffers = 1,
@@ -97,6 +107,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 12,
+		.bpl_scaling = { 12, 8 },
+		.width_padding = { 40, 36 },
 		.fourcc = V4L2_PIX_FMT_X012M,
 		.num_planes = 2,
 		.buffers = 2,
@@ -110,6 +122,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 2,
 		.bpp = 12,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_X016,
 		.num_planes = 2,
 		.buffers = 1,
@@ -123,6 +137,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 2,
 		.bpp = 12,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_X016M,
 		.num_planes = 2,
 		.buffers = 2,
@@ -136,6 +152,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 16,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_NV16,
 		.num_planes = 2,
 		.buffers = 1,
@@ -149,6 +167,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 16,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_NV16M,
 		.num_planes = 2,
 		.buffers = 2,
@@ -162,6 +182,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 2,
 		.bpp = 16,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_YUYV,
 		.num_planes = 1,
 		.buffers = 1,
@@ -175,6 +197,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 2,
 		.bpp = 16,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_UYVY,
 		.num_planes = 1,
 		.buffers = 1,
@@ -188,6 +212,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 16,
+		.bpl_scaling = { 10, 8 },
+		.width_padding = { 32, 30 },
 		.fourcc = V4L2_PIX_FMT_XV20,
 		.num_planes = 2,
 		.buffers = 1,
@@ -201,6 +227,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 16,
+		.bpl_scaling = { 10, 8 },
+		.width_padding = { 32, 30 },
 		.fourcc = V4L2_PIX_FMT_XV20M,
 		.num_planes = 2,
 		.buffers = 2,
@@ -214,6 +242,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 16,
+		.bpl_scaling = { 12, 8 },
+		.width_padding = { 40, 36 },
 		.fourcc = V4L2_PIX_FMT_X212,
 		.num_planes = 2,
 		.buffers = 1,
@@ -227,6 +257,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 16,
+		.bpl_scaling = { 12, 8 },
+		.width_padding = { 40, 36 },
 		.fourcc = V4L2_PIX_FMT_X212M,
 		.num_planes = 2,
 		.buffers = 2,
@@ -240,6 +272,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 2,
 		.bpp = 16,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_X216,
 		.num_planes = 2,
 		.buffers = 1,
@@ -253,6 +287,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 2,
 		.bpp = 16,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_X216M,
 		.num_planes = 2,
 		.buffers = 2,
@@ -266,6 +302,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 3,
 		.bpp = 24,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_VUY24,
 		.num_planes = 1,
 		.buffers = 1,
@@ -279,6 +317,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 4,
 		.bpp = 32,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_XVUY32,
 		.num_planes = 1,
 		.buffers = 1,
@@ -292,6 +332,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 3,
 		.bpp = 32,
+		.bpl_scaling = { 10, 8 },
+		.width_padding = { 32, 30 },
 		.fourcc = V4L2_PIX_FMT_XVUY10,
 		.num_planes = 1,
 		.buffers = 1,
@@ -305,6 +347,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 24,
+		.bpl_scaling = { 12, 8 },
+		.width_padding = { 40, 36 },
 		.fourcc = V4L2_PIX_FMT_X412,
 		.num_planes = 1,
 		.buffers = 1,
@@ -318,6 +362,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 1,
 		.bpp = 24,
+		.bpl_scaling = { 12, 8 },
+		.width_padding = { 40, 36 },
 		.fourcc = V4L2_PIX_FMT_X412M,
 		.num_planes = 1,
 		.buffers = 1,
@@ -331,6 +377,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 2,
 		.bpp = 24,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_X416,
 		.num_planes = 1,
 		.buffers = 1,
@@ -344,6 +392,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 2,
 		.bpp = 24,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_X416M,
 		.num_planes = 1,
 		.buffers = 1,
@@ -357,6 +407,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 3,
 		.bpp = 24,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_BGR24,
 		.num_planes = 1,
 		.buffers = 1,
@@ -370,6 +422,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 3,
 		.bpp = 24,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_RGB24,
 		.num_planes = 1,
 		.buffers = 1,
@@ -383,6 +437,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 4,
 		.bpp = 32,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_BGRX32,
 		.num_planes = 1,
 		.buffers = 1,
@@ -396,6 +452,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 4,
 		.bpp = 32,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_XBGR32,
 		.num_planes = 1,
 		.buffers = 1,
@@ -409,6 +467,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 3,
 		.bpp = 32,
+		.bpl_scaling = { 10, 8 },
+		.width_padding = { 32, 30 },
 		.fourcc = V4L2_PIX_FMT_XBGR30,
 		.num_planes = 1,
 		.buffers = 1,
@@ -422,6 +482,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 3,
 		.bpp = 40,
+		.bpl_scaling = { 12, 8 },
+		.width_padding = { 40, 36 },
 		.fourcc = V4L2_PIX_FMT_XBGR40,
 		.num_planes = 1,
 		.buffers = 1,
@@ -435,6 +497,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = 0,
 		.bpl_factor = 6,
 		.bpp = 48,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_BGR48,
 		.num_planes = 1,
 		.buffers = 1,
@@ -448,6 +512,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_Y8_1X8,
 		.bpl_factor = 1,
 		.bpp = 8,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_GREY,
 		.num_planes = 1,
 		.buffers = 1,
@@ -461,6 +527,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_Y8_1X8,
 		.bpl_factor = 1,
 		.bpp = 32,
+		.bpl_scaling = { 10, 8 },
+		.width_padding = { 32, 30 },
 		.fourcc = V4L2_PIX_FMT_XY10,
 		.num_planes = 1,
 		.buffers = 1,
@@ -474,6 +542,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_Y8_1X8,
 		.bpl_factor = 1,
 		.bpp = 12,
+		.bpl_scaling = { 12, 8 },
+		.width_padding = { 40, 36 },
 		.fourcc = V4L2_PIX_FMT_XY12,
 		.num_planes = 1,
 		.buffers = 1,
@@ -487,6 +557,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_Y8_1X8,
 		.bpl_factor = 2,
 		.bpp = 16,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_Y16,
 		.num_planes = 1,
 		.buffers = 1,
@@ -500,6 +572,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SRGGB8_1X8,
 		.bpl_factor = 1,
 		.bpp = 8,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SGRBG8,
 		.num_planes = 1,
 		.buffers = 1,
@@ -513,6 +587,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SGRBG8_1X8,
 		.bpl_factor = 1,
 		.bpp = 8,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SGRBG8,
 		.num_planes = 1,
 		.buffers = 1,
@@ -526,6 +602,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SGBRG8_1X8,
 		.bpl_factor = 1,
 		.bpp = 8,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SGBRG8,
 		.num_planes = 1,
 		.buffers = 1,
@@ -539,6 +617,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SBGGR8_1X8,
 		.bpl_factor = 1,
 		.bpp = 8,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SBGGR8,
 		.num_planes = 1,
 		.buffers = 1,
@@ -552,6 +632,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SRGGB8_1X8,
 		.bpl_factor = 2,
 		.bpp = 10,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SRGGB10,
 		.num_planes = 1,
 		.buffers = 1,
@@ -565,6 +647,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SGRBG8_1X8,
 		.bpl_factor = 2,
 		.bpp = 10,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SGRBG10,
 		.num_planes = 1,
 		.buffers = 1,
@@ -578,6 +662,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SGBRG8_1X8,
 		.bpl_factor = 2,
 		.bpp = 10,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SGBRG10,
 		.num_planes = 1,
 		.buffers = 1,
@@ -591,6 +677,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SBGGR8_1X8,
 		.bpl_factor = 2,
 		.bpp = 10,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SBGGR10,
 		.num_planes = 1,
 		.buffers = 1,
@@ -604,6 +692,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SRGGB8_1X8,
 		.bpl_factor = 2,
 		.bpp = 12,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SRGGB12,
 		.num_planes = 1,
 		.buffers = 1,
@@ -617,6 +707,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SGRBG8_1X8,
 		.bpl_factor = 2,
 		.bpp = 12,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SGRBG12,
 		.num_planes = 1,
 		.buffers = 1,
@@ -630,6 +722,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SGBRG8_1X8,
 		.bpl_factor = 2,
 		.bpp = 12,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SGBRG12,
 		.num_planes = 1,
 		.buffers = 1,
@@ -643,6 +737,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SBGGR8_1X8,
 		.bpl_factor = 2,
 		.bpp = 12,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SBGGR12,
 		.num_planes = 1,
 		.buffers = 1,
@@ -656,6 +752,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SRGGB8_1X8,
 		.bpl_factor = 2,
 		.bpp = 16,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SRGGB16,
 		.num_planes = 1,
 		.buffers = 1,
@@ -669,6 +767,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SGRBG8_1X8,
 		.bpl_factor = 2,
 		.bpp = 16,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SGRBG16,
 		.num_planes = 1,
 		.buffers = 1,
@@ -682,6 +782,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SGBRG8_1X8,
 		.bpl_factor = 2,
 		.bpp = 16,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SGBRG16,
 		.num_planes = 1,
 		.buffers = 1,
@@ -695,6 +797,8 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.flavor = MEDIA_BUS_FMT_SBGGR8_1X8,
 		.bpl_factor = 2,
 		.bpp = 16,
+		.bpl_scaling = { 1, 1 },
+		.width_padding = { 1, 1 },
 		.fourcc = V4L2_PIX_FMT_SBGGR16,
 		.num_planes = 1,
 		.buffers = 1,
@@ -764,89 +868,6 @@ const struct xvip_video_format *xvip_get_format_by_index(unsigned int index)
 	return &xvip_video_formats[index];
 }
 EXPORT_SYMBOL_GPL(xvip_get_format_by_index);
-
-/**
- * xvip_bpl_scaling_factor - Retrieve bpl scaling factor for a 4CC
- * @fourcc: the format 4CC
- * @numerator: returning numerator of scaling factor
- * @denominator: returning denominator of scaling factor
- *
- * Return: Return numerator and denominator values by address
- */
-void xvip_bpl_scaling_factor(u32 fourcc, u32 *numerator, u32 *denominator)
-{
-	switch (fourcc) {
-	case V4L2_PIX_FMT_XY10:
-	case V4L2_PIX_FMT_XV15:
-	case V4L2_PIX_FMT_XV20:
-	case V4L2_PIX_FMT_X403:
-	case V4L2_PIX_FMT_XV15M:
-	case V4L2_PIX_FMT_XV20M:
-	case V4L2_PIX_FMT_XBGR30:
-	case V4L2_PIX_FMT_XVUY10:
-		*numerator = 10;
-		*denominator = 8;
-		break;
-	case V4L2_PIX_FMT_XBGR40:
-	case V4L2_PIX_FMT_XY12:
-	case V4L2_PIX_FMT_X012:
-	case V4L2_PIX_FMT_X012M:
-	case V4L2_PIX_FMT_X212:
-	case V4L2_PIX_FMT_X212M:
-	case V4L2_PIX_FMT_X412:
-	case V4L2_PIX_FMT_X412M:
-		*numerator = 12;
-		*denominator = 8;
-		break;
-	default:
-		*numerator = 1;
-		*denominator = 1;
-		break;
-	}
-}
-EXPORT_SYMBOL_GPL(xvip_bpl_scaling_factor);
-
-/**
- * xvip_width_padding_factor - Retrieve width's padding factor for a 4CC
- * @fourcc: the format 4CC
- * @numerator: returning numerator of padding factor
- * @denominator: returning denominator of padding factor
- *
- * Return: Return numerator and denominator values by address
- */
-void xvip_width_padding_factor(u32 fourcc, u32 *numerator, u32 *denominator)
-{
-	switch (fourcc) {
-	case V4L2_PIX_FMT_XY10:
-	case V4L2_PIX_FMT_XV15:
-	case V4L2_PIX_FMT_XV20:
-	case V4L2_PIX_FMT_X403:
-	case V4L2_PIX_FMT_XV15M:
-	case V4L2_PIX_FMT_XV20M:
-	case V4L2_PIX_FMT_XBGR30:
-	case V4L2_PIX_FMT_XVUY10:
-		/* 32 bits are required per 30 bits of data */
-		*numerator = 32;
-		*denominator = 30;
-		break;
-	case V4L2_PIX_FMT_XBGR40:
-	case V4L2_PIX_FMT_XY12:
-	case V4L2_PIX_FMT_X012:
-	case V4L2_PIX_FMT_X012M:
-	case V4L2_PIX_FMT_X212:
-	case V4L2_PIX_FMT_X212M:
-	case V4L2_PIX_FMT_X412:
-	case V4L2_PIX_FMT_X412M:
-		*numerator = 40;
-		*denominator = 36;
-		break;
-	default:
-		*numerator = 1;
-		*denominator = 1;
-		break;
-	}
-}
-EXPORT_SYMBOL_GPL(xvip_width_padding_factor);
 
 /**
  * xvip_of_get_format - Parse a device tree node and return format information

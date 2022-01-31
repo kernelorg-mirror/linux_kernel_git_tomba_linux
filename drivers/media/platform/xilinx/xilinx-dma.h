@@ -97,7 +97,7 @@ struct xvip_dma {
 	unsigned int port;
 
 	struct mutex lock;
-	struct v4l2_format format;
+	struct v4l2_pix_format_mplane format;
 	struct v4l2_rect r;
 	const struct xvip_video_format *fmtinfo;
 

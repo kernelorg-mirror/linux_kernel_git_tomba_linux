@@ -1535,7 +1535,7 @@ static int xvip_m2m_dma_init(struct xvip_m2m_dma *dma)
 
 	/* Format info on output port - NV12 is the default format */
 	dma->outinfo = xvip_get_format_by_fourcc(XVIP_M2M_DEFAULT_FMT);
-	pix_mp = &dma->capfmt.fmt.pix_mp;
+	pix_mp = &dma->outfmt.fmt.pix_mp;
 	pix_mp->pixelformat = dma->outinfo->fourcc;
 	pix_mp->field = V4L2_FIELD_NONE;
 	pix_mp->width = XVIP_M2M_DEF_WIDTH;

@@ -343,52 +343,79 @@ error:
 }
 
 /**
- * xvip_pipeline_set_stream - Enable/disable streaming on a pipeline
+ * xvip_pipeline_start_dma - Start a DMA engine on a pipeline
  * @pipe: The pipeline
- * @on: Turn the stream on when true or off when false
+ * @dma: The DMA engine being started
  *
  * The pipeline is shared between all DMA engines connect at its input and
  * output. While the stream state of DMA engines can be controlled
  * independently, pipelines have a shared stream state that enable or disable
  * all entities in the pipeline. For this reason the pipeline uses a streaming
  * counter that tracks the number of DMA engines that have requested the stream
- * to be enabled. This will walk the graph starting from each DMA and enable or
- * disable the entities in the path.
+ * to be enabled.
  *
- * When called with the @on argument set to true, this function will increment
- * the pipeline streaming count. If the streaming count reaches the number of
- * DMA engines in the pipeline it will enable all entities that belong to the
- * pipeline.
- *
- * Similarly, when called with the @on argument set to false, this function will
- * decrement the pipeline streaming count and disable all entities in the
- * pipeline when the streaming count reaches zero.
+ * This function increments the pipeline streaming count corresponding to the
+ * @dma direction. When the streaming count reaches the number of DMA engines
+ * in the pipeline, it enables all entities that belong to the pipeline.
  *
  * Return: 0 if successful, or the return value of the failed video::s_stream
- * operation otherwise. Stopping the pipeline never fails. The pipeline state is
- * not updated when the operation fails.
+ * operation otherwise. The pipeline state is not updated when the operation
+ * fails.
  */
-static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe, bool on)
+static int xvip_pipeline_start_dma(struct xvip_pipeline *pipe,
+				   struct xvip_dma *dma)
 {
 	int ret = 0;
 
 	mutex_lock(&pipe->lock);
 
-	if (on) {
-		if (pipe->stream_count == pipe->num_dmas - 1) {
-			ret = xvip_pipeline_start_stop_dmas(pipe, true);
-			if (ret < 0)
-				goto done;
-		}
-		pipe->stream_count++;
-	} else {
-		if (--pipe->stream_count == 0)
-			xvip_pipeline_start_stop_dmas(pipe, false);
+	if (pipe->input_stream_count + pipe->output_stream_count ==
+	    pipe->num_inputs + pipe->num_outputs - 1) {
+		ret = xvip_pipeline_start_stop_dmas(pipe, true);
+		if (ret < 0)
+			goto done;
 	}
+
+	if (dma->video.vfl_dir == VFL_DIR_RX)
+		pipe->output_stream_count++;
+	else
+		pipe->input_stream_count++;
 
 done:
 	mutex_unlock(&pipe->lock);
 	return ret;
+}
+
+/**
+ * xvip_pipeline_stop_dma - Stop a DMA engine on a pipeline
+ * @pipe: The pipeline
+ * @dma: The DMA engine being stopped
+ *
+ * The pipeline is shared between all DMA engines connect at its input and
+ * output. While the stream state of DMA engines can be controlled
+ * independently, pipelines have a shared stream state that enable or disable
+ * all entities in the pipeline. For this reason the pipeline uses a streaming
+ * counter that tracks the number of DMA engines that have requested the stream
+ * to be enabled.
+ *
+ * This function decrements the pipeline streaming count corresponding to the
+ * @dma direction. When the total streaming count reaches zero, it disables all
+ * entities in the pipeline.
+ */
+static void xvip_pipeline_stop_dma(struct xvip_pipeline *pipe,
+				   struct xvip_dma *dma)
+{
+	mutex_lock(&pipe->lock);
+
+	if (dma->video.vfl_dir == VFL_DIR_RX)
+		pipe->output_stream_count--;
+	else
+		pipe->input_stream_count--;
+
+	if (pipe->input_stream_count == 0 && pipe->output_stream_count == 0)
+		xvip_pipeline_start_stop_dmas(pipe, false);
+
+	mutex_unlock(&pipe->lock);
 }
 
 static int xvip_pipeline_init(struct xvip_pipeline *pipe,
@@ -436,7 +463,8 @@ static int xvip_pipeline_init(struct xvip_pipeline *pipe,
 	if (num_outputs == 0 && num_inputs == 0)
 		return -EPIPE;
 
-	pipe->num_dmas = num_inputs + num_outputs;
+	pipe->num_inputs = num_inputs;
+	pipe->num_outputs = num_outputs;
 	pipe->xdev = start->xdev;
 
 	return 0;
@@ -447,7 +475,8 @@ static void __xvip_pipeline_cleanup(struct xvip_pipeline *pipe)
 	while (!list_empty(&pipe->dmas))
 		list_del(pipe->dmas.next);
 
-	pipe->num_dmas = 0;
+	pipe->num_inputs = 0;
+	pipe->num_outputs = 0;
 }
 
 /**
@@ -611,6 +640,11 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	 */
 	dma_async_issue_pending(dma->dma);
 
+	/* Start the DMA engine on the pipeline. */
+	ret = xvip_pipeline_start_dma(pipe, dma);
+	if (ret < 0)
+		goto error_stop;
+
 	return 0;
 
 error_stop:
@@ -629,8 +663,8 @@ static void xvip_dma_stop_streaming(struct vb2_queue *vq)
 	struct xvip_dma *dma = vb2_get_drv_priv(vq);
 	struct xvip_pipeline *pipe = to_xvip_pipeline(&dma->video);
 
-	/* Stop the pipeline. */
-	xvip_pipeline_set_stream(pipe, false);
+	/* Stop the DMA engine on the pipeline. */
+	xvip_pipeline_stop_dma(pipe, dma);
 
 	/* Stop and reset the DMA engine. */
 	dmaengine_terminate_all(dma->dma);

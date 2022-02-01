@@ -48,9 +48,11 @@ struct xvip_dma_buffer {
  * @pipe: media pipeline
  * @lock: protects the pipeline @stream_count
  * @use_count: number of DMA engines using the pipeline
- * @stream_count: number of DMA engines currently streaming
+ * @input_stream_count: number of input DMA engines currently streaming
+ * @output_stream_count: number of output DMA engines currently streaming
  * @dmas: list of xvip_dma in the pipeline
- * @num_dmas: number of DMA engines in the pipeline
+ * @num_inputs: number of inputs in the pipeline
+ * @num_outputs: number of outputs in the pipeline
  * @xdev: Composite device the pipe belongs to
  */
 struct xvip_pipeline {
@@ -58,10 +60,12 @@ struct xvip_pipeline {
 
 	struct mutex lock;
 	unsigned int use_count;
-	unsigned int stream_count;
+	unsigned int input_stream_count;
+	unsigned int output_stream_count;
 
 	struct list_head dmas;
-	unsigned int num_dmas;
+	unsigned int num_inputs;
+	unsigned int num_outputs;
 	struct xvip_composite_device *xdev;
 };
 

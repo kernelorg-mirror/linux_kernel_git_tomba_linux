@@ -598,8 +598,8 @@ static int xvip_m2m_queue_setup(struct vb2_queue *vq,
 				return -EINVAL;
 		}
 	} else {
-		*nplanes = info->buffers;
-		for (i = 0; i < info->buffers; i++)
+		*nplanes = info->num_buffers;
+		for (i = 0; i < info->num_buffers; i++)
 			sizes[i] = f->fmt.pix_mp.plane_fmt[i].sizeimage;
 	}
 
@@ -622,7 +622,7 @@ static int xvip_m2m_buf_prepare(struct vb2_buffer *vb)
 		info = dma->capinfo;
 	}
 
-	for (i = 0; i < info->buffers; i++) {
+	for (i = 0; i < info->num_buffers; i++) {
 		if (vb2_plane_size(vb, i) <
 			f->fmt.pix_mp.plane_fmt[i].sizeimage) {
 			dev_err(ctx->xdev->dev,
@@ -945,7 +945,7 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 	 * When using single-planar formats with multiple planes, add up all
 	 * sizeimage values in the first plane.
 	 */
-	if (info->buffers == 1) {
+	if (info->num_buffers == 1) {
 		for (i = 1; i < info->num_planes; ++i) {
 			struct v4l2_plane_pix_format *plane =
 				&pix_mp->plane_fmt[i];
@@ -1222,7 +1222,7 @@ static void xvip_m2m_prep_submit_dev2mem_desc(struct xvip_m2m_ctx *ctx,
 	 */
 	ctx->sgl[0].src_icg = 0;
 
-	if (info->buffers == 1) {
+	if (info->num_buffers == 1) {
 		/* Handling contiguous data with mplanes */
 		ctx->sgl[0].dst_icg = 0;
 		if (dma->crop)
@@ -1230,7 +1230,7 @@ static void xvip_m2m_prep_submit_dev2mem_desc(struct xvip_m2m_ctx *ctx,
 					      (pix_mp->height - dst_height);
 	} else {
 		/* Handling non-contiguous data with mplanes */
-		if (info->buffers == 2) {
+		if (info->num_buffers == 2) {
 			dma_addr_t chroma_cap =
 			vb2_dma_contig_plane_dma_addr(&dst_buf->vb2_buf, 1);
 			luma_size = pix_mp->plane_fmt[0].bytesperline *
@@ -1306,7 +1306,7 @@ static void xvip_m2m_prep_submit_mem2dev_desc(struct xvip_m2m_ctx *ctx,
 	 */
 	ctx->sgl[0].dst_icg = 0;
 
-	if (info->buffers == 1) {
+	if (info->num_buffers == 1) {
 		/* Handling contiguous data with mplanes */
 		ctx->sgl[0].src_icg = 0;
 		if (dma->crop)
@@ -1314,7 +1314,7 @@ static void xvip_m2m_prep_submit_mem2dev_desc(struct xvip_m2m_ctx *ctx,
 					      (pix_mp->height - src_height);
 	} else {
 		/* Handling non-contiguous data with mplanes */
-		if (info->buffers == 2) {
+		if (info->num_buffers == 2) {
 			dma_addr_t chroma_out =
 			vb2_dma_contig_plane_dma_addr(&src_buf->vb2_buf, 1);
 			luma_size = bpl * ctx->xt.numf;

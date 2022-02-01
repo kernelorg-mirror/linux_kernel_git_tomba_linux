@@ -32,7 +32,7 @@
 #define XVIP_DMA_DEF_WIDTH		1920
 #define XVIP_DMA_DEF_HEIGHT		1080
 #define XVIP_DMA_DEF_WIDTH_ALIGN	2
-/* Minimum and maximum widths are expressed in bytes */
+/* Minimum and maximum widths are expressed in pixels */
 #define XVIP_DMA_MIN_WIDTH		1U
 #define XVIP_DMA_MAX_WIDTH		65535U
 #define XVIP_DMA_MIN_HEIGHT		1U
@@ -801,16 +801,15 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 		info = xvip_get_format_by_fourcc(XVIP_DMA_DEF_FORMAT);
 
 	/*
-	 * The transfer alignment requirements are expressed in bytes. Compute
-	 * the minimum and maximum values, clamp the requested width and convert
-	 * it back to pixels.
+	 * The width alignment requirements (width_align) are expressed in
+	 * pixels, while the stride alignment (align) requirements are
+	 * expressed in bytes.
 	 */
 	min_width = roundup(XVIP_DMA_MIN_WIDTH, dma->width_align);
 	max_width = rounddown(XVIP_DMA_MAX_WIDTH, dma->width_align);
 
-	width = rounddown(pix_mp->width * info->bpl_factor, dma->width_align);
-	pix_mp->width = clamp(width, min_width, max_width)
-		      / info->bpl_factor;
+	width = rounddown(pix_mp->width, dma->width_align);
+	pix_mp->width = clamp(width, min_width, max_width);
 	pix_mp->height = clamp(pix_mp->height, XVIP_DMA_MIN_HEIGHT,
 			       XVIP_DMA_MAX_HEIGHT);
 

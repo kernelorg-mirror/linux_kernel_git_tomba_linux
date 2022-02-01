@@ -36,7 +36,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bytes_per_pixel = { 2, 2 },
 		.num_planes = 2,
 		.buffers = 1,
-		.hsub = 1,
+		.hsub = 2,
 		.vsub = 2,
 	}, {
 		.vf_code = XVIP_VF_YUV_420,
@@ -50,7 +50,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bytes_per_pixel = { 2, 2 },
 		.num_planes = 2,
 		.buffers = 2,
-		.hsub = 1,
+		.hsub = 2,
 		.vsub = 2,
 	}, {
 		.vf_code = XVIP_VF_YUV_420,
@@ -78,7 +78,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bytes_per_pixel = { 8, 6 },
 		.num_planes = 2,
 		.buffers = 2,
-		.hsub = 1,
+		.hsub = 2,
 		.vsub = 2,
 	}, {
 		.vf_code = XVIP_VF_YUV_420,
@@ -106,7 +106,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bytes_per_pixel = { 3, 2 },
 		.num_planes = 2,
 		.buffers = 2,
-		.hsub = 1,
+		.hsub = 2,
 		.vsub = 2,
 	}, {
 		.vf_code = XVIP_VF_YUV_420,
@@ -134,7 +134,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bytes_per_pixel = { 4, 2 },
 		.num_planes = 2,
 		.buffers = 2,
-		.hsub = 1,
+		.hsub = 2,
 		.vsub = 2,
 	}, {
 		.vf_code = XVIP_VF_YUV_422,
@@ -148,7 +148,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bytes_per_pixel = { 2, 2 },
 		.num_planes = 2,
 		.buffers = 1,
-		.hsub = 1,
+		.hsub = 2,
 		.vsub = 1,
 	}, {
 		.vf_code = XVIP_VF_YUV_422,
@@ -162,7 +162,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bytes_per_pixel = { 2, 2 },
 		.num_planes = 2,
 		.buffers = 2,
-		.hsub = 1,
+		.hsub = 2,
 		.vsub = 1,
 	}, {
 		.vf_code = XVIP_VF_YUV_422,
@@ -218,7 +218,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bytes_per_pixel = { 8, 6 },
 		.num_planes = 2,
 		.buffers = 2,
-		.hsub = 1,
+		.hsub = 2,
 		.vsub = 1,
 	}, {
 		.vf_code = XVIP_VF_YUV_422,
@@ -246,7 +246,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bytes_per_pixel = { 3, 2 },
 		.num_planes = 2,
 		.buffers = 2,
-		.hsub = 1,
+		.hsub = 2,
 		.vsub = 1,
 	}, {
 		.vf_code = XVIP_VF_YUV_422,
@@ -274,7 +274,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bytes_per_pixel = { 4, 2 },
 		.num_planes = 2,
 		.buffers = 2,
-		.hsub = 1,
+		.hsub = 2,
 		.vsub = 1,
 	}, {
 		.vf_code = XVIP_VF_YUV_444,

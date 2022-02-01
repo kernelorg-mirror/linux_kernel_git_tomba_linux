@@ -827,7 +827,12 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 		struct v4l2_plane_pix_format *plane = &pix_mp->plane_fmt[i];
 		unsigned int bpl;
 
-		width = pix_mp->width / (i ? info->hsub : 1);
+		/*
+		 * Multiple hsub by two for the second plane as all supported
+		 * multi-planar formats are semi-planar and store both U and V
+		 * in the second plane.
+		 */
+		width = pix_mp->width / (i ? info->hsub * 2 : 1);
 		height = pix_mp->height / (i ? info->vsub : 1);
 
 		min_bpl = width * info->bytes_per_pixel.numerator

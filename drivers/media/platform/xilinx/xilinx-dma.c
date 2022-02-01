@@ -539,13 +539,6 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 	list_add_tail(&buf->queue, &dma->queued_bufs);
 	spin_unlock_irq(&dma->queued_lock);
 
-	/*
-	 * Low latency capture: Give descriptor callback at start of
-	 * processing the descriptor
-	 */
-	if (dma->low_latency_cap)
-		xilinx_xdma_set_earlycb(dma->dma, desc,
-					EARLY_CALLBACK_START_DESC);
 	dmaengine_submit(desc);
 
 	if (vb2_is_streaming(&dma->queue))
@@ -555,7 +548,6 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct xvip_dma *dma = vb2_get_drv_priv(vq);
-	struct xvip_dma_buffer *buf;
 	struct xvip_pipeline *pipe;
 	int ret;
 
@@ -590,25 +582,8 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	/* Start the DMA engine. This must be done before starting the blocks
 	 * in the pipeline to avoid DMA synchronization issues.
-	 * We dont't want to start DMA in case of low latency capture mode,
-	 * applications will start DMA using S_CTRL at later point of time.
 	 */
-	if (!dma->low_latency_cap) {
-		dma_async_issue_pending(dma->dma);
-
-		/* Start the pipeline. */
-		ret = xvip_pipeline_set_stream(pipe, true);
-		if (ret < 0)
-			goto error_stop;
-	} else {
-		/* For low latency capture, return the first buffer early
-		 * so that consumer can initialize until we start DMA.
-		 */
-		buf = list_first_entry(&dma->queued_bufs,
-				       struct xvip_dma_buffer, queue);
-		xvip_dma_complete(buf);
-		buf->desc->callback = NULL;
-	}
+	dma_async_issue_pending(dma->dma);
 
 	return 0;
 
@@ -1137,125 +1112,13 @@ static const struct v4l2_ioctl_ops xvip_dma_ioctl_ops = {
 };
 
 /* -----------------------------------------------------------------------------
- * V4L2 controls
- */
-
-static int xvip_dma_s_ctrl(struct v4l2_ctrl *ctl)
-{
-	struct xvip_dma *dma = container_of(ctl->handler, struct xvip_dma,
-					    ctrl_handler);
-	int ret = 0;
-	struct xvip_pipeline *pipe = media_entity_pipeline(&dma->video.entity) ?
-		to_xvip_pipeline(&dma->video) : &dma->pipe;
-	struct xvip_dma_buffer *buf, *nbuf;
-
-	switch (ctl->id)  {
-	case V4L2_CID_XILINX_LOW_LATENCY:
-		if (ctl->val == XVIP_LOW_LATENCY_ENABLE) {
-			if (vb2_is_busy(&dma->queue))
-				return -EBUSY;
-
-			dma->low_latency_cap = true;
-			/*
-			 * Don't use auto-restart for low latency
-			 * to avoid extra one frame delay between
-			 * programming and actual writing of data
-			 */
-			xilinx_xdma_set_mode(dma->dma, DEFAULT);
-		} else if (ctl->val == XVIP_LOW_LATENCY_DISABLE) {
-			if (vb2_is_busy(&dma->queue))
-				return -EBUSY;
-
-			dma->low_latency_cap = false;
-			xilinx_xdma_set_mode(dma->dma, AUTO_RESTART);
-		} else if (ctl->val == XVIP_START_DMA) {
-			if (dma->low_latency_cap &&
-			    vb2_is_streaming(&dma->queue)) {
-				/*
-				 * In low latency capture, the driver allows application
-				 * to start dma when queue has buffers. That's why we
-				 * don't check for vb2_is_busy().
-				 */
-				dma_async_issue_pending(dma->dma);
-
-				/* Start the pipeline. */
-				ret = xvip_pipeline_set_stream(pipe, true);
-				if (ret < 0) {
-					dev_err(dma->xdev->dev, "Failed to set stream\n");
-					media_pipeline_stop(dma->video.entity.pads);
-					dmaengine_terminate_all(dma->dma);
-
-					/* Give back all queued buffers to videobuf2. */
-					spin_lock_irq(&dma->queued_lock);
-					list_for_each_entry_safe(buf, nbuf,
-								 &dma->queued_bufs, queue) {
-						vb2_buffer_done(&buf->buf.vb2_buf,
-								VB2_BUF_STATE_QUEUED);
-						list_del(&buf->queue);
-					}
-					spin_unlock_irq(&dma->queued_lock);
-				}
-			} else {
-				ret = -EINVAL;
-			}
-		} else {
-			ret = -EINVAL;
-		}
-
-		break;
-	default:
-		ret = -EINVAL;
-	}
-
-	return ret;
-}
-
-static int xvip_dma_open(struct file *file)
-{
-	int ret;
-
-	ret = v4l2_fh_open(file);
-	if (ret)
-		return ret;
-
-	/* Disable the low latency mode as default */
-	if (v4l2_fh_is_singular_file(file)) {
-		struct xvip_dma *dma = video_drvdata(file);
-
-		mutex_lock(&dma->lock);
-		dma->low_latency_cap = false;
-		xilinx_xdma_set_mode(dma->dma, AUTO_RESTART);
-		mutex_unlock(&dma->lock);
-	}
-
-	return 0;
-}
-
-static const struct v4l2_ctrl_ops xvip_dma_ctrl_ops = {
-	.s_ctrl = xvip_dma_s_ctrl,
-};
-
-static const struct v4l2_ctrl_config xvip_dma_ctrls[] = {
-	{
-		.ops = &xvip_dma_ctrl_ops,
-		.id = V4L2_CID_XILINX_LOW_LATENCY,
-		.name = "Low Latency Controls",
-		.type = V4L2_CTRL_TYPE_INTEGER,
-		.min = XVIP_LOW_LATENCY_ENABLE,
-		.max = XVIP_START_DMA,
-		.step = 1,
-		.def = XVIP_LOW_LATENCY_DISABLE,
-	}
-};
-
-/* -----------------------------------------------------------------------------
  * V4L2 file operations
  */
 
 static const struct v4l2_file_operations xvip_dma_fops = {
 	.owner		= THIS_MODULE,
 	.unlocked_ioctl	= video_ioctl2,
-	.open		= xvip_dma_open,
+	.open		= v4l2_fh_open,
 	.release	= vb2_fop_release,
 	.poll		= vb2_fop_poll,
 	.mmap		= vb2_fop_mmap,
@@ -1271,7 +1134,6 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	struct v4l2_pix_format_mplane *pix_mp;
 	char name[16];
 	int ret;
-	u32 i;
 
 	dma->xdev = xdev;
 	dma->port = port;
@@ -1323,43 +1185,9 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	if (ret < 0)
 		goto error;
 
-	ret = v4l2_ctrl_handler_init(&dma->ctrl_handler,
-				     ARRAY_SIZE(xvip_dma_ctrls));
-	if (ret < 0) {
-		dev_err(dma->xdev->dev, "failed to initialize V4L2 ctrl\n");
-		goto error;
-	}
-
-	for (i = 0; i < ARRAY_SIZE(xvip_dma_ctrls); i++) {
-		struct v4l2_ctrl *ctrl;
-
-		dev_dbg(dma->xdev->dev, "%d ctrl = 0x%x\n", i,
-			xvip_dma_ctrls[i].id);
-		ctrl = v4l2_ctrl_new_custom(&dma->ctrl_handler,
-					    &xvip_dma_ctrls[i], NULL);
-		if (!ctrl) {
-			dev_err(dma->xdev->dev, "Failed for %s ctrl\n",
-				xvip_dma_ctrls[i].name);
-			goto error;
-		}
-	}
-
-	if (dma->ctrl_handler.error) {
-		dev_err(dma->xdev->dev, "failed to add controls\n");
-		ret = dma->ctrl_handler.error;
-		goto error;
-	}
-
-	ret = v4l2_ctrl_handler_setup(&dma->ctrl_handler);
-	if (ret < 0) {
-		dev_err(dma->xdev->dev, "failed to set controls\n");
-		goto error;
-	}
-
 	/* ... and the video node... */
 	dma->video.fops = &xvip_dma_fops;
 	dma->video.v4l2_dev = &xdev->v4l2_dev;
-	dma->video.v4l2_dev->ctrl_handler = &dma->ctrl_handler;
 	dma->video.queue = &dma->queue;
 	snprintf(dma->video.name, sizeof(dma->video.name), "%pOFn %s %u",
 		 xdev->dev->of_node,
@@ -1446,7 +1274,6 @@ void xvip_dma_cleanup(struct xvip_dma *dma)
 	if (!IS_ERR_OR_NULL(dma->dma))
 		dma_release_channel(dma->dma);
 
-	v4l2_ctrl_handler_free(&dma->ctrl_handler);
 	media_entity_cleanup(&dma->video.entity);
 
 	mutex_destroy(&dma->lock);

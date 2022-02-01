@@ -375,7 +375,7 @@ static void xvip_dma_complete(void *param)
 		}
 	}
 
-	for (i = 0; i < dma->fmtinfo->buffers; i++) {
+	for (i = 0; i < dma->fmtinfo->num_buffers; i++) {
 		u32 sizeimage = dma->format.plane_fmt[i].sizeimage;
 
 		vb2_set_plane_payload(&buf->buf.vb2_buf, i, sizeimage);
@@ -404,8 +404,8 @@ xvip_dma_queue_setup(struct vb2_queue *vq,
 				return -EINVAL;
 		}
 	} else {
-		*nplanes = dma->fmtinfo->buffers;
-		for (i = 0; i < dma->fmtinfo->buffers; i++) {
+		*nplanes = dma->fmtinfo->num_buffers;
+		for (i = 0; i < dma->fmtinfo->num_buffers; i++) {
 			sizeimage = dma->format.plane_fmt[i].sizeimage;
 			sizes[i] = sizeimage;
 		}
@@ -478,12 +478,12 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 	 */
 
 	/* Handling contiguous data with mplanes */
-	if (dma->fmtinfo->buffers == 1) {
+	if (dma->fmtinfo->num_buffers == 1) {
 		dma->sgl[0].dst_icg = (size_t)bpl *
 				      (pix_mp->height - dma->r.height);
 	} else {
 		/* Handling non-contiguous data with mplanes */
-		if (dma->fmtinfo->buffers == 2) {
+		if (dma->fmtinfo->num_buffers == 2) {
 			dma_addr_t chroma_addr =
 				vb2_dma_contig_plane_dma_addr(vb, 1);
 			luma_size = bpl * dma->xt.numf;
@@ -847,7 +847,7 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 	 * When using single-planar formats with multiple planes, add up all
 	 * sizeimage values in the first plane.
 	 */
-	if (info->buffers == 1) {
+	if (info->num_buffers == 1) {
 		for (i = 1; i < info->num_planes; ++i) {
 			struct v4l2_plane_pix_format *plane =
 				&pix_mp->plane_fmt[i];

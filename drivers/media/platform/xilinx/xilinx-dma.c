@@ -221,8 +221,8 @@ done:
 	return ret;
 }
 
-static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
-				  struct xvip_dma *start)
+static int xvip_pipeline_init(struct xvip_pipeline *pipe,
+			      struct xvip_dma *start)
 {
 	struct media_graph graph;
 	struct media_entity *entity = &start->video.entity;
@@ -316,7 +316,7 @@ static int xvip_pipeline_prepare(struct xvip_pipeline *pipe,
 
 	/* If we're the first user validate and initialize the pipeline. */
 	if (pipe->use_count == 0) {
-		ret = xvip_pipeline_validate(pipe, dma);
+		ret = xvip_pipeline_init(pipe, dma);
 		if (ret < 0) {
 			__xvip_pipeline_cleanup(pipe);
 			goto done;

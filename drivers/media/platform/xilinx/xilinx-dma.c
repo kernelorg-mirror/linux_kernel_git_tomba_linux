@@ -100,6 +100,176 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
 }
 
 /* -----------------------------------------------------------------------------
+ * Buffer Handling
+ */
+
+static void xvip_dma_complete(void *param)
+{
+	struct xvip_dma_buffer *buf = param;
+	struct xvip_dma *dma = buf->dma;
+	unsigned int i;
+	u32 fid;
+	int status;
+
+	spin_lock(&dma->queued_lock);
+	list_del(&buf->queue);
+	spin_unlock(&dma->queued_lock);
+
+	buf->buf.field = V4L2_FIELD_NONE;
+	buf->buf.sequence = dma->sequence++;
+	buf->buf.vb2_buf.timestamp = ktime_get_ns();
+
+	status = xilinx_xdma_get_fid(dma->dma, buf->desc, &fid);
+	if (!status) {
+		if (dma->format.field == V4L2_FIELD_ALTERNATE) {
+			/*
+			 * fid = 1 is odd field i.e. V4L2_FIELD_TOP.
+			 * fid = 0 is even field i.e. V4L2_FIELD_BOTTOM.
+			 */
+			buf->buf.field = fid ?
+					 V4L2_FIELD_TOP : V4L2_FIELD_BOTTOM;
+
+			if (fid == dma->prev_fid)
+				buf->buf.sequence = dma->sequence++;
+
+			buf->buf.sequence >>= 1;
+			dma->prev_fid = fid;
+		}
+	}
+
+	for (i = 0; i < dma->fmtinfo->num_buffers; i++) {
+		u32 sizeimage = dma->format.plane_fmt[i].sizeimage;
+
+		vb2_set_plane_payload(&buf->buf.vb2_buf, i, sizeimage);
+	}
+
+	vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_DONE);
+}
+
+static int xvip_dma_submit_buffer(struct xvip_dma_buffer *buf,
+				  enum dma_transfer_direction dir,
+				  dma_addr_t dma_addrs[2],
+				  u32 format, unsigned int num_planes,
+				  unsigned int width, unsigned int height,
+				  unsigned int bpl, u32 fid)
+{
+	struct xvip_dma *dma = buf->dma;
+	struct dma_async_tx_descriptor *desc;
+	u32 flags = 0;
+
+	if (dir == DMA_DEV_TO_MEM) {
+		flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
+		dma->xt.dir = DMA_DEV_TO_MEM;
+		dma->xt.src_sgl = false;
+		dma->xt.dst_sgl = true;
+		dma->xt.dst_start = dma_addrs[0];
+	} else  {
+		flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
+		dma->xt.dir = DMA_MEM_TO_DEV;
+		dma->xt.src_sgl = true;
+		dma->xt.dst_sgl = false;
+		dma->xt.src_start = dma_addrs[0];
+	}
+
+	/*
+	 * DMA IP supports only 2 planes, so one datachunk is sufficient
+	 * to get start address of 2nd plane
+	 */
+
+	xilinx_xdma_v4l2_config(dma->dma, format);
+	dma->xt.frame_size = num_planes;
+
+	dma->sgl[0].size = width;
+	dma->sgl[0].icg = bpl - width;
+
+	/*
+	 * dst_icg is the number of bytes to jump after last luma addr
+	 * and before first chroma addr
+	 */
+	if (num_planes == 2)
+		dma->sgl[0].dst_icg = dma_addrs[1] - dma_addrs[0]
+				    - bpl * height;
+
+	dma->xt.numf = height;
+
+	desc = dmaengine_prep_interleaved_dma(dma->dma, &dma->xt, flags);
+	if (!desc) {
+		dev_err(dma->xdev->dev, "Failed to prepare DMA transfer\n");
+		return -EINVAL;
+	}
+	desc->callback = xvip_dma_complete;
+	desc->callback_param = buf;
+	buf->desc = desc;
+
+	xilinx_xdma_set_fid(dma->dma, desc, fid);
+
+	spin_lock_irq(&dma->queued_lock);
+	list_add_tail(&buf->queue, &dma->queued_bufs);
+	spin_unlock_irq(&dma->queued_lock);
+
+	dmaengine_submit(desc);
+
+	return 0;
+}
+
+static void xvip_dma_submit_vb2_buffer(struct xvip_dma *dma,
+				       struct xvip_dma_buffer *buf)
+{
+	struct vb2_buffer *vb = &buf->buf.vb2_buf;
+	enum dma_transfer_direction dir;
+	dma_addr_t dma_addrs[2] = { };
+	unsigned int width;
+	unsigned int bpl;
+	u32 fid;
+	int ret;
+
+	switch (dma->queue.type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
+	default:
+		dir = DMA_DEV_TO_MEM;
+		break;
+
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
+		dir = DMA_MEM_TO_DEV;
+		break;
+	}
+
+	bpl = dma->format.plane_fmt[0].bytesperline;
+
+	dma_addrs[0] = vb2_dma_contig_plane_dma_addr(vb, 0);
+	if (dma->fmtinfo->num_buffers == 2)
+		dma_addrs[1] = vb2_dma_contig_plane_dma_addr(vb, 1);
+	else if (dma->fmtinfo->num_planes == 2)
+		dma_addrs[1] = dma_addrs[0] + bpl * dma->format.height;
+
+	switch (buf->buf.field) {
+	case V4L2_FIELD_TOP:
+		fid = 1;
+		break;
+	case V4L2_FIELD_BOTTOM:
+	case V4L2_FIELD_NONE:
+		fid = 0;
+		break;
+	default:
+		fid = ~0;
+		break;
+	}
+
+	width = (size_t)dma->r.width * dma->fmtinfo->bytes_per_pixel[0].numerator
+	      / (size_t)dma->fmtinfo->bytes_per_pixel[0].denominator;
+
+	ret = xvip_dma_submit_buffer(buf, dir, dma_addrs, dma->format.pixelformat,
+				     dma->fmtinfo->num_planes, width, dma->r.height,
+				     bpl, fid);
+	if (ret < 0) {
+		vb2_buffer_done(vb, VB2_BUF_STATE_ERROR);
+		return;
+	}
+}
+
+/* -----------------------------------------------------------------------------
  * Pipeline Stream Management
  */
 
@@ -335,49 +505,6 @@ done:
  * videobuf2 queue operations
  */
 
-static void xvip_dma_complete(void *param)
-{
-	struct xvip_dma_buffer *buf = param;
-	struct xvip_dma *dma = buf->dma;
-	unsigned int i;
-	u32 fid;
-	int status;
-
-	spin_lock(&dma->queued_lock);
-	list_del(&buf->queue);
-	spin_unlock(&dma->queued_lock);
-
-	buf->buf.field = V4L2_FIELD_NONE;
-	buf->buf.sequence = dma->sequence++;
-	buf->buf.vb2_buf.timestamp = ktime_get_ns();
-
-	status = xilinx_xdma_get_fid(dma->dma, buf->desc, &fid);
-	if (!status) {
-		if (dma->format.field == V4L2_FIELD_ALTERNATE) {
-			/*
-			 * fid = 1 is odd field i.e. V4L2_FIELD_TOP.
-			 * fid = 0 is even field i.e. V4L2_FIELD_BOTTOM.
-			 */
-			buf->buf.field = fid ?
-					 V4L2_FIELD_TOP : V4L2_FIELD_BOTTOM;
-
-			if (fid == dma->prev_fid)
-				buf->buf.sequence = dma->sequence++;
-
-			buf->buf.sequence >>= 1;
-			dma->prev_fid = fid;
-		}
-	}
-
-	for (i = 0; i < dma->fmtinfo->num_buffers; i++) {
-		u32 sizeimage = dma->format.plane_fmt[i].sizeimage;
-
-		vb2_set_plane_payload(&buf->buf.vb2_buf, i, sizeimage);
-	}
-
-	vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_DONE);
-}
-
 static void xvip_dma_return_buffers(struct xvip_dma *dma,
 				    enum vb2_buffer_state state)
 {
@@ -435,95 +562,10 @@ static int xvip_dma_buffer_prepare(struct vb2_buffer *vb)
 static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 {
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
-	struct xvip_dma *dma = vb2_get_drv_priv(vb->vb2_queue);
 	struct xvip_dma_buffer *buf = to_xvip_dma_buffer(vbuf);
-	struct dma_async_tx_descriptor *desc;
-	dma_addr_t addr = vb2_dma_contig_plane_dma_addr(vb, 0);
-	struct v4l2_pix_format_mplane *pix_mp;
-	size_t size;
-	u32 flags = 0;
-	u32 luma_size;
-	u32 fid = ~0;
-	u32 bpl;
+	struct xvip_dma *dma = buf->dma;
 
-	if (dma->queue.type == V4L2_BUF_TYPE_VIDEO_CAPTURE ||
-	    dma->queue.type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
-		flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
-		dma->xt.dir = DMA_DEV_TO_MEM;
-		dma->xt.src_sgl = false;
-		dma->xt.dst_sgl = true;
-		dma->xt.dst_start = addr;
-	} else if (dma->queue.type == V4L2_BUF_TYPE_VIDEO_OUTPUT ||
-		   dma->queue.type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE) {
-		flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
-		dma->xt.dir = DMA_MEM_TO_DEV;
-		dma->xt.src_sgl = true;
-		dma->xt.dst_sgl = false;
-		dma->xt.src_start = addr;
-	}
-
-	/*
-	 * DMA IP supports only 2 planes, so one datachunk is sufficient
-	 * to get start address of 2nd plane
-	 */
-	pix_mp = &dma->format;
-	bpl = pix_mp->plane_fmt[0].bytesperline;
-
-	xilinx_xdma_v4l2_config(dma->dma, pix_mp->pixelformat);
-	dma->xt.frame_size = dma->fmtinfo->num_planes;
-
-	size = (size_t)dma->r.width * dma->fmtinfo->bytes_per_pixel[0].numerator
-	     / (size_t)dma->fmtinfo->bytes_per_pixel[0].denominator;
-	dma->sgl[0].size = size;
-
-	dma->sgl[0].icg = bpl - dma->sgl[0].size;
-	dma->xt.numf = dma->r.height;
-
-	/*
-	 * dst_icg is the number of bytes to jump after last luma addr
-	 * and before first chroma addr
-	 */
-
-	/* Handling contiguous data with mplanes */
-	if (dma->fmtinfo->num_buffers == 1) {
-		dma->sgl[0].dst_icg = (size_t)bpl *
-				      (pix_mp->height - dma->r.height);
-	} else {
-		/* Handling non-contiguous data with mplanes */
-		if (dma->fmtinfo->num_buffers == 2) {
-			dma_addr_t chroma_addr =
-				vb2_dma_contig_plane_dma_addr(vb, 1);
-			luma_size = bpl * dma->xt.numf;
-			if (chroma_addr > addr)
-				dma->sgl[0].dst_icg = chroma_addr -
-						      addr - luma_size;
-			}
-	}
-
-	desc = dmaengine_prep_interleaved_dma(dma->dma, &dma->xt, flags);
-	if (!desc) {
-		dev_err(dma->xdev->dev, "Failed to prepare DMA transfer\n");
-		vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_ERROR);
-		return;
-	}
-	desc->callback = xvip_dma_complete;
-	desc->callback_param = buf;
-	buf->desc = desc;
-
-	if (buf->buf.field == V4L2_FIELD_TOP)
-		fid = 1;
-	else if (buf->buf.field == V4L2_FIELD_BOTTOM)
-		fid = 0;
-	else if (buf->buf.field == V4L2_FIELD_NONE)
-		fid = 0;
-
-	xilinx_xdma_set_fid(dma->dma, desc, fid);
-
-	spin_lock_irq(&dma->queued_lock);
-	list_add_tail(&buf->queue, &dma->queued_bufs);
-	spin_unlock_irq(&dma->queued_lock);
-
-	dmaengine_submit(desc);
+	xvip_dma_submit_vb2_buffer(dma, buf);
 
 	if (vb2_is_streaming(&dma->queue))
 		dma_async_issue_pending(dma->dma);

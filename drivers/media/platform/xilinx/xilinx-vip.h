@@ -94,7 +94,6 @@ struct clk;
  * @flavor:  media bus format code for the same pixel layout but
  *	shifted to be 8 bits per pixel. =0 if format is not shiftable.
  * @fourcc: V4L2 pixel format FCC identifier
- * @bpl_factor: Bytes per line factor
  * @bits_per_pixel: bits per pixel
  * @bytes_per_pixel: Bytes per pixel for the first plane expressed as a
  *	fraction. The denominator is the minimum number of pixels that a row
@@ -112,7 +111,6 @@ struct xvip_video_format {
 	unsigned int code;
 	unsigned int flavor;
 	u32 fourcc;
-	unsigned int bpl_factor;
 	unsigned int bits_per_pixel;
 	struct v4l2_fract bytes_per_pixel;
 	u8 num_planes;

@@ -335,22 +335,6 @@ done:
  * videobuf2 queue operations
  */
 
-/**
- * struct xvip_dma_buffer - Video DMA buffer
- * @buf: vb2 buffer base object
- * @queue: buffer list entry in the DMA engine queued buffers list
- * @dma: DMA channel that uses the buffer
- * @desc: Descriptor associated with this structure
- */
-struct xvip_dma_buffer {
-	struct vb2_v4l2_buffer buf;
-	struct list_head queue;
-	struct xvip_dma *dma;
-	struct dma_async_tx_descriptor *desc;
-};
-
-#define to_xvip_dma_buffer(vb)	container_of(vb, struct xvip_dma_buffer, buf)
-
 static void xvip_dma_complete(void *param)
 {
 	struct xvip_dma_buffer *buf = param;

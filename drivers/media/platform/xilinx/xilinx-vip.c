@@ -34,7 +34,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 2, 2 },
 		.num_planes = 2,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 2,
 		.vsub = 2,
 	}, {
@@ -47,7 +47,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 2, 2 },
 		.num_planes = 2,
-		.buffers = 2,
+		.num_buffers = 2,
 		.hsub = 2,
 		.vsub = 2,
 	}, {
@@ -60,7 +60,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 8, 6 },
 		.num_planes = 2,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 2,
 		.vsub = 2,
 	}, {
@@ -73,7 +73,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 8, 6 },
 		.num_planes = 2,
-		.buffers = 2,
+		.num_buffers = 2,
 		.hsub = 2,
 		.vsub = 2,
 	}, {
@@ -86,7 +86,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 3, 2 },
 		.num_planes = 2,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 2,
 		.vsub = 2,
 	}, {
@@ -99,7 +99,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 3, 2 },
 		.num_planes = 2,
-		.buffers = 2,
+		.num_buffers = 2,
 		.hsub = 2,
 		.vsub = 2,
 	}, {
@@ -112,7 +112,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 4, 2 },
 		.num_planes = 2,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 2,
 		.vsub = 2,
 	}, {
@@ -125,7 +125,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 4, 2 },
 		.num_planes = 2,
-		.buffers = 2,
+		.num_buffers = 2,
 		.hsub = 2,
 		.vsub = 2,
 	}, {
@@ -138,7 +138,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 2, 2 },
 		.num_planes = 2,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 2,
 		.vsub = 1,
 	}, {
@@ -151,7 +151,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 2, 2 },
 		.num_planes = 2,
-		.buffers = 2,
+		.num_buffers = 2,
 		.hsub = 2,
 		.vsub = 1,
 	}, {
@@ -164,7 +164,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 4, 2 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 2,
 		.vsub = 1,
 	}, {
@@ -177,7 +177,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 4, 2 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 2,
 		.vsub = 1,
 	}, {
@@ -190,7 +190,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 8, 6 },
 		.num_planes = 2,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 2,
 		.vsub = 1,
 	}, {
@@ -203,7 +203,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 8, 6 },
 		.num_planes = 2,
-		.buffers = 2,
+		.num_buffers = 2,
 		.hsub = 2,
 		.vsub = 1,
 	}, {
@@ -216,7 +216,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 3, 2 },
 		.num_planes = 2,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 2,
 		.vsub = 1,
 	}, {
@@ -229,7 +229,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 3, 2 },
 		.num_planes = 2,
-		.buffers = 2,
+		.num_buffers = 2,
 		.hsub = 2,
 		.vsub = 1,
 	}, {
@@ -242,7 +242,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 4, 2 },
 		.num_planes = 2,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 2,
 		.vsub = 1,
 	}, {
@@ -255,7 +255,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 4, 2 },
 		.num_planes = 2,
-		.buffers = 2,
+		.num_buffers = 2,
 		.hsub = 2,
 		.vsub = 1,
 	}, {
@@ -268,7 +268,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 24,
 		.bytes_per_pixel = { 3, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -281,7 +281,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 32,
 		.bytes_per_pixel = { 4, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -294,7 +294,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 32,
 		.bytes_per_pixel = { 4, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -307,7 +307,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 24,
 		.bytes_per_pixel = { 10, 6 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -320,7 +320,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 24,
 		.bytes_per_pixel = { 10, 6 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -333,7 +333,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 24,
 		.bytes_per_pixel = { 4, 2 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -346,7 +346,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 24,
 		.bytes_per_pixel = { 4, 2 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -359,7 +359,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 24,
 		.bytes_per_pixel = { 3, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -372,7 +372,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 24,
 		.bytes_per_pixel = { 3, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -385,7 +385,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 32,
 		.bytes_per_pixel = { 4, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -398,7 +398,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 32,
 		.bytes_per_pixel = { 4, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -411,7 +411,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 32,
 		.bytes_per_pixel = { 4, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -424,7 +424,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 40,
 		.bytes_per_pixel = { 5, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -437,7 +437,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 48,
 		.bytes_per_pixel = { 6, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -450,7 +450,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 8,
 		.bytes_per_pixel = { 1, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -463,7 +463,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 32,
 		.bytes_per_pixel = { 4, 3 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -476,7 +476,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 5, 3 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -489,7 +489,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -502,7 +502,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 8,
 		.bytes_per_pixel = { 1, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -515,7 +515,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 8,
 		.bytes_per_pixel = { 1, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -528,7 +528,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 8,
 		.bytes_per_pixel = { 1, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -541,7 +541,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 8,
 		.bytes_per_pixel = { 1, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -554,7 +554,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 10,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -567,7 +567,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 10,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -580,7 +580,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 10,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -593,7 +593,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 10,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -606,7 +606,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -619,7 +619,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -632,7 +632,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -645,7 +645,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 12,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -658,7 +658,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -671,7 +671,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -684,7 +684,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	}, {
@@ -697,7 +697,7 @@ static const struct xvip_video_format xvip_video_formats[] = {
 		.bits_per_pixel = 16,
 		.bytes_per_pixel = { 2, 1 },
 		.num_planes = 1,
-		.buffers = 1,
+		.num_buffers = 1,
 		.hsub = 1,
 		.vsub = 1,
 	},

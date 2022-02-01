@@ -100,7 +100,7 @@ struct clk;
  *	must be a multiple of, and the numerator the number of bytes those
  *	pixels occupy in the first plane of the image.
  * @num_planes: number of planes w.r.t. color format
- * @buffers: number of buffers per format
+ * @num_buffers: number of buffers per format
  * @hsub: Horizontal sampling factor of Chroma
  * @vsub: Vertical sampling factor of Chroma
  */
@@ -114,7 +114,7 @@ struct xvip_video_format {
 	unsigned int bits_per_pixel;
 	struct v4l2_fract bytes_per_pixel;
 	u8 num_planes;
-	u8 buffers;
+	u8 num_buffers;
 	u8 hsub;
 	u8 vsub;
 };

@@ -924,7 +924,12 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 		unsigned int width, height;
 		u32 bpl;
 
-		width = pix_mp->width / (i ? info->hsub : 1);
+		/*
+		 * Multiple hsub by two for the second plane as all supported
+		 * multi-planar formats are semi-planar and store both U and V
+		 * in the second plane.
+		 */
+		width = pix_mp->width / (i ? info->hsub * 2 : 1);
 		height = pix_mp->height / (i ? info->vsub : 1);
 
 		min_bpl = width * info->bytes_per_pixel.numerator

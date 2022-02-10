@@ -132,6 +132,7 @@
  * @hsize: Horizontal Size
  * @stride: Number of bytes between the first
  *	    pixels of each horizontal line
+ * @fmt_id: Format ID
  */
 struct xilinx_frmbuf_desc_hw {
 	dma_addr_t luma_plane_addr;
@@ -139,6 +140,7 @@ struct xilinx_frmbuf_desc_hw {
 	u32 vsize;
 	u32 hsize;
 	u32 stride;
+	u32 fmt_id;
 };
 
 /**
@@ -1261,7 +1263,7 @@ static void xilinx_frmbuf_start_transfer(struct xilinx_frmbuf_chan *chan)
 	frmbuf_write(chan, XILINX_FRMBUF_WIDTH_OFFSET, desc->hw.hsize);
 	frmbuf_write(chan, XILINX_FRMBUF_STRIDE_OFFSET, desc->hw.stride);
 	frmbuf_write(chan, XILINX_FRMBUF_HEIGHT_OFFSET, desc->hw.vsize);
-	frmbuf_write(chan, XILINX_FRMBUF_FMT_OFFSET, chan->vid_fmt->id);
+	frmbuf_write(chan, XILINX_FRMBUF_FMT_OFFSET, desc->hw.fmt_id);
 
 	/* If it is framebuffer read IP set the FID */
 	if (chan->direction == DMA_MEM_TO_DEV && chan->hw_fid)
@@ -1468,6 +1470,7 @@ xilinx_frmbuf_dma_prep_interleaved(struct dma_chan *dchan,
 	hw->stride = xt->sgl[0].icg + xt->sgl[0].size;
 	hw->hsize = (xt->sgl[0].size * chan->vid_fmt->ppw * 8) /
 		     chan->vid_fmt->bpw;
+	hw->fmt_id = chan->vid_fmt->id;
 
 	/* hsize calc should not have resulted in an odd number */
 	if (hw->hsize & 1)

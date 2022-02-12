@@ -95,13 +95,13 @@ struct clk;
  *	shifted to be 8 bits per pixel. =0 if format is not shiftable.
  * @fourcc: V4L2 pixel format FCC identifier
  * @bits_per_pixel: bits per pixel
- * @bytes_per_pixel: Bytes per pixel for the first plane expressed as a
- *	fraction. The denominator is the minimum number of pixels that a row
- *	must be a multiple of, and the numerator the number of bytes those
- *	pixels occupy in the first plane of the image.
+ * @bytes_per_pixel: Bytes per pixel for each plane expressed as a fraction.
+ *	The denominator is the minimum number of pixels that a row must be a
+ *	multiple of, and the numerator the number of bytes those pixels occupy
+ *	per plane of the image. The denominator values must be identical for
+ *	all planes.
  * @num_planes: number of planes w.r.t. color format
  * @num_buffers: number of buffers per format
- * @hsub: Horizontal sampling factor of Chroma
  * @vsub: Vertical sampling factor of Chroma
  */
 struct xvip_video_format {
@@ -112,10 +112,9 @@ struct xvip_video_format {
 	unsigned int flavor;
 	u32 fourcc;
 	unsigned int bits_per_pixel;
-	struct v4l2_fract bytes_per_pixel;
+	struct v4l2_fract bytes_per_pixel[3];
 	u8 num_planes;
 	u8 num_buffers;
-	u8 hsub;
 	u8 vsub;
 };
 

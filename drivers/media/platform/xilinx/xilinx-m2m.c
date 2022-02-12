@@ -921,24 +921,18 @@ static int __xvip_m2m_try_fmt(struct xvip_m2m_dma *dma, struct v4l2_format *f)
 	/* Calculate the bytesperline and sizeimage values for each plane. */
 	for (i = 0; i < info->num_planes; i++) {
 		struct v4l2_plane_pix_format *plane = &pix_mp->plane_fmt[i];
-		unsigned int width, height;
 		u32 bpl;
 
-		/*
-		 * Multiple hsub by two for the second plane as all supported
-		 * multi-planar formats are semi-planar and store both U and V
-		 * in the second plane.
-		 */
-		width = pix_mp->width / (i ? info->hsub * 2 : 1);
-		height = pix_mp->height / (i ? info->vsub : 1);
-
-		min_bpl = width * info->bytes_per_pixel.numerator
-			/ info->bytes_per_pixel.denominator;
+		min_bpl = pix_mp->width
+			* info->bytes_per_pixel[i].numerator
+			/ info->bytes_per_pixel[i].denominator;
 		min_bpl = roundup(min_bpl, align);
 
 		bpl = rounddown(plane_fmt[i].bytesperline, align);
 		plane->bytesperline = clamp(bpl, min_bpl, max_bpl);
-		plane->sizeimage = plane->bytesperline * height;
+
+		plane->sizeimage = plane->bytesperline * pix_mp->height
+				 / (i ? info->vsub : 1);
 	}
 
 	/*
@@ -1211,8 +1205,8 @@ static void xvip_m2m_prep_submit_dev2mem_desc(struct xvip_m2m_ctx *ctx,
 	xilinx_xdma_v4l2_config(dma->chan_rx, pix_mp->pixelformat);
 
 	ctx->xt.frame_size = info->num_planes;
-	ctx->sgl[0].size = dst_width * info->bytes_per_pixel.numerator
-			 / info->bytes_per_pixel.denominator;
+	ctx->sgl[0].size = dst_width * info->bytes_per_pixel[0].numerator
+			 / info->bytes_per_pixel[0].denominator;
 	ctx->sgl[0].icg = bpl - ctx->sgl[0].size;
 	ctx->xt.numf = dst_height;
 
@@ -1295,8 +1289,8 @@ static void xvip_m2m_prep_submit_mem2dev_desc(struct xvip_m2m_ctx *ctx,
 	xilinx_xdma_v4l2_config(dma->chan_tx, pix_mp->pixelformat);
 
 	ctx->xt.frame_size = info->num_planes;
-	ctx->sgl[0].size = src_width * info->bytes_per_pixel.numerator
-			 / info->bytes_per_pixel.denominator;
+	ctx->sgl[0].size = src_width * info->bytes_per_pixel[0].numerator
+			 / info->bytes_per_pixel[0].denominator;
 	ctx->sgl[0].icg = bpl - ctx->sgl[0].size;
 	ctx->xt.numf = src_height;
 

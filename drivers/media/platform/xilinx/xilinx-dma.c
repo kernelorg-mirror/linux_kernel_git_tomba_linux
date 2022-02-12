@@ -465,8 +465,8 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 	xilinx_xdma_v4l2_config(dma->dma, pix_mp->pixelformat);
 	dma->xt.frame_size = dma->fmtinfo->num_planes;
 
-	size = (size_t)dma->r.width * dma->fmtinfo->bytes_per_pixel.numerator
-	     / (size_t)dma->fmtinfo->bytes_per_pixel.denominator;
+	size = (size_t)dma->r.width * dma->fmtinfo->bytes_per_pixel[0].numerator
+	     / (size_t)dma->fmtinfo->bytes_per_pixel[0].denominator;
 	dma->sgl[0].size = size;
 
 	dma->sgl[0].icg = bpl - dma->sgl[0].size;
@@ -784,7 +784,7 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 	const struct xvip_video_format *info;
 	unsigned int min_width, max_width;
 	unsigned int min_bpl, max_bpl;
-	unsigned int width, height;
+	unsigned int width;
 	unsigned int i;
 
 
@@ -826,21 +826,15 @@ __xvip_dma_try_format(const struct xvip_dma *dma,
 		struct v4l2_plane_pix_format *plane = &pix_mp->plane_fmt[i];
 		unsigned int bpl;
 
-		/*
-		 * Multiple hsub by two for the second plane as all supported
-		 * multi-planar formats are semi-planar and store both U and V
-		 * in the second plane.
-		 */
-		width = pix_mp->width / (i ? info->hsub * 2 : 1);
-		height = pix_mp->height / (i ? info->vsub : 1);
-
-		min_bpl = width * info->bytes_per_pixel.numerator
-			/ info->bytes_per_pixel.denominator;
+		min_bpl = pix_mp->width * info->bytes_per_pixel[i].numerator
+			/ info->bytes_per_pixel[i].denominator;
 		min_bpl = roundup(min_bpl, dma->align);
 
 		bpl = rounddown(plane->bytesperline, dma->align);
 		plane->bytesperline = clamp(bpl, min_bpl, max_bpl);
-		plane->sizeimage = plane->bytesperline * height;
+
+		plane->sizeimage = plane->bytesperline * pix_mp->height
+				 / (i ? info->vsub : 1);
 	}
 
 	/*

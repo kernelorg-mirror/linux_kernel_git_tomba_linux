@@ -72,19 +72,29 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
 	if (ret < 0)
 		return ret == -ENOIOCTLCMD ? -EINVAL : ret;
 
-	if (dma->fmtinfo->code != fmt.format.code)
+	if (dma->fmtinfo->code != fmt.format.code) {
+		dev_dbg(dma->xdev->dev, "%s(): code mismatch 0x%04x != 0x%04x\n",
+			__func__, fmt.format.code, dma->fmtinfo->code);
 		return -EINVAL;
+	}
 
 	/*
 	 * Crop rectangle contains format resolution by default, and crop
 	 * rectangle if s_selection is executed.
 	 */
 	if (dma->r.width != fmt.format.width ||
-	    dma->r.height != fmt.format.height)
+	    dma->r.height != fmt.format.height) {
+		dev_dbg(dma->xdev->dev, "%s(): size mismatch %ux%u != %ux%u\n",
+			__func__, fmt.format.width, fmt.format.height,
+			dma->r.width, dma->r.height);
 		return -EINVAL;
+	}
 
-	if (fmt.format.field != dma->format.field)
+	if (fmt.format.field != dma->format.field) {
+		dev_dbg(dma->xdev->dev, "%s(): field mismatch %u != %u\n",
+			__func__, fmt.format.field, dma->format.field);
 		return -EINVAL;
+	}
 
 	return 0;
 }

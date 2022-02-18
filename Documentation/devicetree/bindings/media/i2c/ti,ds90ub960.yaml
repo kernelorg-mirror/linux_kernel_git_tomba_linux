@@ -17,6 +17,7 @@ properties:
   compatible:
     enum:
       - ti,ds90ub960-q1
+      - ti,ds90ub9702-q1
 
   reg:
     minItems: 1
@@ -76,6 +77,9 @@ properties:
               rx-mode:
                 description: FPD3 Input Mode
 
+              cdr-mode:
+                description: FPD4 CDR Mode
+
               strobe-pos:
                 description: Manual strobe position
 
@@ -101,6 +105,9 @@ properties:
             properties:
               rx-mode:
                 description: FPD3 Input Mode
+
+              cdr-mode:
+                description: FPD4 CDR Mode
 
               strobe-pos:
                 description: Manual strobe position
@@ -128,6 +135,9 @@ properties:
               rx-mode:
                 description: FPD3 Input Mode
 
+              cdr-mode:
+                description: FPD4 CDR Mode
+
               strobe-pos:
                 description: Manual strobe position
 
@@ -153,6 +163,9 @@ properties:
             properties:
               rx-mode:
                 description: FPD3 Input Mode
+
+              cdr-mode:
+                description: FPD4 CDR Mode
 
               strobe-pos:
                 description: Manual strobe position

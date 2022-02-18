@@ -224,7 +224,9 @@
 #define UB960_SR_CSI_LINE_ERR_COUNT_HI(n)	(0x96 + 8 * (n))
 #define UB960_SR_CSI_LINE_ERR_COUNT_LO(n)	(0x97 + 8 * (n))
 
-#define UB960_XR_REFCLK_FREQ			0xA5
+#define UB960_XR_REFCLK_FREQ			0xA5	/* UB960 */
+
+#define UB960_RR_VC_ID_MAP(x)			(0xa0 + (x)) /* UB9702 */
 
 #define UB960_SR_IND_ACC_CTL			0xB0
 #define UB960_SR_IND_ACC_CTL_IA_AUTO_INC	BIT(1)
@@ -237,6 +239,9 @@
 #define UB960_SR_FPD3_ENC_CTL			0xBA
 #define UB960_SR_FV_MIN_TIME			0xBC
 #define UB960_SR_GPIO_PD_CTL			0xBE
+
+#define UB960_SR_FPD_RATE_CFG			0xc2	/* UB9702 */
+#define UB960_SR_CSI_PLL_DIV			0xc9	/* UB9702 */
 
 #define UB960_RR_PORT_DEBUG			0xD0
 #define UB960_RR_AEQ_CTL2			0xD2
@@ -254,12 +259,16 @@
 #define UB960_RR_SEN_INT_RISE_STS		0xDE
 #define UB960_RR_SEN_INT_FALL_STS		0xDF
 
+#define UB960_RR_CHANNEL_MODE			0xe4	/* UB9702 */
+
 #define UB960_SR_FPD3_RX_ID(n)			(0xF0 + (n))
+
 #define UB960_SR_I2C_RX_ID(n)			(0xF8 + (n)) /* < UB960_FPD_RX_NPORTS */
 
 /* Indirect register blocks */
 #define UB960_IND_TARGET_PAT_GEN		0x00
 #define UB960_IND_TARGET_RX_ANA(n)		(0x01 + (n))
+#define UB960_IND_TARGET_CSI_CSIPLL_REG_1	0x92	/* UB9702 */
 #define UB960_IND_TARGET_CSI_ANA		0x07
 
 /* UB960_IR_PGEN_*: Indirect Registers for Test Pattern Generator */
@@ -303,6 +312,8 @@ struct ub960_hw_data {
 	const char *model;
 	u8 num_rxports;
 	u8 num_txports;
+	bool ub9702;
+	bool fpdlink4;
 };
 
 enum ub960_rxport_mode {
@@ -314,6 +325,12 @@ enum ub960_rxport_mode {
 	RXPORT_MODE_LAST = RXPORT_MODE_CSI2_ASYNC,
 };
 
+enum ub960_rxport_cdr {
+	RXPORT_CDR_FPD3 = 0,
+	RXPORT_CDR_FPD4 = 1,
+	RXPORT_CDR_LAST = RXPORT_CDR_FPD4,
+};
+
 struct ub960_rxport {
 	struct ub960_data      *priv;
 	u8                      nport;	/* RX port number, and index in priv->rxport[] */
@@ -322,6 +339,7 @@ struct ub960_rxport {
 	struct fwnode_handle   *fwnode;
 
 	enum ub960_rxport_mode  rx_mode;
+	enum ub960_rxport_cdr	cdr_mode;
 
 	struct device_node     *remote_of_node;	/* "remote-chip" OF node */
 	struct i2c_client      *ser_client;	/* remote serializer */
@@ -1594,6 +1612,7 @@ static int ub960_rxport_probe_one(struct ub960_data *priv,
 	struct ub960_rxport *rxport;
 	int ret;
 	u32 rx_mode;
+	u32 cdr_mode;
 	s32 strobe_pos;
 	u32 eq_level;
 
@@ -1628,6 +1647,27 @@ static int ub960_rxport_probe_one(struct ub960_data *priv,
 			goto err_free_rxport;
 		}
 	}
+
+	ret = of_property_read_u32(np, "cdr-mode", &cdr_mode);
+	if (ret == -EINVAL) {
+		cdr_mode = RXPORT_CDR_FPD3;
+	} else if (ret < 0) {
+		dev_err(dev, "Failed to get RX port CDR mode: %d\n", ret);
+		goto err_free_rxport;
+	}
+
+	if (cdr_mode > RXPORT_CDR_LAST) {
+		dev_err(dev, "Bad RX port cdr %u\n", cdr_mode);
+		goto err_free_rxport;
+	}
+
+	if (!priv->hw_data->fpdlink4 && cdr_mode == RXPORT_CDR_FPD4) {
+		dev_err(dev, "FPD-Link 4 CDR not supported on RX port %u\n",
+			nport);
+		goto err_free_rxport;
+	}
+
+	rxport->cdr_mode = cdr_mode;
 
 	ret = of_property_read_u32(np, "rx-mode", &rx_mode);
 	if (ret < 0) {
@@ -1724,24 +1764,50 @@ static int ub960_init_tx_ports(struct ub960_data *priv)
 {
 	unsigned int nport;
 	u8 speed_select;
+	u8 pll_div;
+
+	/* TX ports */
 
 	switch (priv->tx_data_rate) {
 	case 1600000000:
 	default:
 		speed_select = 0;
+		pll_div = 0x10;
 		break;
 	case 1200000000:
 		speed_select = 1;
 		break;
 	case 800000000:
 		speed_select = 2;
+		pll_div = 0x10;
 		break;
 	case 400000000:
 		speed_select = 3;
+		pll_div = 0x10;
 		break;
 	}
 
 	ub960_write(priv, UB960_SR_CSI_PLL_CTL, speed_select);
+
+	if (priv->hw_data->ub9702) {
+		ub960_write(priv, UB960_SR_CSI_PLL_DIV, pll_div);
+
+		switch (priv->tx_data_rate) {
+		case 1600000000:
+		default:
+			ub960_write_ind(priv, UB960_IND_TARGET_CSI_ANA, 0x92, 0x80);
+			ub960_write_ind(priv, UB960_IND_TARGET_CSI_ANA, 0x4B, 0x2A);
+			break;
+		case 800000000:
+			ub960_write_ind(priv, UB960_IND_TARGET_CSI_ANA, 0x92, 0x90);
+			ub960_write_ind(priv, UB960_IND_TARGET_CSI_ANA, 0x4F, 0x2A);
+			ub960_write_ind(priv, UB960_IND_TARGET_CSI_ANA, 0x4B, 0x2A);
+			break;
+		case 400000000:
+			ub960_write_ind(priv, UB960_IND_TARGET_CSI_ANA, 0x92, 0xA0);
+			break;
+		}
+	}
 
 	for (nport = 0; nport < priv->hw_data->num_txports; nport++) {
 		struct ub960_txport *txport = priv->txports[nport];
@@ -1755,7 +1821,7 @@ static int ub960_init_tx_ports(struct ub960_data *priv)
 	return 0;
 }
 
-static void ub960_init_rx_port(struct ub960_data *priv, struct ub960_rxport *rxport)
+static void ub960_init_rx_port_ub960(struct ub960_data *priv, struct ub960_rxport *rxport)
 {
 	unsigned int nport = rxport->nport;
 	u32 bc_freq_val;
@@ -1845,6 +1911,217 @@ static void ub960_init_rx_port(struct ub960_data *priv, struct ub960_rxport *rxp
 	ub960_update_bits(priv, UB960_SR_RX_PORT_CTL, BIT(nport), BIT(nport));
 }
 
+static void ub960_init_rx_port_ub9702_fpd3(struct ub960_data *priv, struct ub960_rxport *rxport)
+{
+	unsigned int nport = rxport->nport;
+	u8 bc_freq_val;
+	u8 fpd_func_mode;
+
+	switch (rxport->rx_mode) {
+	case RXPORT_MODE_RAW10:
+		bc_freq_val = 0;
+		fpd_func_mode = 5;
+		break;
+
+	case RXPORT_MODE_RAW12_HF:
+		bc_freq_val = 0;
+		fpd_func_mode = 4;
+		break;
+
+	case RXPORT_MODE_RAW12_LF:
+		bc_freq_val = 0;
+		fpd_func_mode = 6;
+		break;
+
+	case RXPORT_MODE_CSI2_SYNC:
+		bc_freq_val = 6;
+		fpd_func_mode = 2;
+		break;
+
+	case RXPORT_MODE_CSI2_ASYNC:
+		bc_freq_val = 2;
+		fpd_func_mode = 2;
+		break;
+
+	default:
+		WARN_ON(true);
+		break;
+	}
+
+	ub960_rxport_update_bits(priv, nport, UB960_RR_BCC_CONFIG, 0x7, bc_freq_val);
+	ub960_rxport_write(priv, nport, UB960_RR_CHANNEL_MODE, fpd_func_mode);
+
+	/* set serdes_eq_mode = 1 */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0xA8, 0x80);
+
+	/* enable serdes driver */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x0D, 0x7F);
+
+	/* set serdes_eq_offset=4 */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x2B, 0x04);
+
+	/* init default serdes_eq_max in 0xA9 */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0xA9, 0x23);
+
+	/* init serdes_eq_min in 0xAA */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0xAA, 0);
+
+	/* serdes_driver_ctl2 control: DS90UB953-Q1/DS90UB933-Q1/DS90UB913A-Q1 */
+	ub960_ind_update_bits(priv, UB960_IND_TARGET_RX_ANA(nport), 0x1b, BIT(3), BIT(3));
+
+	/* RX port to half-rate */
+	ub960_update_bits(priv, UB960_SR_FPD_RATE_CFG, 0x3 << (nport * 2), 1 << (nport * 2));
+}
+
+static void ub960_init_rx_port_ub9702_fpd4_aeq(struct ub960_data *priv, struct ub960_rxport *rxport)
+{
+	unsigned int nport = rxport->nport;
+	bool first_time_power_up = true;
+
+	if (first_time_power_up) {
+		u8 v;
+
+		/* AEQ init */
+		ub960_read_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x2C, &v);
+
+		ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x27, v);
+		ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x28, v + 1);
+
+		ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x2B, 0x00);
+	}
+
+	/* enable serdes_eq_ctl2 */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x9E, 0x00);
+
+	/* enable serdes_eq_ctl1 */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x90, 0x40);
+
+	/* enable serdes_eq_en */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x2E, 0x40);
+
+	/* disable serdes_eq_override */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0xF0, 0x00);
+
+	/* disable serdes_gain_override */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x71, 0x00);
+}
+
+static void ub960_init_rx_port_ub9702_fpd4(struct ub960_data *priv, struct ub960_rxport *rxport)
+{
+	unsigned int nport = rxport->nport;
+	u8 bc_freq_val;
+
+	switch (rxport->rx_mode) {
+	case RXPORT_MODE_RAW10:
+		bc_freq_val = 0;
+		break;
+
+	case RXPORT_MODE_RAW12_HF:
+		bc_freq_val = 0;
+		break;
+
+	case RXPORT_MODE_RAW12_LF:
+		bc_freq_val = 0;
+		break;
+
+	case RXPORT_MODE_CSI2_SYNC:
+		bc_freq_val = 6;
+		break;
+
+	case RXPORT_MODE_CSI2_ASYNC:
+		bc_freq_val = 2;
+		break;
+
+	default:
+		WARN_ON(true);
+		break;
+	}
+
+	ub960_rxport_update_bits(priv, nport, UB960_RR_BCC_CONFIG, 0x7, bc_freq_val);
+
+	/* FPD4 Sync Mode */
+	ub960_rxport_write(priv, nport, UB960_RR_CHANNEL_MODE, 0);
+
+	/* add serdes_eq_offset of 4 */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x2B, 0x04);
+
+	/* FPD4 serdes_start_eq in 0x27: assign default */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x27, 0x0);
+	/* FPD4 serdes_end_eq in 0x28: assign default */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x28, 0x23);
+
+	/* set serdes_driver_mode into FPD IV mode */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x04, 0x00);
+	/* set FPD PBC drv into FPD IV mode */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x1B, 0x00);
+
+	/* set serdes_system_init to 0x2f */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x21, 0x2f);
+	/* set serdes_system_rst in reset mode */
+	ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x25, 0xC1);
+
+	/* RX port to 7.55G mode */
+	ub960_update_bits(priv, UB960_SR_FPD_RATE_CFG,
+			  0x3 << (nport * 2), 0 << (nport * 2));
+
+	ub960_init_rx_port_ub9702_fpd4_aeq(priv, rxport);
+}
+
+static void ub960_init_rx_port_ub9702(struct ub960_data *priv, struct ub960_rxport *rxport)
+{
+	unsigned int nport = rxport->nport;
+
+	if (rxport->cdr_mode == RXPORT_CDR_FPD3)
+		ub960_init_rx_port_ub9702_fpd3(priv, rxport);
+	else /* RXPORT_CDR_FPD4 */
+		ub960_init_rx_port_ub9702_fpd4(priv, rxport);
+
+	switch (rxport->rx_mode) {
+	default:
+		WARN_ON(true);
+		fallthrough;
+
+	case RXPORT_MODE_RAW10:
+		/*
+		 * RAW10_8BIT_CTL = 0b11 : 8-bit processing using lower 8 bits
+		 * 0b10 : 8-bit processing using upper 8 bits
+		 */
+		ub960_rxport_update_bits(priv, nport, UB960_RR_PORT_CONFIG2,
+					 0x3 << 6, 0x2 << 6);
+
+		break;
+
+	case RXPORT_MODE_CSI2_SYNC:
+	case RXPORT_MODE_CSI2_ASYNC:
+
+		break;
+	}
+
+	/* LV_POLARITY & FV_POLARITY */
+	ub960_rxport_update_bits(priv, nport, UB960_RR_PORT_CONFIG2, 0x3, 0x1);
+
+	/* Enable all interrupt sources from this port */
+	ub960_rxport_write(priv, nport, UB960_RR_PORT_ICR_HI, 0x07);
+	ub960_rxport_write(priv, nport, UB960_RR_PORT_ICR_LO, 0x7f);
+
+	/* Enable I2C_PASS_THROUGH */
+	ub960_rxport_update_bits(priv, nport, UB960_RR_BCC_CONFIG,
+				 UB960_RR_BCC_CONFIG_I2C_PASS_THROUGH,
+				 UB960_RR_BCC_CONFIG_I2C_PASS_THROUGH);
+
+	/* Enable I2C communication to the serializer via the alias addr */
+	ub960_rxport_write(priv, nport, UB960_RR_SER_ALIAS_ID,
+			   rxport->ser_alias << 1);
+
+	/* Enable RX port */
+	ub960_update_bits(priv, UB960_SR_RX_PORT_CTL, BIT(nport), BIT(nport));
+
+	if (rxport->cdr_mode == RXPORT_CDR_FPD4) {
+		/* unreset 960 AEQ */
+		ub960_write_ind(priv, UB960_IND_TARGET_RX_ANA(nport), 0x25, 0x41);
+	}
+}
+
 static int ub960_init_rx_ports(struct ub960_data *priv)
 {
 	unsigned int nport;
@@ -1855,7 +2132,10 @@ static int ub960_init_rx_ports(struct ub960_data *priv)
 		if (!rxport)
 			continue;
 
-		ub960_init_rx_port(priv, rxport);
+		if (priv->hw_data->ub9702)
+			ub960_init_rx_port_ub9702(priv, rxport);
+		else
+			ub960_init_rx_port_ub960(priv, rxport);
 	}
 
 	return 0;
@@ -2172,10 +2452,18 @@ static int ub960_configure_ports_for_streaming(struct ub960_data *priv,
 
 		case RXPORT_MODE_CSI2_SYNC:
 		case RXPORT_MODE_CSI2_ASYNC:
-			/* Map all VCs from this port to the same VC */
-			ub960_rxport_write(priv, nport, UB960_RR_CSI_VC_MAP,
-					   (vc << 6) | (vc << 4) |
-						   (vc << 2) | (vc << 0));
+			if (!priv->hw_data->ub9702) {
+				/* Map all VCs from this port to the same VC */
+				ub960_rxport_write(priv, nport, UB960_RR_CSI_VC_MAP,
+						   (vc << 6) | (vc << 4) |
+							   (vc << 2) | (vc << 0));
+			} else {
+				unsigned int i;
+
+				/* Map all VCs from this port to VC(nport) */
+				for (i = 0; i < 8; ++i)
+					ub960_rxport_write(priv, nport, UB960_RR_VC_ID_MAP(i), nport);
+			}
 
 			break;
 		}
@@ -3559,6 +3847,10 @@ static int ub960_probe(struct i2c_client *client)
 	if (ret)
 		goto err_mutex_destroy;
 
+	/* release GPIO lock */
+	if (priv->hw_data->ub9702)
+		ub960_update_bits(priv, UB960_SR_RESET, BIT(5), BIT(5));
+
 	ret = ub960_atr_probe(priv);
 	if (ret)
 		goto err_atr_probe;
@@ -3677,8 +3969,17 @@ static const struct ub960_hw_data ds90ub960_hw = {
 	.num_txports = 2,
 };
 
+static const struct ub960_hw_data ds90ub9702_hw = {
+	.model = "ub9702",
+	.num_rxports = 4,
+	.num_txports = 2,
+	.ub9702 = true,
+	.fpdlink4 = true,
+};
+
 static const struct i2c_device_id ub960_id[] = {
 	{ "ds90ub960-q1", 0 },
+	{ "ds90ub9702-q1", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, ub960_id);
@@ -3686,6 +3987,7 @@ MODULE_DEVICE_TABLE(i2c, ub960_id);
 #ifdef CONFIG_OF
 static const struct of_device_id ub960_dt_ids[] = {
 	{ .compatible = "ti,ds90ub960-q1", .data = &ds90ub960_hw },
+	{ .compatible = "ti,ds90ub9702-q1", .data = &ds90ub9702_hw },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, ub960_dt_ids);

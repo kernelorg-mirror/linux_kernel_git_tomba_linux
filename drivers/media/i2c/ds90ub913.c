@@ -571,9 +571,9 @@ static int ub913_v4l2_notifier_register(struct ub913_data *priv)
 		return -ENODEV;
 	}
 
-	v4l2_async_nf_init(&priv->notifier);
+	v4l2_async_notifier_init(&priv->notifier);
 
-	asd = v4l2_async_nf_add_fwnode_remote(
+	asd = v4l2_async_notifier_add_fwnode_remote_subdev(
 		&priv->notifier, of_fwnode_handle(ep_node),
 		struct v4l2_async_subdev);
 
@@ -581,30 +581,30 @@ static int ub913_v4l2_notifier_register(struct ub913_data *priv)
 
 	if (IS_ERR(asd)) {
 		dev_err(dev, "Failed to add subdev: %ld", PTR_ERR(asd));
-		v4l2_async_nf_cleanup(&priv->notifier);
+		v4l2_async_notifier_cleanup(&priv->notifier);
 		return PTR_ERR(asd);
 	}
 
 	priv->notifier.ops = &ub913_notify_ops;
 
-	ret = v4l2_async_subdev_nf_register(&priv->sd, &priv->notifier);
+	ret = v4l2_async_subdev_notifier_register(&priv->sd, &priv->notifier);
 	if (ret) {
 		dev_err(dev, "Failed to register subdev_notifier");
-		v4l2_async_nf_cleanup(&priv->notifier);
+		v4l2_async_notifier_cleanup(&priv->notifier);
 		return ret;
 	}
 
 	return 0;
 }
 
-static void ub913_v4l2_nf_unregister(struct ub913_data *priv)
+static void ub913_v4l2_notifier_unregister(struct ub913_data *priv)
 {
 	struct device *dev = &priv->client->dev;
 
 	dev_dbg(dev, "Unregister async notif\n");
 
-	v4l2_async_nf_unregister(&priv->notifier);
-	v4l2_async_nf_cleanup(&priv->notifier);
+	v4l2_async_notifier_unregister(&priv->notifier);
+	v4l2_async_notifier_cleanup(&priv->notifier);
 }
 
 static int ub913_i2c_init(struct ub913_data *priv)
@@ -735,7 +735,7 @@ static int ub913_probe(struct i2c_client *client)
 	return 0;
 
 err_unreg_notif:
-	ub913_v4l2_nf_unregister(priv);
+	ub913_v4l2_notifier_unregister(priv);
 err_free_state:
 	v4l2_subdev_cleanup(&priv->sd);
 err_entity_cleanup:
@@ -756,7 +756,7 @@ static int ub913_remove(struct i2c_client *client)
 
 	dev_dbg(&client->dev, "Removing\n");
 
-	ub913_v4l2_nf_unregister(priv);
+	ub913_v4l2_notifier_unregister(priv);
 	v4l2_async_unregister_subdev(&priv->sd);
 
 	v4l2_subdev_cleanup(&priv->sd);

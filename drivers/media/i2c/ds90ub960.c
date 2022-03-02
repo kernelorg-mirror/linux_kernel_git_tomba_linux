@@ -3189,7 +3189,7 @@ static int ub960_v4l2_notifier_register(struct ub960_data *priv)
 	unsigned int i;
 	int ret;
 
-	v4l2_async_nf_init(&priv->notifier);
+	v4l2_async_notifier_init(&priv->notifier);
 
 	for (i = 0; i < priv->hw_data->num_rxports; ++i) {
 		struct ub960_rxport *rxport = priv->rxports[i];
@@ -3198,12 +3198,12 @@ static int ub960_v4l2_notifier_register(struct ub960_data *priv)
 		if (!rxport)
 			continue;
 
-		asd = v4l2_async_nf_add_fwnode(&priv->notifier, rxport->fwnode,
+		asd = v4l2_async_notifier_add_fwnode_subdev(&priv->notifier, rxport->fwnode,
 					       struct ub960_asd);
 		if (IS_ERR(asd)) {
 			dev_err(dev, "Failed to add subdev for source %u: %ld",
 				i, PTR_ERR(asd));
-			v4l2_async_nf_cleanup(&priv->notifier);
+			v4l2_async_notifier_cleanup(&priv->notifier);
 			return PTR_ERR(asd);
 		}
 
@@ -3212,10 +3212,10 @@ static int ub960_v4l2_notifier_register(struct ub960_data *priv)
 
 	priv->notifier.ops = &ub960_notify_ops;
 
-	ret = v4l2_async_subdev_nf_register(&priv->sd, &priv->notifier);
+	ret = v4l2_async_subdev_notifier_register(&priv->sd, &priv->notifier);
 	if (ret) {
 		dev_err(dev, "Failed to register subdev_notifier");
-		v4l2_async_nf_cleanup(&priv->notifier);
+		v4l2_async_notifier_cleanup(&priv->notifier);
 		return ret;
 	}
 
@@ -3228,8 +3228,8 @@ static void ub960_v4l2_notifier_unregister(struct ub960_data *priv)
 
 	dev_dbg(dev, "Unregister async notif\n");
 
-	v4l2_async_nf_unregister(&priv->notifier);
-	v4l2_async_nf_cleanup(&priv->notifier);
+	v4l2_async_notifier_unregister(&priv->notifier);
+	v4l2_async_notifier_cleanup(&priv->notifier);
 }
 
 static int ub960_create_subdev(struct ub960_data *priv)

@@ -2210,7 +2210,7 @@ static int ub960_configure_ports_for_streaming(struct ub960_data *priv,
 		if (rx_data[nport].num_streams > 2)
 			return -EPIPE;
 
-		fmt = v4l2_subdev_state_get_stream_format(state, route->sink_pad,
+		fmt = v4l2_state_get_stream_format(state, route->sink_pad,
 							  route->sink_stream);
 		if (!fmt)
 			return -EPIPE;
@@ -2404,7 +2404,7 @@ static int ub960_s_stream(struct v4l2_subdev *sd, int enable)
 	unsigned int nport;
 	int ret = 0;
 
-	state = v4l2_subdev_lock_and_get_active_state(sd);
+	state = v4l2_subdev_lock_active_state(sd);
 
 	routing = &state->routing;
 
@@ -2484,12 +2484,16 @@ static int _ub960_set_routing(struct v4l2_subdev *sd,
 	 * TODO: We need a new flag to validate that all streams from a sink pad
 	 * go to a single source pad.
 	 */
-	ret = v4l2_subdev_routing_validate(sd, routing,
-					   V4L2_SUBDEV_ROUTING_ONLY_1_TO_1);
+	ret = v4l2_routing_simple_verify(routing);
 	if (ret)
 		return ret;
 
+	v4l2_subdev_lock_state(state);
+
 	ret = v4l2_subdev_set_routing_with_fmt(sd, state, routing, &format);
+
+	v4l2_subdev_unlock_state(state);
+
 	if (ret)
 		return ret;
 
@@ -2547,7 +2551,7 @@ static int ub960_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 	if (!ub960_pad_is_source(priv, pad))
 		return -EINVAL;
 
-	state = v4l2_subdev_lock_and_get_active_state(&priv->sd);
+	state = v4l2_subdev_lock_active_state(&priv->sd);
 
 	ub960_get_vc_maps(priv, state, vc_map);
 
@@ -2607,7 +2611,7 @@ static int ub960_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 			const struct ub960_format_info *ub960_fmt;
 			struct v4l2_mbus_framefmt *fmt;
 
-			fmt = v4l2_subdev_state_get_stream_format(
+			fmt = v4l2_state_get_stream_format(
 				state, pad, route->source_stream);
 
 			if (!fmt) {
@@ -2649,20 +2653,24 @@ static int ub960_set_fmt(struct v4l2_subdev *sd,
 	if (ub960_pad_is_source(priv, format->pad))
 		return v4l2_subdev_get_fmt(sd, state, format);
 
+	v4l2_subdev_lock_state(state);
+
 	/* TODO: implement fmt validation */
 
-	fmt = v4l2_subdev_state_get_stream_format(state, format->pad, format->stream);
+	fmt = v4l2_state_get_stream_format(state, format->pad, format->stream);
 	if (!fmt)
 		return -EINVAL;
 
 	*fmt = format->format;
 
-	fmt = v4l2_subdev_state_get_opposite_stream_format(state, format->pad,
+	fmt = v4l2_state_get_opposite_stream_format(state, format->pad,
 							   format->stream);
 	if (!fmt)
 		return -EINVAL;
 
 	*fmt = format->format;
+
+	v4l2_subdev_unlock_state(state);
 
 	return 0;
 }
@@ -2691,9 +2699,6 @@ static int ub960_init_cfg(struct v4l2_subdev *sd,
 }
 
 static const struct v4l2_subdev_pad_ops ub960_pad_ops = {
-	.enable_streams = ub960_enable_streams,
-	.disable_streams = ub960_disable_streams,
-
 	.set_routing	= ub960_set_routing,
 	.get_frame_desc	= ub960_get_frame_desc,
 
@@ -2713,7 +2718,7 @@ static int ub960_log_status(struct v4l2_subdev *sd)
 	unsigned int i;
 	char id[7];
 
-	state = v4l2_subdev_lock_and_get_active_state(sd);
+	state = v4l2_subdev_lock_active_state(sd);
 
 	for (i = 0; i < 6; ++i)
 		ub960_read(priv, UB960_SR_FPD3_RX_ID(i), &id[i]);
@@ -2901,13 +2906,13 @@ static void ub960_enable_tpg(struct ub960_data *priv, int tpg_num)
 
 	struct v4l2_subdev_state *state;
 
-	state = v4l2_subdev_get_locked_active_state(&priv->sd);
+	state = v4l2_subdev_lock_active_state(&priv->sd);
 
 	vbp = 33;
 	vfp = 10;
 	blank_lines = vbp + vfp + 2; /* total blanking lines */
 
-	fmt = v4l2_subdev_state_get_stream_format(state, 4, 0);
+	fmt = v4l2_state_get_stream_format(state, 4, 0);
 	if (!fmt) {
 		dev_err(&priv->client->dev, "failed to enable TPG\n");
 		return;
@@ -2949,6 +2954,8 @@ static void ub960_enable_tpg(struct ub960_data *priv, int tpg_num)
 			 vbp);
 	ub960_write_ind(priv, UB960_IND_TARGET_PAT_GEN, UB960_IR_PGEN_VFP,
 			 vfp);
+
+	v4l2_subdev_unlock_state(state);
 }
 
 static void ub960_disable_tpg(struct ub960_data *priv)
@@ -3276,8 +3283,6 @@ static int ub960_create_subdev(struct ub960_data *priv)
 				     priv->pads);
 	if (ret)
 		goto err_free_ctrl;
-
-	priv->sd.state_lock = priv->sd.ctrl_handler->lock;
 
 	ret = v4l2_subdev_init_finalize(&priv->sd);
 	if (ret)

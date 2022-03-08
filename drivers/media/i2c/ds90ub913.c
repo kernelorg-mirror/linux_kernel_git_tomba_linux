@@ -298,11 +298,16 @@ static int _ub913_set_routing(struct v4l2_subdev *sd,
 	if (routing->num_routes > V4L2_FRAME_DESC_ENTRY_MAX)
 		return -EINVAL;
 
-	ret = v4l2_subdev_routing_validate(sd, routing, V4L2_SUBDEV_ROUTING_ONLY_1_TO_1);
+	ret = v4l2_routing_simple_verify(routing);
 	if (ret)
 		return ret;
 
+	v4l2_subdev_lock_state(state);
+
 	ret = v4l2_subdev_set_routing_with_fmt(sd, state, routing, &format);
+
+	v4l2_subdev_unlock_state(state);
+
 	if (ret)
 		return ret;
 
@@ -357,7 +362,7 @@ static int ub913_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 	if (ret)
 		return ret;
 
-	state = v4l2_subdev_lock_and_get_active_state(sd);
+	state = v4l2_subdev_lock_active_state(sd);
 
 	routing = &state->routing;
 
@@ -413,20 +418,24 @@ static int ub913_set_fmt(struct v4l2_subdev *sd,
 	if (format->pad == 1)
 		return v4l2_subdev_get_fmt(sd, state, format);
 
+	v4l2_subdev_lock_state(state);
+
 	/* Set sink format */
-	fmt = v4l2_subdev_state_get_stream_format(state, format->pad, format->stream);
+	fmt = v4l2_state_get_stream_format(state, format->pad, format->stream);
 	if (!fmt)
 		return -EINVAL;
 
 	*fmt = format->format;
 
 	/* Propagate to source format */
-	fmt = v4l2_subdev_state_get_opposite_stream_format(state, format->pad,
+	fmt = v4l2_state_get_opposite_stream_format(state, format->pad,
 							   format->stream);
 	if (!fmt)
 		return -EINVAL;
 
 	*fmt = format->format;
+
+	v4l2_subdev_unlock_state(state);
 
 	return 0;
 }

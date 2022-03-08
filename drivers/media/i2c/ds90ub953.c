@@ -449,11 +449,16 @@ static int _ub953_set_routing(struct v4l2_subdev *sd,
 	if (routing->num_routes > V4L2_FRAME_DESC_ENTRY_MAX)
 		return -EINVAL;
 
-	ret = v4l2_subdev_routing_validate(sd, routing, V4L2_SUBDEV_ROUTING_ONLY_1_TO_1);
+	ret = v4l2_routing_simple_verify(routing);
 	if (ret)
 		return ret;
 
+	v4l2_subdev_lock_state(state);
+
 	ret = v4l2_subdev_set_routing_with_fmt(sd, state, routing, &format);
+
+	v4l2_subdev_unlock_state(state);
+
 	if (ret)
 		return ret;
 
@@ -508,7 +513,7 @@ static int ub953_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 	if (ret)
 		return ret;
 
-	state = v4l2_subdev_lock_and_get_active_state(sd);
+	state = v4l2_subdev_lock_active_state(sd);
 
 	routing = &state->routing;
 
@@ -570,20 +575,24 @@ static int ub953_set_fmt(struct v4l2_subdev *sd,
 	if (format->pad == 1)
 		return v4l2_subdev_get_fmt(sd, state, format);
 
+	v4l2_subdev_lock_state(state);
+
 	/* Set sink format */
-	fmt = v4l2_subdev_state_get_stream_format(state, format->pad, format->stream);
+	fmt = v4l2_state_get_stream_format(state, format->pad, format->stream);
 	if (!fmt)
 		return -EINVAL;
 
 	*fmt = format->format;
 
 	/* Propagate to source format */
-	fmt = v4l2_subdev_state_get_opposite_stream_format(state, format->pad,
+	fmt = v4l2_state_get_opposite_stream_format(state, format->pad,
 							   format->stream);
 	if (!fmt)
 		return -EINVAL;
 
 	*fmt = format->format;
+
+	v4l2_subdev_unlock_state(state);
 
 	return 0;
 }
@@ -742,9 +751,9 @@ static void ub953_enable_tpg(struct ub953_data *priv, int tpg_num)
 	vfp = 10;
 	blank_lines = vbp + vfp + 2; /* total blanking lines */
 
-	state = v4l2_subdev_get_locked_active_state(sd);
+	state = v4l2_subdev_lock_active_state(sd);
 
-	fmt = v4l2_subdev_state_get_stream_format(state, UB953_PAD_SOURCE, 0);
+	fmt = v4l2_state_get_stream_format(state, UB953_PAD_SOURCE, 0);
 
 	width = fmt->width;
 	height = fmt->height;
@@ -778,6 +787,8 @@ static void ub953_enable_tpg(struct ub953_data *priv, int tpg_num)
 			 vbp);
 	ub953_write_ind(priv, UB953_IND_TARGET_PAT_GEN, UB953_IND_PGEN_VFP,
 			 vfp);
+
+	v4l2_subdev_unlock_state(state);
 }
 
 static void ub953_disable_tpg(struct ub953_data *priv)
@@ -1163,8 +1174,6 @@ static int ub953_probe(struct i2c_client *client)
 
 	priv->tx_ep_np = of_graph_get_endpoint_by_regs(dev->of_node, 1, 0);
 	priv->sd.fwnode = of_fwnode_handle(priv->tx_ep_np);
-
-	priv->sd.state_lock = priv->sd.ctrl_handler->lock;
 
 	ret = v4l2_subdev_init_finalize(&priv->sd);
 	if (ret)

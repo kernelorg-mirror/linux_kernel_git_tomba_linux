@@ -3465,8 +3465,8 @@ static int vip_register_subdev_notif(struct vip_port *port,
 			 bt656_vep->num_channels);
 
 		if (bt656_vep->pixmux &&
-		    (bt656_vep->num_channels != 1 ||
-		     bt656_vep->num_channels != 2 ||
+		    (bt656_vep->num_channels != 1 &&
+		     bt656_vep->num_channels != 2 &&
 		     bt656_vep->num_channels != 4)) {
 			v4l2_warn(port,
 				  "ti,vip-pixel-mux is set but number of channels is not 1, 2 or 4: (%u), disabling ti,vip-pixel-mux.\n",

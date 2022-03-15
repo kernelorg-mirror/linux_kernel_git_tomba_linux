@@ -41,6 +41,14 @@
 
 };
 
+/*
+ * On DRA76x CAL replaces VIP3. Since we include dra74x.dtsi make sure
+ * vip3 is removed.
+ */
+&l4_per3 {
+	/delete-node/ target-module@1b0000;
+};
+
 &l4_per3 {
 	target-module@1b0000 {			/* 0x489b0000, ap 25 34.0 */
 		compatible = "ti,sysc-omap4", "ti,sysc";

@@ -101,7 +101,6 @@ struct vip_fmt {
  */
 struct vip_parser_data {
 	void __iomem		*base;
-	struct resource		*res;
 
 	struct platform_device *pdev;
 };

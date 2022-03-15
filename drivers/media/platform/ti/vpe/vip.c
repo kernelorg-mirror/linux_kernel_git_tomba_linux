@@ -3686,12 +3686,8 @@ static int vip_probe_slice(struct platform_device *pdev, int slice)
 	if (!parser)
 		return PTR_ERR(parser);
 
-	parser->res = platform_get_resource_byname(pdev,
-						   IORESOURCE_MEM,
-						   (slice == 0) ?
-						   "parser0" :
-						   "parser1");
-	parser->base = devm_ioremap_resource(&pdev->dev, parser->res);
+	parser->base = devm_platform_ioremap_resource_byname(pdev,
+		(slice == 0) ? "parser0" : "parser1");
 	if (IS_ERR(parser->base))
 		return PTR_ERR(parser->base);
 

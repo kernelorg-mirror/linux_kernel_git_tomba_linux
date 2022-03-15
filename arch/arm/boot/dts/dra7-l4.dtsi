@@ -4168,6 +4168,8 @@
 				/* CTRL_CORE_SMA_SW_1 */
 				ti,vip-clk-polarity = <&scm_conf 0x534 0x1 0x4 0x2 0x8>;
 
+				status = "disabled";
+
 				ports {
 					#address-cells = <1>;
 					#size-cells = <0>;

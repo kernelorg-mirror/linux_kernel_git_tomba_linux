@@ -1392,8 +1392,6 @@ static void vip_parser_stop_imm(struct vip_port *port, bool on)
 	struct vip_dev *dev = port->dev;
 	struct vip_parser_data *parser = dev->parser;
 
-	config0 = reg_read(parser, VIP_PARSER_STOP_IMM_PORT(port->port_id));
-
 	if (on)
 		config0 = 0xffffffff;
 	else
@@ -3759,6 +3757,10 @@ static int vip_probe(struct platform_device *pdev)
 	vip_init_format_info(&pdev->dev);
 
 	pinctrl = devm_pinctrl_get_select_default(&pdev->dev);
+	if (IS_ERR(pinctrl)) {
+		dev_err(&pdev->dev, "Failed to select default pinctrl\n");
+		return PTR_ERR(pinctrl);
+	}
 
 	pm_runtime_enable(&pdev->dev);
 

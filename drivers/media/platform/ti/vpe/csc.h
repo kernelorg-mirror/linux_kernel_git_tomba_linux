@@ -9,6 +9,9 @@
 #ifndef TI_CSC_H
 #define TI_CSC_H
 
+#include <linux/types.h>
+#include <linux/videodev2.h>
+
 /* VPE color space converter regs */
 #define CSC_CSC00		0x00
 #define CSC_A0_MASK		0x1fff

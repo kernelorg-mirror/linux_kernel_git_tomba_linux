@@ -9,6 +9,8 @@
 #ifndef TI_SC_H
 #define TI_SC_H
 
+#include <linux/types.h>
+
 /* Scaler regs */
 #define CFG_SC0				0x0
 #define CFG_INTERLACE_O			(1 << 0)

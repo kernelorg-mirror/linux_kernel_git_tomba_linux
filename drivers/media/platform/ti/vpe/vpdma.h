@@ -10,6 +10,10 @@
 #ifndef __TI_VPDMA_H_
 #define __TI_VPDMA_H_
 
+#include <linux/types.h>
+#include <linux/spinlock.h>
+#include <linux/videodev2.h>
+
 #define VPDMA_MAX_NUM_LIST		8
 /*
  * A vpdma_buf tracks the size, DMA address and mapping status of each

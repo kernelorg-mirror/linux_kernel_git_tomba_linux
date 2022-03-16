@@ -59,7 +59,7 @@ EXPORT_SYMBOL(sc_dump_regs);
  * input widths, after accounting for up to two levels of decimation
  */
 void sc_set_hs_coeffs(struct sc_data *sc, void *addr, unsigned int src_w,
-		unsigned int dst_w)
+		      unsigned int dst_w)
 {
 	struct device *dev = &sc->pdev->dev;
 	unsigned int sixteenths;
@@ -111,7 +111,7 @@ EXPORT_SYMBOL(sc_set_hs_coeffs);
  * input heights
  */
 void sc_set_vs_coeffs(struct sc_data *sc, void *addr, unsigned int src_h,
-		unsigned int dst_h)
+		      unsigned int dst_h)
 {
 	struct device *dev = &sc->pdev->dev;
 	unsigned int sixteenths;
@@ -151,8 +151,8 @@ void sc_set_vs_coeffs(struct sc_data *sc, void *addr, unsigned int src_h,
 EXPORT_SYMBOL(sc_set_vs_coeffs);
 
 void sc_config_scaler(struct sc_data *sc, u32 *sc_reg0, u32 *sc_reg8,
-		u32 *sc_reg17, unsigned int src_w, unsigned int src_h,
-		unsigned int dst_w, unsigned int dst_h)
+		      u32 *sc_reg17, unsigned int src_w, unsigned int src_h,
+		      unsigned int dst_w, unsigned int dst_h)
 {
 	struct device *dev = &sc->pdev->dev;
 	u32 val;
@@ -225,7 +225,7 @@ void sc_config_scaler(struct sc_data *sc, u32 *sc_reg0, u32 *sc_reg8,
 
 	if (use_rav) {
 		/* use RAV */
-		factor = (u16) ((dst_h << 10) / src_h);
+		factor = (u16)((dst_h << 10) / src_h);
 
 		row_acc_init_rav = factor + ((1 + factor) >> 1);
 		if (row_acc_init_rav >= 1024)
@@ -252,7 +252,6 @@ void sc_config_scaler(struct sc_data *sc, u32 *sc_reg0, u32 *sc_reg8,
 		dev_dbg(dev, "vs config(POLY): src_h = %d, dst_h = %d,row_acc_inc = %08x\n",
 			src_h, dst_h, row_acc_inc);
 	}
-
 
 	sc_reg0[0] = val;
 	sc_reg0[1] = row_acc_inc;

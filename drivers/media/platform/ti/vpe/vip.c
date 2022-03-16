@@ -2613,6 +2613,22 @@ static int vip_s_selection(struct file *file, void *fh,
 	return 0;
 }
 
+static int vip_log_status(struct file *file, void *priv)
+{
+	struct vip_stream *stream = file2stream(file);
+	struct vip_port *port = stream->port;
+	struct vip_dev *vip_dev = port->dev;
+	struct device *dev = &vip_dev->pdev->dev;
+	u32 v;
+
+	v = reg_read(port->dev->parser, VIP_PARSER_MAIN_CFG);
+
+	dev_info(dev, "%#x\n", v);
+
+	return 0;
+}
+
+
 static const struct v4l2_ioctl_ops vip_ioctl_ops = {
 	.vidioc_querycap	= vip_querycap,
 	.vidioc_enum_input	= vip_enuminput,
@@ -2644,7 +2660,7 @@ static const struct v4l2_ioctl_ops vip_ioctl_ops = {
 
 	.vidioc_streamon	= vb2_ioctl_streamon,
 	.vidioc_streamoff	= vb2_ioctl_streamoff,
-	.vidioc_log_status	= v4l2_ctrl_log_status,
+	.vidioc_log_status	= vip_log_status,
 	.vidioc_subscribe_event = v4l2_ctrl_subscribe_event,
 	.vidioc_unsubscribe_event = v4l2_event_unsubscribe,
 };

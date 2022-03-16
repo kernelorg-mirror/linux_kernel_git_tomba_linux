@@ -26,7 +26,7 @@
 
 #include "vip.h"
 
-#define VIP_MODULE_NAME 	"vip"
+#define VIP_MODULE_NAME		"vip"
 
 static int debug;
 module_param(debug, int, 0644);
@@ -339,8 +339,8 @@ vip_csc_direction(u32 src_code, const struct v4l2_format_info *dfinfo)
 #define FLAG_MULT_PORT		BIT(6)
 #define FLAG_MULT_ANC		BIT(7)
 
-#define reg_read(dev, offset) ioread32(dev->base + offset)
-#define reg_write(dev, offset, val) iowrite32(val, dev->base + offset)
+#define reg_read(dev, offset) ioread32((dev)->base + (offset))
+#define reg_write(dev, offset, val) iowrite32(val, (dev)->base + (offset))
 
 /*
  * Insert a masked field into a 32-bit field
@@ -373,10 +373,10 @@ struct vip_mmr_adb {
 };
 
 #define GET_OFFSET_TOP(port, obj, reg)	\
-	((obj)->res->start - port->dev->res->start + reg)
+	((obj)->res->start - (port)->dev->res->start + (reg))
 
 #define VIP_SET_MMR_ADB_HDR(port, hdr, regs, offset_a)	\
-	VPDMA_SET_MMR_ADB_HDR(port->mmr_adb, vip_mmr_adb, hdr, regs, offset_a)
+	VPDMA_SET_MMR_ADB_HDR((port)->mmr_adb, vip_mmr_adb, hdr, regs, offset_a)
 
 /*
  * Set the headers for all of the address/data block structures.
@@ -667,9 +667,8 @@ static int add_out_dtd(struct vip_stream *stream, int srce_type)
 		flags = port->flags;
 		break;
 	case VIP_SRCE_RGB:
-		if ((port->port_id == VIP_PORTB) ||
-		    ((port->port_id == VIP_PORTA) &&
-		     (port->csc == VIP_CSC_NA) &&
+		if (port->port_id == VIP_PORTB ||
+		    (port->port_id == VIP_PORTA && port->csc == VIP_CSC_NA &&
 		     v4l2_is_format_rgb(port->fmt->finfo)))
 			/*
 			 * RGB sensor only connect to Y_LO
@@ -1029,7 +1028,7 @@ static bool is_csc_available(struct vip_port *port)
 }
 
 static bool allocate_csc(struct vip_port *port,
-				enum vip_csc_state csc_direction)
+			 enum vip_csc_state csc_direction)
 {
 	/* Is CSC needed? */
 	if (csc_direction != VIP_CSC_NA) {
@@ -2037,14 +2036,14 @@ static int vip_try_fmt_vid_cap(struct file *file, void *priv,
 		if (!vip_is_size_dma_aligned(bpp, fse.max_width))
 			continue;
 
-		if ((fse.max_width >= largest_width) &&
-		    (fse.max_height >= largest_height)) {
+		if (fse.max_width >= largest_width &&
+		    fse.max_height >= largest_height) {
 			largest_width = fse.max_width;
 			largest_height = fse.max_height;
 		}
 
-		if ((fse.max_width >= f->fmt.pix.width) &&
-		    (fse.max_height >= f->fmt.pix.height)) {
+		if (fse.max_width >= f->fmt.pix.width &&
+		    fse.max_height >= f->fmt.pix.height) {
 			if (!best_width ||
 			    ((abs(best_width - f->fmt.pix.width) >=
 			      abs(fse.max_width - f->fmt.pix.width)) &&
@@ -2055,16 +2054,16 @@ static int vip_try_fmt_vid_cap(struct file *file, void *priv,
 			}
 		}
 
-		if ((f->fmt.pix.width == fse.max_width) &&
-		    (f->fmt.pix.height == fse.max_height)) {
+		if (f->fmt.pix.width == fse.max_width &&
+		    f->fmt.pix.height == fse.max_height) {
 			found = true;
 			break;
 		}
 
-		if ((f->fmt.pix.width >= fse.min_width) &&
-		    (f->fmt.pix.width <= fse.max_width) &&
-		    (f->fmt.pix.height >= fse.min_height) &&
-		    (f->fmt.pix.height <= fse.max_height)) {
+		if (f->fmt.pix.width >= fse.min_width &&
+		    f->fmt.pix.width <= fse.max_width &&
+		    f->fmt.pix.height >= fse.min_height &&
+		    f->fmt.pix.height <= fse.max_height) {
 			found = true;
 			break;
 		}
@@ -2615,7 +2614,6 @@ static int vip_log_status(struct file *file, void *priv)
 
 	return 0;
 }
-
 
 static const struct v4l2_ioctl_ops vip_ioctl_ops = {
 	.vidioc_querycap	= vip_querycap,

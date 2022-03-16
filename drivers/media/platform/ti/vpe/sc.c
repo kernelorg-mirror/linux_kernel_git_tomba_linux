@@ -61,9 +61,10 @@ EXPORT_SYMBOL(sc_dump_regs);
 void sc_set_hs_coeffs(struct sc_data *sc, void *addr, unsigned int src_w,
 		unsigned int dst_w)
 {
-	int sixteenths;
-	int idx;
-	int i, j;
+	struct device *dev = &sc->pdev->dev;
+	unsigned int sixteenths;
+	unsigned int idx;
+	unsigned int i, j;
 	u16 *coeff_h = addr;
 	const u16 *cp;
 
@@ -84,6 +85,8 @@ void sc_set_hs_coeffs(struct sc_data *sc, void *addr, unsigned int src_w,
 			idx = HS_LT_9_16_SCALE + sixteenths - 8;
 		}
 	}
+
+	dev_dbg(dev, "hs coef table %u\n", idx);
 
 	cp = scaler_hs_coeffs[idx];
 
@@ -110,9 +113,10 @@ EXPORT_SYMBOL(sc_set_hs_coeffs);
 void sc_set_vs_coeffs(struct sc_data *sc, void *addr, unsigned int src_h,
 		unsigned int dst_h)
 {
-	int sixteenths;
-	int idx;
-	int i, j;
+	struct device *dev = &sc->pdev->dev;
+	unsigned int sixteenths;
+	unsigned int idx;
+	unsigned int i, j;
 	u16 *coeff_v = addr;
 	const u16 *cp;
 
@@ -126,6 +130,8 @@ void sc_set_vs_coeffs(struct sc_data *sc, void *addr, unsigned int src_h,
 			sixteenths = 8;
 		idx = VS_LT_9_16_SCALE + sixteenths - 8;
 	}
+
+	dev_dbg(dev, "vs coef table %u\n", idx);
 
 	cp = scaler_vs_coeffs[idx];
 

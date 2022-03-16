@@ -12,6 +12,8 @@
 #ifndef __TI_SC_COEFF_H
 #define __TI_SC_COEFF_H
 
+#include "sc.h"
+
 /* horizontal scaler coefficients */
 enum {
 	HS_UP_SCALE = 0,
@@ -23,9 +25,10 @@ enum {
 	HS_LT_14_16_SCALE,
 	HS_LT_15_16_SCALE,
 	HS_LE_16_16_SCALE,
+	HS_NUM_COEFS,
 };
 
-static const u16 scaler_hs_coeffs[13][SC_NUM_PHASES * 2 * SC_H_NUM_TAPS] = {
+static const u16 scaler_hs_coeffs[HS_NUM_COEFS][SC_NUM_PHASES * 2 * SC_H_NUM_TAPS] = {
 	[HS_UP_SCALE] = {
 		/* Luma */
 		0x001F, 0x1F90, 0x00D2, 0x06FE, 0x00D2, 0x1F90, 0x001F,
@@ -652,9 +655,10 @@ enum {
 	VS_LT_15_16_SCALE,
 	VS_LT_16_16_SCALE,
 	VS_1_TO_1_SCALE,
+	VS_NUM_COEFS,
 };
 
-static const u16 scaler_vs_coeffs[15][SC_NUM_PHASES * 2 * SC_V_NUM_TAPS] = {
+static const u16 scaler_vs_coeffs[VS_NUM_COEFS][SC_NUM_PHASES * 2 * SC_V_NUM_TAPS] = {
 	[VS_UP_SCALE] = {
 		/* Luma */
 		0x1FD1, 0x00B1, 0x06FC, 0x00B1, 0x1FD1,

@@ -284,6 +284,9 @@ enum sync_types {
 /*
  * Register offsets and field selectors
  */
+
+/* VIP TOP registers */
+
 #define VIP_PID_FUNC			0xf02
 
 #define VIP_PID				0x0000
@@ -400,6 +403,8 @@ enum sync_types {
 #define VIP_DATAPATH_SELECT_MASK	0x0f
 #define VIP_DATAPATH_SELECT_SHFT	28
 
+/* VIP PARSER registers */
+
 #define VIP_PARSER_MAIN_CFG		0x0000
 #define VIP_DATA_INTERFACE_MODE_MASK	0x03
 #define VIP_DATA_INTERFACE_MODE_SHFT	0
@@ -512,190 +517,5 @@ enum sync_types {
 #define VIP_PARSER_STOP_IMM_PORT(p)	(0x00d8 + (p) * 0x4)
 #define VIP_ANC_SRCNUM_STOP_IMM_SHFT	0
 #define VIP_YUV_SRCNUM_STOP_IMM_SHFT	16
-
-#define VIP_CSC_CSC00			0x0200
-#define VIP_CSC_A0_MASK			0x1fff
-#define VIP_CSC_A0_SHFT			0
-#define VIP_CSC_B0_MASK			0x1fff
-#define VIP_CSC_B0_SHFT			16
-
-#define VIP_CSC_CSC01			0x0204
-#define VIP_CSC_C0_MASK			0x1fff
-#define VIP_CSC_C0_SHFT			0
-#define VIP_CSC_A1_MASK			0x1fff
-#define VIP_CSC_A1_SHFT			16
-
-#define VIP_CSC_CSC02			0x0208
-#define VIP_CSC_B1_MASK			0x1fff
-#define VIP_CSC_B1_SHFT			0
-#define VIP_CSC_C1_MASK			0x1fff
-#define VIP_CSC_C1_SHFT			16
-
-#define VIP_CSC_CSC03			0x020c
-#define VIP_CSC_A2_MASK			0x1fff
-#define VIP_CSC_A2_SHFT			0
-#define VIP_CSC_B2_MASK			0x1fff
-#define VIP_CSC_B2_SHFT			16
-
-#define VIP_CSC_CSC04			0x0210
-#define VIP_CSC_C2_MASK			0x1fff
-#define VIP_CSC_C2_SHFT			0
-#define VIP_CSC_D0_MASK			0x0fff
-#define VIP_CSC_D0_SHFT			16
-
-#define VIP_CSC_CSC05			0x0214
-#define VIP_CSC_D1_MASK			0x0fff
-#define VIP_CSC_D1_SHFT			0
-#define VIP_CSC_D2_MASK			0x0fff
-#define VIP_CSC_D2_SHFT			16
-#define VIP_CSC_BYPASS			BIT(28)
-
-#define VIP_SC_MP_SC0			0x0300
-#define VIP_INTERLACE_O			BIT(0)
-#define VIP_LINEAR			BIT(1)
-#define VIP_SC_BYPASS			BIT(2)
-#define VIP_INVT_FID			BIT(3)
-#define VIP_USE_RAV			BIT(4)
-#define VIP_ENABLE_EV			BIT(5)
-#define VIP_AUTH_HS			BIT(6)
-#define VIP_DCM_2X			BIT(7)
-#define VIP_DCM_4X			BIT(8)
-#define VIP_HP_BYPASS			BIT(9)
-#define VIP_INTERLACE_I			BIT(10)
-#define VIP_ENABLE_SIN2_VER_INTP	BIT(11)
-#define VIP_Y_PK_EN			BIT(14)
-#define VIP_TRIM			BIT(15)
-#define VIP_SELFGEN_FID			BIT(16)
-
-#define VIP_SC_MP_SC1			0x0304
-#define VIP_ROW_ACC_INC_MASK		0x07ffffff
-#define VIP_ROW_ACC_INC_SHFT		0
-
-#define VIP_SC_MP_SC2			0x0308
-#define VIP_ROW_ACC_OFFSET_MASK		0x0fffffff
-#define VIP_ROW_ACC_OFFSET_SHFT		0
-
-#define VIP_SC_MP_SC3			0x030c
-#define VIP_ROW_ACC_OFFSET_B_MASK	0x0fffffff
-#define VIP_ROW_ACC_OFFSET_B_SHFT	0
-
-#define VIP_SC_MP_SC4			0x0310
-#define VIP_TAR_H_MASK			0x07ff
-#define VIP_TAR_H_SHFT			0
-#define VIP_TAR_W_MASK			0x07ff
-#define VIP_TAR_W_SHFT			12
-#define VIP_LIN_ACC_INC_U_MASK		0x07
-#define VIP_LIN_ACC_INC_U_SHFT		24
-#define VIP_NLIN_ACC_INIT_U_MASK	0x07
-#define VIP_NLIN_ACC_INIT_U_SHFT	28
-
-#define VIP_SC_MP_SC5			0x0314
-#define VIP_SRC_H_MASK			0x03ff
-#define VIP_SRC_H_SHFT			0
-#define VIP_SRC_W_MASK			0x07ff
-#define VIP_SRC_W_SHFT			12
-#define VIP_NLIN_ACC_INC_U_MASK		0x07
-#define VIP_NLIN_ACC_INC_U_SHFT		24
-
-#define VIP_SC_MP_SC6			0x0318
-#define VIP_ROW_ACC_INIT_RAV_MASK	0x03ff
-#define VIP_ROW_ACC_INIT_RAV_SHFT	0
-#define VIP_ROW_ACC_INIT_RAV_B_MASK	0x03ff
-#define VIP_ROW_ACC_INIT_RAV_B_SHFT	10
-
-#define VIP_SC_MP_SC8			0x0320
-#define VIP_NLIN_LEFT_MASK		0x07ff
-#define VIP_NLIN_LEFT_SHFT		0
-#define VIP_NLIN_RIGHT_MASK		0x07ff
-#define VIP_NLIN_RIGHT_SHFT		12
-
-#define VIP_SC_MP_SC9			0x0324
-#define VIP_LIN_ACC_INC			VIP_SC_MP_SC9
-
-#define VIP_SC_MP_SC10			0x0328
-#define VIP_NLIN_ACC_INIT		VIP_SC_MP_SC10
-
-#define VIP_SC_MP_SC11			0x032c
-#define VIP_NLIN_ACC_INC		VIP_SC_MP_SC11
-
-#define VIP_SC_MP_SC12			0x0330
-#define VIP_COL_ACC_OFFSET_MASK		0x01ffffff
-#define VIP_COL_ACC_OFFSET_SHFT		0
-
-#define VIP_SC_MP_SC13			0x0334
-#define VIP_SC_FACTOR_RAV_MASK		0x03ff
-#define VIP_SC_FACTOR_RAV_SHFT		0
-#define VIP_CHROMA_INTP_THR_MASK	0x03ff
-#define VIP_CHROMA_INTP_THR_SHFT	12
-#define VIP_DELTA_CHROMA_THR_MASK	0x0f
-#define VIP_DELTA_CHROMA_THR_SHFT	24
-
-#define VIP_SC_MP_SC17			0x0344
-#define VIP_EV_THR_MASK			0x03ff
-#define VIP_EV_THR_SHFT			12
-#define VIP_DELTA_LUMA_THR_MASK		0x0f
-#define VIP_DELTA_LUMA_THR_SHFT		24
-#define VIP_DELTA_EV_THR_MASK		0x0f
-#define VIP_DELTA_EV_THR_SHFT		28
-
-#define VIP_SC_MP_SC18			0x0348
-#define VIP_HS_FACTOR_MASK		0x03ff
-#define VIP_HS_FACTOR_SHFT		0
-#define VIP_CONF_DEFAULT_MASK		0x01ff
-#define VIP_CONF_DEFAULT_SHFT		16
-
-#define VIP_SC_MP_SC19			0x034c
-#define VIP_HPF_COEFF0_MASK		0xff
-#define VIP_HPF_COEFF0_SHFT		0
-#define VIP_HPF_COEFF1_MASK		0xff
-#define VIP_HPF_COEFF1_SHFT		8
-#define VIP_HPF_COEFF2_MASK		0xff
-#define VIP_HPF_COEFF2_SHFT		16
-#define VIP_HPF_COEFF3_MASK		0xff
-#define VIP_HPF_COEFF3_SHFT		23
-
-#define VIP_SC_MP_SC20			0x0350
-#define VIP_HPF_COEFF4_MASK		0xff
-#define VIP_HPF_COEFF4_SHFT		0
-#define VIP_HPF_COEFF5_MASK		0xff
-#define VIP_HPF_COEFF5_SHFT		8
-#define VIP_HPF_NORM_SHFT_MASK		0x07
-#define VIP_HPF_NORM_SHFT_SHFT		16
-#define VIP_NL_LIMIT_MASK		0x1ff
-#define VIP_NL_LIMIT_SHFT		20
-
-#define VIP_SC_MP_SC21			0x0354
-#define VIP_NL_LO_THR_MASK		0x01ff
-#define VIP_NL_LO_THR_SHFT		0
-#define VIP_NL_LO_SLOPE_MASK		0xff
-#define VIP_NL_LO_SLOPE_SHFT		16
-
-#define VIP_SC_MP_SC22			0x0358
-#define VIP_NL_HI_THR_MASK		0x01ff
-#define VIP_NL_HI_THR_SHFT		0
-#define VIP_NL_HI_SLOPE_SH_MASK		0x07
-#define VIP_NL_HI_SLOPE_SH_SHFT		16
-
-#define VIP_SC_MP_SC23			0x035c
-#define VIP_GRADIENT_THR_MASK		0x07ff
-#define VIP_GRADIENT_THR_SHFT		0
-#define VIP_GRADIENT_THR_RANGE_MASK	0x0f
-#define VIP_GRADIENT_THR_RANGE_SHFT	12
-#define VIP_MIN_GY_THR_MASK		0xff
-#define VIP_MIN_GY_THR_SHFT		16
-#define VIP_MIN_GY_THR_RANGE_MASK	0x0f
-#define VIP_MIN_GY_THR_RANGE_SHFT	28
-
-#define VIP_SC_MP_SC24			0x0360
-#define VIP_ORG_H_MASK			0x07ff
-#define VIP_ORG_H_SHFT			0
-#define VIP_ORG_W_MASK			0x07ff
-#define VIP_ORG_W_SHFT			16
-
-#define VIP_SC_MP_SC25			0x0364
-#define VIP_OFF_H_MASK			0x07ff
-#define VIP_OFF_H_SHFT			0
-#define VIP_OFF_W_MASK			0x07ff
-#define VIP_OFF_W_SHFT			16
 
 #endif

@@ -546,12 +546,6 @@ static void vip_clr_pclk_invert(struct vip_port *port)
 				   pclk->rm_bit_field[index], 0);
 }
 
-#define VIP_PARSER_PORT(p)	(VIP_PARSER_PORTA_0 + (p * 0x8U))
-#define VIP_PARSER_EXTRA_PORT(p)	(VIP_PARSER_PORTA_1 + (p * 0x8U))
-#define VIP_PARSER_CROP_H_PORT(p)	(VIP_PARSER_PORTA_EXTRA4 + (p * 0x10U))
-#define VIP_PARSER_CROP_V_PORT(p)	(VIP_PARSER_PORTA_EXTRA5 + (p * 0x10U))
-#define VIP_PARSER_STOP_IMM_PORT(p)	(VIP_PARSER_PORTA_EXTRA6 + (p * 0x4U))
-
 static void vip_set_data_interface(struct vip_port *port,
 				   enum data_interface_modes mode)
 {

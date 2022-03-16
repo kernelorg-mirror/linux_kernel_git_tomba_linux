@@ -400,9 +400,6 @@ enum sync_types {
 #define VIP_DATAPATH_SELECT_MASK	0x0f
 #define VIP_DATAPATH_SELECT_SHFT	28
 
-#define VIP1_PARSER_REG_OFFSET		0x5500
-#define VIP2_PARSER_REG_OFFSET		0x5a00
-
 #define VIP_PARSER_MAIN_CFG		0x0000
 #define VIP_DATA_INTERFACE_MODE_MASK	0x03
 #define VIP_DATA_INTERFACE_MODE_SHFT	0
@@ -707,7 +704,5 @@ enum sync_types {
 #define VIP_OFF_H_SHFT			0
 #define VIP_OFF_W_MASK			0x07ff
 #define VIP_OFF_W_SHFT			16
-
-#define VIP_VPDMA_REG_OFFSET		0xd000
 
 #endif

@@ -314,15 +314,11 @@ enum sync_types {
 #define VIP_SMART_STANDBY_MODE          2
 #define VIP_SMART_STANDBY_WAKEUP_MODE   3
 
-#define VIP_INTC_INTX_OFFSET		0x0020
+#define VIP_INTC_INTRx_STATUS_RAWy(x, y)	(0x0020 + 0x20 * (x) + 4 * (y))
+#define VIP_INTC_INTRx_STATUS_ENAy(x, y)	(0x0028 + 0x20 * (x) + 4 * (y))
+#define VIP_INTC_INTRx_ENA_SETy(x, y)		(0x0030 + 0x20 * (x) + 4 * (y))
+#define VIP_INTC_INTRx_ENA_CLRy(x, y)		(0x0038 + 0x20 * (x) + 4 * (y))
 
-#define VIP_INT0_STATUS0_RAW_SET	0x0020
-#define VIP_INT0_STATUS0_RAW		VIP_INT0_STATUS0_RAW_SET
-#define VIP_INT0_STATUS0_CLR		0x0028
-#define VIP_INT0_STATUS0		VIP_INT0_STATUS0_CLR
-#define VIP_INT0_ENABLE0_SET		0x0030
-#define VIP_INT0_ENABLE0		VIP_INT0_ENABLE0_SET
-#define VIP_INT0_ENABLE0_CLR		0x0038
 #define VIP_INT0_LIST0_COMPLETE         BIT(0)
 #define VIP_INT0_LIST0_NOTIFY           BIT(1)
 #define VIP_INT0_LIST1_COMPLETE         BIT(2)
@@ -343,14 +339,6 @@ enum sync_types {
 #define VIP_VIP1_PARSER_INT		BIT(20)
 #define VIP_VIP2_PARSER_INT		BIT(21)
 
-#define VIP_INT0_STATUS1_RAW_SET        0x0024
-#define VIP_INT0_STATUS1_RAW            VIP_INT0_STATUS0_RAW_SET
-#define VIP_INT0_STATUS1_CLR            0x002c
-#define VIP_INT0_STATUS1                VIP_INT0_STATUS0_CLR
-#define VIP_INT0_ENABLE1_SET            0x0034
-#define VIP_INT0_ENABLE1                VIP_INT0_ENABLE0_SET
-#define VIP_INT0_ENABLE1_CLR            0x003c
-#define VIP_INT0_ENABLE1_STAT		0x004c
 #define VIP_INT0_CHANNEL_GROUP0		BIT(0)
 #define VIP_INT0_CHANNEL_GROUP1		BIT(1)
 #define VIP_INT0_CHANNEL_GROUP2		BIT(2)
@@ -363,14 +351,14 @@ enum sync_types {
 #define VIP_VIP2_DS1_UV_ERROR_INT	BIT(24)
 #define VIP_VIP2_DS2_UV_ERROR_INT	BIT(25)
 
-#define VIP_INTC_E0I			0x00a0
+#define VIP_INTC_EOI			0x00a0
 
-#define VIP_CLK_ENABLE			0x0100
+#define VIP_CLKC_CLKEN			0x0100
 #define VIP_VPDMA_CLK_ENABLE		BIT(0)
 #define VIP_VIP1_DATA_PATH_CLK_ENABLE	BIT(16)
 #define VIP_VIP2_DATA_PATH_CLK_ENABLE	BIT(17)
 
-#define VIP_CLK_RESET			0x0104
+#define VIP_CLKC_RST			0x0104
 #define VIP_VPDMA_RESET			BIT(0)
 #define VIP_VPDMA_CLK_RESET_MASK	0x1
 #define VIP_VPDMA_CLK_RESET_SHIFT	0
@@ -391,8 +379,8 @@ enum sync_types {
 #define VIP_VIP2_DS2_RESET		BIT(28)
 #define VIP_MAIN_RESET			BIT(31)
 
-#define VIP_VIP1_DATA_PATH_SELECT	0x010c
-#define VIP_VIP2_DATA_PATH_SELECT	0x0110
+#define VIP_CLKC_DPS			0x0108
+#define VIP_CLKC_VIP_DPS(slice)		(0x010c + 4 * (slice))
 #define VIP_CSC_SRC_SELECT_MASK		0x07
 #define VIP_CSC_SRC_SELECT_SHFT		0
 #define VIP_SC_SRC_SELECT_MASK		0x07

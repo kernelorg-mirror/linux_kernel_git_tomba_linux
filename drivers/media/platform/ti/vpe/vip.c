@@ -409,7 +409,7 @@ static void vip_module_reset(struct vip_dev *dev, uint32_t module, bool on)
 {
 	u32 val = 0;
 
-	val = reg_read(dev, VIP_CLK_RESET);
+	val = reg_read(dev, VIP_CLKC_RST);
 
 	if (dev->slice_id == VIP_SLICE2)
 		module <<= 1;
@@ -419,7 +419,7 @@ static void vip_module_reset(struct vip_dev *dev, uint32_t module, bool on)
 	else
 		val &= ~module;
 
-	reg_write(dev, VIP_CLK_RESET, val);
+	reg_write(dev, VIP_CLKC_RST, val);
 }
 
 /*
@@ -429,7 +429,7 @@ static void vip_set_clock_enable(struct vip_dev *dev, bool on)
 {
 	u32 val = 0;
 
-	val = reg_read(dev, VIP_CLK_ENABLE);
+	val = reg_read(dev, VIP_CLKC_CLKEN);
 	if (on) {
 		val |= VIP_VPDMA_CLK_ENABLE;
 		if (dev->slice_id == VIP_SLICE1)
@@ -448,7 +448,7 @@ static void vip_set_clock_enable(struct vip_dev *dev, bool on)
 			val = 0;
 	}
 
-	reg_write(dev, VIP_CLK_ENABLE, val);
+	reg_write(dev, VIP_CLKC_CLKEN, val);
 }
 
 /* This helper function is used to enable the clock early on to
@@ -461,14 +461,14 @@ static void vip_shared_set_clock_enable(struct vip_shared *shared, bool on)
 	if (on)
 		val = VIP_VIP1_DATA_PATH_CLK_ENABLE | VIP_VPDMA_CLK_ENABLE;
 
-	reg_write(shared, VIP_CLK_ENABLE, val);
+	reg_write(shared, VIP_CLKC_CLKEN, val);
 }
 
 static void vip_top_reset(struct vip_dev *dev)
 {
 	u32 val = 0;
 
-	val = reg_read(dev, VIP_CLK_RESET);
+	val = reg_read(dev, VIP_CLKC_RST);
 
 	if (dev->slice_id == VIP_SLICE1)
 		insert_field(&val, 1, VIP_DATA_PATH_CLK_RESET_MASK,
@@ -477,11 +477,11 @@ static void vip_top_reset(struct vip_dev *dev)
 		insert_field(&val, 1, VIP_DATA_PATH_CLK_RESET_MASK,
 			     VIP_VIP2_DATA_PATH_RESET_SHIFT);
 
-	reg_write(dev, VIP_CLK_RESET, val);
+	reg_write(dev, VIP_CLKC_RST, val);
 
 	usleep_range(200, 250);
 
-	val = reg_read(dev, VIP_CLK_RESET);
+	val = reg_read(dev, VIP_CLKC_RST);
 
 	if (dev->slice_id == VIP_SLICE1)
 		insert_field(&val, 0, VIP_DATA_PATH_CLK_RESET_MASK,
@@ -489,24 +489,24 @@ static void vip_top_reset(struct vip_dev *dev)
 	else
 		insert_field(&val, 0, VIP_DATA_PATH_CLK_RESET_MASK,
 			     VIP_VIP2_DATA_PATH_RESET_SHIFT);
-	reg_write(dev, VIP_CLK_RESET, val);
+	reg_write(dev, VIP_CLKC_RST, val);
 }
 
 static void vip_top_vpdma_reset(struct vip_shared *shared)
 {
 	u32 val;
 
-	val = reg_read(shared, VIP_CLK_RESET);
+	val = reg_read(shared, VIP_CLKC_RST);
 	insert_field(&val, 1, VIP_VPDMA_CLK_RESET_MASK,
 		     VIP_VPDMA_CLK_RESET_SHIFT);
-	reg_write(shared, VIP_CLK_RESET, val);
+	reg_write(shared, VIP_CLKC_RST, val);
 
 	usleep_range(200, 250);
 
-	val = reg_read(shared, VIP_CLK_RESET);
+	val = reg_read(shared, VIP_CLKC_RST);
 	insert_field(&val, 0, VIP_VPDMA_CLK_RESET_MASK,
 		     VIP_VPDMA_CLK_RESET_SHIFT);
-	reg_write(shared, VIP_CLK_RESET, val);
+	reg_write(shared, VIP_CLKC_RST, val);
 }
 
 static void vip_set_pclk_invert(struct vip_port *port)
@@ -569,7 +569,7 @@ static void vip_set_slice_path(struct vip_dev *dev,
 	u32 val = 0;
 	int data_path_reg;
 
-	data_path_reg = VIP_VIP1_DATA_PATH_SELECT + 4 * dev->slice_id;
+	data_path_reg = VIP_CLKC_VIP_DPS(dev->slice_id);
 
 	switch (data_path) {
 	case ALL_FIELDS_DATA_SELECT:
@@ -775,8 +775,7 @@ static void add_stream_dtds(struct vip_stream *stream)
 static void enable_irqs(struct vip_dev *dev, int irq_num, int list_num)
 {
 	struct vip_parser_data *parser = dev->parser;
-	u32 reg_addr = VIP_INT0_ENABLE0_SET +
-			VIP_INTC_INTX_OFFSET * irq_num;
+	u32 reg_addr = VIP_INTC_INTRx_ENA_SETy(irq_num, 0);
 	u32 irq_val = (1 << (list_num * 2)) |
 		      (VIP_VIP1_PARSER_INT << (irq_num * 1));
 
@@ -792,8 +791,7 @@ static void enable_irqs(struct vip_dev *dev, int irq_num, int list_num)
 static void disable_irqs(struct vip_dev *dev, int irq_num, int list_num)
 {
 	struct vip_parser_data *parser = dev->parser;
-	u32 reg_addr = VIP_INT0_ENABLE0_CLR +
-			VIP_INTC_INTX_OFFSET * irq_num;
+	u32 reg_addr = VIP_INTC_INTRx_ENA_CLRy(irq_num, 0);
 	u32 irq_val = (1 << (list_num * 2)) |
 		      (VIP_VIP1_PARSER_INT << (irq_num * 1));
 
@@ -809,8 +807,7 @@ static void disable_irqs(struct vip_dev *dev, int irq_num, int list_num)
 static void clear_irqs(struct vip_dev *dev, int irq_num, int list_num)
 {
 	struct vip_parser_data *parser = dev->parser;
-	u32 reg_addr = VIP_INT0_STATUS0_CLR +
-			VIP_INTC_INTX_OFFSET * irq_num;
+	u32 reg_addr = VIP_INTC_INTRx_STATUS_ENAy(irq_num, 0);
 	u32 irq_val = (1 << (list_num * 2)) |
 		      (VIP_VIP1_PARSER_INT << (irq_num * 1));
 
@@ -1667,8 +1664,7 @@ static irqreturn_t vip_irq(int irq_vip, void *data)
 		return IRQ_HANDLED;
 
 	vpdma = dev->shared->vpdma;
-	reg_addr = VIP_INT0_STATUS0 +
-			VIP_INTC_INTX_OFFSET * irq_num;
+	reg_addr = VIP_INTC_INTRx_STATUS_ENAy(irq_num, 0);
 	irqst_saved = reg_read(dev->shared, reg_addr);
 	irqst = irqst_saved;
 
@@ -1705,11 +1701,10 @@ static irqreturn_t vip_irq(int irq_vip, void *data)
 	}
 
 	/* Acknowledge that we are done with all interrupts */
-	reg_write(dev->shared, VIP_INTC_E0I, 1 << irq_num);
+	reg_write(dev->shared, VIP_INTC_EOI, 1 << irq_num);
 
 	/* Clear handled events from status register */
-	reg_addr = VIP_INT0_STATUS0_CLR +
-		   VIP_INTC_INTX_OFFSET * irq_num;
+	reg_addr = VIP_INTC_INTRx_STATUS_ENAy(irq_num, 0);
 	reg_write(dev->shared, reg_addr, irqst_saved);
 
 	return IRQ_HANDLED;

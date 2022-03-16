@@ -1940,7 +1940,7 @@ static int vip_try_fmt_vid_cap(struct file *file, void *priv,
 	struct v4l2_subdev_frame_size_enum fse;
 	struct vip_fmt *fmt;
 	u32 best_width, best_height, largest_width, largest_height;
-	int ret, found;
+	int found;
 	enum vip_csc_state csc_direction;
 
 	fmt = find_port_format_by_pix(port, f->fmt.pix.pixelformat);
@@ -1983,7 +1983,6 @@ static int vip_try_fmt_vid_cap(struct file *file, void *priv,
 	port->try_mbus_framefmt.code = fmt->code;
 
 	/* check for/find a valid width/height */
-	ret = 0;
 	found = false;
 	best_width = 0;
 	best_height = 0;
@@ -1993,6 +1992,8 @@ static int vip_try_fmt_vid_cap(struct file *file, void *priv,
 	fse.code = fmt->code;
 	fse.which = V4L2_SUBDEV_FORMAT_ACTIVE;
 	for (fse.index = 0; ; fse.index++) {
+		int ret;
+
 		u32 bpp = fmt->vpdma_fmt[0]->depth >> 3;
 
 		ret = v4l2_subdev_call(port->subdev, pad,
@@ -2870,9 +2871,11 @@ static int vip_init_port(struct vip_port *port)
 	sd_fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
 	sd_fmt.pad = port->source_pad;
 	ret = v4l2_subdev_call(port->subdev, pad, get_fmt, NULL, &sd_fmt);
-	if (ret)
-		v4l2_dbg(1, debug, port, "init_port get_fmt failed in subdev: (%d)\n",
+	if (ret) {
+		v4l2_err(port, "init_port get_fmt failed in subdev: (%d)\n",
 			 ret);
+		return ret;
+	}
 
 	/* try to find one that matches */
 	fmt = find_port_format_by_code(port, mbus_fmt->code);
@@ -2887,9 +2890,11 @@ static int vip_init_port(struct vip_port *port)
 		sd_fmt.pad = port->source_pad;
 		ret = v4l2_subdev_call(port->subdev, pad, set_fmt,
 				       NULL, &sd_fmt);
-		if (ret)
-			v4l2_dbg(1, debug, port, "init_port set_fmt failed in subdev: (%d)\n",
+		if (ret) {
+			v4l2_err(port, "init_port set_fmt failed in subdev: (%d)\n",
 				 ret);
+			return ret;
+		}
 	}
 
 	/* Assign current format */
@@ -2945,7 +2950,7 @@ static int vip_init_stream(struct vip_stream *stream)
 	int ret;
 
 	ret = vip_init_port(port);
-	if (ret != 0)
+	if (ret)
 		return ret;
 
 	fmt = port->fmt;

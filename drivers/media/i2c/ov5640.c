@@ -2765,7 +2765,7 @@ find_mode:
 }
 
 static int ov5640_get_fmt(struct v4l2_subdev *sd,
-			  struct v4l2_subdev_state *sd_state,
+			  struct v4l2_subdev_state *state,
 			  struct v4l2_subdev_format *format)
 {
 	struct ov5640_dev *sensor = to_ov5640_dev(sd);
@@ -2777,7 +2777,7 @@ static int ov5640_get_fmt(struct v4l2_subdev *sd,
 	mutex_lock(&sensor->lock);
 
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
-		fmt = v4l2_subdev_get_try_format(&sensor->sd, sd_state,
+		fmt = v4l2_subdev_get_try_format(&sensor->sd, state,
 						 format->pad);
 	else
 		fmt = &sensor->fmt;
@@ -2913,7 +2913,7 @@ static int ov5640_update_pixel_rate(struct ov5640_dev *sensor)
 }
 
 static int ov5640_set_fmt(struct v4l2_subdev *sd,
-			  struct v4l2_subdev_state *sd_state,
+			  struct v4l2_subdev_state *state,
 			  struct v4l2_subdev_format *format)
 {
 	struct ov5640_dev *sensor = to_ov5640_dev(sd);
@@ -2937,7 +2937,7 @@ static int ov5640_set_fmt(struct v4l2_subdev *sd,
 		goto out;
 
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
-		*v4l2_subdev_get_try_format(sd, sd_state, 0) = *mbus_fmt;
+		*v4l2_subdev_get_try_format(sd, state, 0) = *mbus_fmt;
 		goto out;
 	}
 
@@ -2959,7 +2959,7 @@ out:
 }
 
 static int ov5640_get_selection(struct v4l2_subdev *sd,
-				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_state *state,
 				struct v4l2_subdev_selection *sel)
 {
 	struct ov5640_dev *sensor = to_ov5640_dev(sd);
@@ -3500,7 +3500,7 @@ free_ctrls:
 }
 
 static int ov5640_enum_frame_size(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_state *sd_state,
+				  struct v4l2_subdev_state *state,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct ov5640_dev *sensor = to_ov5640_dev(sd);
@@ -3533,7 +3533,7 @@ static int ov5640_enum_frame_size(struct v4l2_subdev *sd,
 
 static int ov5640_enum_frame_interval(
 	struct v4l2_subdev *sd,
-	struct v4l2_subdev_state *sd_state,
+	struct v4l2_subdev_state *state,
 	struct v4l2_subdev_frame_interval_enum *fie)
 {
 	struct ov5640_dev *sensor = to_ov5640_dev(sd);
@@ -3629,7 +3629,7 @@ out:
 }
 
 static int ov5640_enum_mbus_code(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *sd_state,
+				 struct v4l2_subdev_state *state,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
 	struct ov5640_dev *sensor = to_ov5640_dev(sd);

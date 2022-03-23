@@ -447,7 +447,6 @@ struct ov5640_dev {
 
 	int power_count;
 
-	struct v4l2_mbus_framefmt fmt;
 	bool pending_fmt_change;
 
 	const struct ov5640_mode_info *current_mode;
@@ -1431,13 +1430,17 @@ out:
 static int ov5640_set_mipi_pclk(struct ov5640_dev *sensor)
 {
 	u8 bit_div, mipi_div, pclk_div, sclk_div, sclk2x_div, root_div;
-	struct v4l2_mbus_framefmt *fmt = &sensor->fmt;
+	struct v4l2_subdev_state *state;
+	struct v4l2_mbus_framefmt *fmt;
 	u8 prediv, mult, sysdiv;
 	unsigned long sysclk;
 	unsigned long sample_rate;
 	u8 pclk_period;
 	s64 link_freq;
 	int ret;
+
+	state = v4l2_subdev_get_locked_active_state(&sensor->sd);
+	fmt = v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
 
 	/* Use the link freq computed at ov5640_update_pixel_rate() time. */
 	link_freq = ov5640_csi2_link_freqs[sensor->ctrls.link_freq->cur.val];
@@ -1552,11 +1555,16 @@ static unsigned long ov5640_calc_pclk(struct ov5640_dev *sensor,
 static int ov5640_set_dvp_pclk(struct ov5640_dev *sensor)
 {
 	u8 prediv, mult, sysdiv, pll_rdiv, bit_div, pclk_div;
+	struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_subdev_state *state;
 	u32 rate;
 	int ret;
 
+	state = v4l2_subdev_get_locked_active_state(&sensor->sd);
+	fmt = v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+
 	rate = ov5640_calc_pixel_rate(sensor);
-	rate *= ov5640_code_to_bpp(sensor, sensor->fmt.code);
+	rate *= ov5640_code_to_bpp(sensor, fmt->code);
 	rate /= sensor->ep.bus.parallel.bus_width;
 
 	ov5640_calc_pclk(sensor, rate, &prediv, &mult, &sysdiv, &pll_rdiv,
@@ -1624,9 +1632,14 @@ static int ov5640_set_timings(struct ov5640_dev *sensor,
 	const struct ov5640_timings *timings;
 	const struct v4l2_rect *analog_crop;
 	const struct v4l2_rect *crop;
+	struct v4l2_subdev_state *state;
+	struct v4l2_mbus_framefmt *fmt;
 	int ret;
 
-	if (sensor->fmt.code == MEDIA_BUS_FMT_JPEG_1X8) {
+	state = v4l2_subdev_get_locked_active_state(&sensor->sd);
+	fmt = v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+
+	if (fmt->code == MEDIA_BUS_FMT_JPEG_1X8) {
 		ret = ov5640_set_jpeg_timings(sensor, mode);
 		if (ret < 0)
 			return ret;
@@ -2395,6 +2408,8 @@ static int ov5640_set_framefmt(struct ov5640_dev *sensor,
 /* restore the last set video mode after chip power-on */
 static int ov5640_restore_mode(struct ov5640_dev *sensor)
 {
+	struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_subdev_state *state;
 	int ret;
 
 	/* first load the initial register values */
@@ -2412,7 +2427,10 @@ static int ov5640_restore_mode(struct ov5640_dev *sensor)
 	if (ret < 0)
 		return ret;
 
-	return ov5640_set_framefmt(sensor, &sensor->fmt);
+	state = v4l2_subdev_get_locked_active_state(&sensor->sd);
+	fmt = v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+
+	return ov5640_set_framefmt(sensor, fmt);
 }
 
 static void ov5640_power(struct ov5640_dev *sensor, bool enable)
@@ -2764,31 +2782,6 @@ find_mode:
 	return mode ? rate : -EINVAL;
 }
 
-static int ov5640_get_fmt(struct v4l2_subdev *sd,
-			  struct v4l2_subdev_state *state,
-			  struct v4l2_subdev_format *format)
-{
-	struct ov5640_dev *sensor = to_ov5640_dev(sd);
-	struct v4l2_mbus_framefmt *fmt;
-
-	if (format->pad != 0)
-		return -EINVAL;
-
-	mutex_lock(&sensor->lock);
-
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
-		fmt = v4l2_subdev_get_try_format(&sensor->sd, state,
-						 format->pad);
-	else
-		fmt = &sensor->fmt;
-
-	format->format = *fmt;
-
-	mutex_unlock(&sensor->lock);
-
-	return 0;
-}
-
 static int ov5640_try_fmt_internal(struct v4l2_subdev *sd,
 				   struct v4l2_mbus_framefmt *fmt,
 				   enum ov5640_frame_rate fr,
@@ -2834,9 +2827,10 @@ static int ov5640_try_fmt_internal(struct v4l2_subdev *sd,
 static int ov5640_update_pixel_rate(struct ov5640_dev *sensor)
 {
 	const struct ov5640_mode_info *mode = sensor->current_mode;
-	struct v4l2_mbus_framefmt *fmt = &sensor->fmt;
+	struct v4l2_mbus_framefmt *fmt;
 	enum ov5640_pixel_rate_id pixel_rate_id = mode->pixel_rate;
 	const struct ov5640_timings *timings;
+	struct v4l2_subdev_state *state;
 	s32 exposure_val, exposure_max;
 	unsigned int hblank;
 	unsigned int i = 0;
@@ -2864,6 +2858,8 @@ static int ov5640_update_pixel_rate(struct ov5640_dev *sensor)
 	 * Start from the suggested pixel_rate for the current mode and
 	 * progressively slow it down if it exceeds 1GHz.
 	 */
+	state = v4l2_subdev_get_locked_active_state(&sensor->sd);
+	fmt = v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
 	num_lanes = sensor->ep.bus.mipi_csi2.num_data_lanes;
 	bpp = ov5640_code_to_bpp(sensor, fmt->code);
 	do {
@@ -2919,43 +2915,41 @@ static int ov5640_set_fmt(struct v4l2_subdev *sd,
 	struct ov5640_dev *sensor = to_ov5640_dev(sd);
 	const struct ov5640_mode_info *new_mode;
 	struct v4l2_mbus_framefmt *mbus_fmt = &format->format;
+	struct v4l2_mbus_framefmt *fmt;
 	int ret;
 
 	if (format->pad != 0)
 		return -EINVAL;
 
-	mutex_lock(&sensor->lock);
-
-	if (sensor->streaming) {
-		ret = -EBUSY;
-		goto out;
-	}
+	if (sensor->streaming)
+		return -EBUSY;
 
 	ret = ov5640_try_fmt_internal(sd, mbus_fmt,
 				      sensor->current_fr, &new_mode);
 	if (ret)
-		goto out;
+		return ret;
+
+	fmt = v4l2_subdev_get_pad_format(sd, state, format->pad);
 
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
-		*v4l2_subdev_get_try_format(sd, state, 0) = *mbus_fmt;
-		goto out;
+		*fmt = *mbus_fmt;
+		return 0;
 	}
 
 	if (new_mode != sensor->current_mode) {
 		sensor->current_mode = new_mode;
 		sensor->pending_mode_change = true;
 	}
-	if (mbus_fmt->code != sensor->fmt.code)
+
+	if (mbus_fmt->code != fmt->code)
 		sensor->pending_fmt_change = true;
 
 	/* update format even if code is unchanged, resolution might change */
-	sensor->fmt = *mbus_fmt;
+	*fmt = *mbus_fmt;
 
 	ov5640_update_pixel_rate(sensor);
 
-out:
-	mutex_unlock(&sensor->lock);
-	return ret;
+	return 0;
 }
 
 static int ov5640_get_selection(struct v4l2_subdev *sd,
@@ -2968,10 +2962,8 @@ static int ov5640_get_selection(struct v4l2_subdev *sd,
 
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP: {
-		mutex_lock(&sensor->lock);
 		timings = ov5640_timings(sensor, mode);
 		sel->r = timings->analog_crop;
-		mutex_unlock(&sensor->lock);
 
 		return 0;
 	}
@@ -3655,9 +3647,10 @@ static int ov5640_enum_mbus_code(struct v4l2_subdev *sd,
 static int ov5640_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct ov5640_dev *sensor = to_ov5640_dev(sd);
+	struct v4l2_subdev_state *state;
 	int ret = 0;
 
-	mutex_lock(&sensor->lock);
+	state = v4l2_subdev_lock_and_get_active_state(sd);
 
 	if (sensor->streaming == !enable) {
 		if (enable && sensor->pending_mode_change) {
@@ -3667,7 +3660,11 @@ static int ov5640_s_stream(struct v4l2_subdev *sd, int enable)
 		}
 
 		if (enable && sensor->pending_fmt_change) {
-			ret = ov5640_set_framefmt(sensor, &sensor->fmt);
+			struct v4l2_mbus_framefmt *fmt;
+
+			fmt = v4l2_subdev_get_pad_format(sd, state, 0);
+
+			ret = ov5640_set_framefmt(sensor, fmt);
 			if (ret)
 				goto out;
 			sensor->pending_fmt_change = false;
@@ -3682,7 +3679,7 @@ static int ov5640_s_stream(struct v4l2_subdev *sd, int enable)
 			sensor->streaming = enable;
 	}
 out:
-	mutex_unlock(&sensor->lock);
+	v4l2_subdev_unlock_state(state);
 	return ret;
 }
 
@@ -3690,8 +3687,8 @@ static int ov5640_init_cfg(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_state *state)
 {
 	struct v4l2_mbus_framefmt *fmt =
-				v4l2_subdev_get_try_format(sd, state, 0);
-	struct v4l2_rect *crop = v4l2_subdev_get_try_crop(sd, state, 0);
+				v4l2_subdev_get_pad_format(sd, state, 0);
+	struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(sd, state, 0);
 
 	*fmt = ov5640_default_fmt;
 
@@ -3719,7 +3716,7 @@ static const struct v4l2_subdev_video_ops ov5640_video_ops = {
 static const struct v4l2_subdev_pad_ops ov5640_pad_ops = {
 	.init_cfg = ov5640_init_cfg,
 	.enum_mbus_code = ov5640_enum_mbus_code,
-	.get_fmt = ov5640_get_fmt,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = ov5640_set_fmt,
 	.get_selection = ov5640_get_selection,
 	.enum_frame_size = ov5640_enum_frame_size,
@@ -3785,11 +3782,6 @@ static int ov5640_probe(struct i2c_client *client)
 
 	sensor->i2c_client = client;
 
-	/*
-	 * default init sequence initialize sensor to
-	 * YUV422 UYVY VGA@30fps
-	 */
-	sensor->fmt = ov5640_default_fmt;
 	sensor->frame_interval.numerator = 1;
 	sensor->frame_interval.denominator = ov5640_framerates[OV5640_30_FPS];
 	sensor->current_fr = OV5640_30_FPS;
@@ -3871,12 +3863,21 @@ static int ov5640_probe(struct i2c_client *client)
 	if (ret)
 		goto entity_cleanup;
 
-	ret = v4l2_async_register_subdev_sensor(&sensor->sd);
+	/* note: this is the sensor->lock */
+	sensor->sd.state_lock = sensor->sd.ctrl_handler->lock;
+
+	ret = v4l2_subdev_init_finalize(&sensor->sd);
 	if (ret)
 		goto free_ctrls;
 
+	ret = v4l2_async_register_subdev_sensor(&sensor->sd);
+	if (ret)
+		goto subdev_cleanup;
+
 	return 0;
 
+subdev_cleanup:
+	v4l2_subdev_cleanup(&sensor->sd);
 free_ctrls:
 	v4l2_ctrl_handler_free(&sensor->ctrls.handler);
 entity_cleanup:
@@ -3891,6 +3892,7 @@ static int ov5640_remove(struct i2c_client *client)
 	struct ov5640_dev *sensor = to_ov5640_dev(sd);
 
 	v4l2_async_unregister_subdev(&sensor->sd);
+	v4l2_subdev_cleanup(&sensor->sd);
 	media_entity_cleanup(&sensor->sd.entity);
 	v4l2_ctrl_handler_free(&sensor->ctrls.handler);
 	mutex_destroy(&sensor->lock);

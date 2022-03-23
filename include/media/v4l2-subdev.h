@@ -1042,6 +1042,16 @@ v4l2_subdev_get_try_compose(struct v4l2_subdev *sd,
 	return &state->pads[pad].try_compose;
 }
 
+/* Temprary helpers until v4l2_subdev_get_try_* functions have been renamed */
+#define v4l2_subdev_get_pad_format(sd, state, pad) \
+	v4l2_subdev_get_try_format(sd, state, pad)
+
+#define v4l2_subdev_get_pad_crop(sd, state, pad) \
+	v4l2_subdev_get_try_crop(sd, state, pad)
+
+#define v4l2_subdev_get_pad_compose(sd, state, pad) \
+	v4l2_subdev_get_try_compose(sd, state, pad)
+
 #endif
 
 extern const struct v4l2_file_operations v4l2_subdev_fops;

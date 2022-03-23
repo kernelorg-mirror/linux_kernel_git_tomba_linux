@@ -61,19 +61,19 @@ MODULE_PARM_DESC(mc_api, "activates the MC API");
 const struct cal_format_info cal_formats[] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_YUYV,
-		.code		= MEDIA_BUS_FMT_YUYV8_2X8,
+		.code		= MEDIA_BUS_FMT_YUYV8_1X16,
 		.bpp		= 16,
 	}, {
 		.fourcc		= V4L2_PIX_FMT_UYVY,
-		.code		= MEDIA_BUS_FMT_UYVY8_2X8,
+		.code		= MEDIA_BUS_FMT_UYVY8_1X16,
 		.bpp		= 16,
 	}, {
 		.fourcc		= V4L2_PIX_FMT_YVYU,
-		.code		= MEDIA_BUS_FMT_YVYU8_2X8,
+		.code		= MEDIA_BUS_FMT_YVYU8_1X16,
 		.bpp		= 16,
 	}, {
 		.fourcc		= V4L2_PIX_FMT_VYUY,
-		.code		= MEDIA_BUS_FMT_VYUY8_2X8,
+		.code		= MEDIA_BUS_FMT_VYUY8_1X16,
 		.bpp		= 16,
 	}, {
 		.fourcc		= V4L2_PIX_FMT_RGB565, /* gggbbbbb rrrrrggg */

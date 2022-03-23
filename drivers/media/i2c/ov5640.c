@@ -519,7 +519,7 @@ static u32 ov5640_code_to_bpp(struct ov5640_dev *sensor, u32 code)
 /* YUV422 UYVY VGA@30fps */
 
 static const struct v4l2_mbus_framefmt ov5640_default_fmt = {
-	.code = MEDIA_BUS_FMT_UYVY8_2X8,
+	.code = MEDIA_BUS_FMT_UYVY8_1X16,
 	.width = 640,
 	.height = 480,
 	.colorspace = V4L2_COLORSPACE_SRGB,

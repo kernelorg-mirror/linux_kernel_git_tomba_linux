@@ -799,7 +799,7 @@ static int ov1063x_configure(struct ov1063x_priv *priv)
 	int ret;
 
 	/* Minimum values for HTS anv VTS. */
-	hts = priv->analog_crop.width + 200;
+	hts = priv->analog_crop.width + 210;
 	vts = priv->analog_crop.height + 50;
 
 	/*

@@ -3331,7 +3331,7 @@ static void free_port(struct vip_port *port)
 static int vip_create_streams(struct vip_port *port,
 			      struct v4l2_subdev *subdev)
 {
-	struct v4l2_fwnode_bus_parallel *bus;
+	struct v4l2_mbus_config_parallel *bus;
 	struct vip_bt656_bus *bt656_ep;
 	int i;
 

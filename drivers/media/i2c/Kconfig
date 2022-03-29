@@ -351,7 +351,7 @@ config VIDEO_OV08D10
 
 config VIDEO_OV10633
 	tristate "OmniVision OV10633/OV10635 sensor support"
-	depends on I2C && VIDEO_V4L2
+	depends on I2C && VIDEO_DEV
 	depends on GPIOLIB && OF
 	select MEDIA_CONTROLLER
 	select REGMAP_I2C

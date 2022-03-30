@@ -1723,34 +1723,6 @@ static int vip_querycap(struct file *file, void *priv,
 	return 0;
 }
 
-static int vip_enuminput(struct file *file, void *priv,
-			 struct v4l2_input *inp)
-{
-	struct vip_stream *stream = file2stream(file);
-
-	if (inp->index)
-		return -EINVAL;
-
-	inp->type = V4L2_INPUT_TYPE_CAMERA;
-	inp->std = stream->vfd->tvnorms;
-	snprintf(inp->name, sizeof(inp->name), "camera %u", stream->vfd->num);
-
-	return 0;
-}
-
-static int vip_g_input(struct file *file, void *priv, unsigned int *i)
-{
-	*i = 0;
-	return 0;
-}
-
-static int vip_s_input(struct file *file, void *priv, unsigned int i)
-{
-	if (i != 0)
-		return -EINVAL;
-	return 0;
-}
-
 static int vip_querystd(struct file *file, void *fh, v4l2_std_id *std)
 {
 	struct vip_stream *stream = file2stream(file);
@@ -2618,9 +2590,6 @@ static int vip_log_status(struct file *file, void *priv)
 
 static const struct v4l2_ioctl_ops vip_ioctl_ops = {
 	.vidioc_querycap	= vip_querycap,
-	.vidioc_enum_input	= vip_enuminput,
-	.vidioc_g_input		= vip_g_input,
-	.vidioc_s_input		= vip_s_input,
 
 	.vidioc_querystd	= vip_querystd,
 	.vidioc_g_std		= vip_g_std,

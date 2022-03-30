@@ -1739,82 +1739,38 @@ static int vip_enum_fmt_vid_cap(struct file *file, void *priv,
 }
 
 static int vip_enum_framesizes(struct file *file, void *priv,
-			       struct v4l2_frmsizeenum *f)
+			       struct v4l2_frmsizeenum *fsize)
 {
 	struct vip_stream *stream = file2stream(file);
 	struct vip_port *port = stream->port;
 	struct vip_fmt *fmt;
-	struct v4l2_subdev_frame_size_enum fse;
-	int ret;
+	unsigned int bitspp;
 
-	fmt = find_port_format_by_pix(port, f->pixel_format);
+	if (fsize->index > 0)
+		return -EINVAL;
+
+	fmt = find_port_format_by_pix(port, fsize->pixel_format);
 	if (!fmt)
 		return -EINVAL;
 
-	fse.index = f->index;
-	fse.pad = port->source_pad;
-	fse.code = fmt->code;
-	fse.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-	ret = v4l2_subdev_call(port->subdev, pad, enum_frame_size, NULL, &fse);
-	if (ret)
-		return -EINVAL;
+	/* XXX validate these */
 
-	v4l2_dbg(1, debug, stream, "%s: index: %d code: %x W:[%d,%d] H:[%d,%d]\n",
-		 __func__, fse.index, fse.code, fse.min_width, fse.max_width,
-		fse.min_height, fse.max_height);
+#define VIP_MIN_WIDTH_BYTES 64
+#define VIP_MAX_WIDTH_BYTES 4096
+#define VIP_MIN_HEIGHT_LINES 4
+#define VIP_MAX_HEIGHT_LINES 2048
 
-	f->type = V4L2_FRMSIZE_TYPE_DISCRETE;
-	f->discrete.width = fse.max_width;
-	f->discrete.height = fse.max_height;
+	bitspp = 16;
 
-	return 0;
-}
-
-static int vip_enum_frameintervals(struct file *file, void *priv,
-				   struct v4l2_frmivalenum *f)
-{
-	struct vip_stream *stream = file2stream(file);
-	struct vip_port *port = stream->port;
-	struct vip_fmt *fmt;
-	struct v4l2_subdev_frame_interval_enum fie = {
-		.index = f->index,
-		.width = f->width,
-		.height = f->height,
-		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
-	};
-	int ret;
-
-	fmt = find_port_format_by_pix(port, f->pixel_format);
-	if (!fmt)
-		return -EINVAL;
-
-	fie.code = fmt->code;
-	ret = v4l2_subdev_call(port->subdev, pad, enum_frame_interval,
-			       NULL, &fie);
-	if (ret)
-		return ret;
-	f->type = V4L2_FRMIVAL_TYPE_DISCRETE;
-	f->discrete = fie.interval;
+	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+	fsize->stepwise.min_width = VIP_MIN_WIDTH_BYTES * 8 / bitspp;
+	fsize->stepwise.max_width = VIP_MAX_WIDTH_BYTES * 8 / bitspp;
+	fsize->stepwise.step_width = 64 / bitspp;
+	fsize->stepwise.min_height = VIP_MIN_HEIGHT_LINES;
+	fsize->stepwise.max_height = VIP_MAX_HEIGHT_LINES;
+	fsize->stepwise.step_height = 1;
 
 	return 0;
-}
-
-static int vip_g_parm(struct file *file, void *priv,
-		      struct v4l2_streamparm *parm)
-{
-	struct vip_stream *stream = file2stream(file);
-	struct vip_port *port = stream->port;
-
-	return v4l2_g_parm_cap(stream->vfd, port->subdev, parm);
-}
-
-static int vip_s_parm(struct file *file, void *priv,
-		      struct v4l2_streamparm *parm)
-{
-	struct vip_stream *stream = file2stream(file);
-	struct vip_port *port = stream->port;
-
-	return v4l2_s_parm_cap(stream->vfd, port->subdev, parm);
 }
 
 static int vip_calc_format_size(struct vip_port *port,
@@ -2560,16 +2516,15 @@ static const struct v4l2_ioctl_ops vip_ioctl_ops = {
 	.vidioc_querycap	= vip_querycap,
 
 	.vidioc_enum_fmt_vid_cap = vip_enum_fmt_vid_cap,
+
 	.vidioc_g_fmt_vid_cap	= vip_g_fmt_vid_cap,
 	.vidioc_try_fmt_vid_cap	= vip_try_fmt_vid_cap,
 	.vidioc_s_fmt_vid_cap	= vip_s_fmt_vid_cap,
 
-	.vidioc_enum_frameintervals	= vip_enum_frameintervals,
-	.vidioc_enum_framesizes		= vip_enum_framesizes,
-	.vidioc_s_parm			= vip_s_parm,
-	.vidioc_g_parm			= vip_g_parm,
+	.vidioc_enum_framesizes	= vip_enum_framesizes,
 	.vidioc_g_selection	= vip_g_selection,
 	.vidioc_s_selection	= vip_s_selection,
+
 	.vidioc_reqbufs		= vb2_ioctl_reqbufs,
 	.vidioc_create_bufs	= vb2_ioctl_create_bufs,
 	.vidioc_prepare_buf	= vb2_ioctl_prepare_buf,
@@ -2580,6 +2535,7 @@ static const struct v4l2_ioctl_ops vip_ioctl_ops = {
 
 	.vidioc_streamon	= vb2_ioctl_streamon,
 	.vidioc_streamoff	= vb2_ioctl_streamoff,
+
 	.vidioc_log_status	= vip_log_status,
 	.vidioc_subscribe_event = v4l2_ctrl_subscribe_event,
 	.vidioc_unsubscribe_event = v4l2_event_unsubscribe,

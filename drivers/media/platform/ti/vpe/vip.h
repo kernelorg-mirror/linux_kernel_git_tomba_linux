@@ -92,11 +92,22 @@ struct vip_fmt {
 };
 
 /*
- * The vip_parser_data structures contains the memory mapped
- * info to access the parser registers.
+ * The vip_bt656_bus structure contains vip specific bt656 bus data.
  */
-struct vip_parser_data {
-	void __iomem		*base;
+struct vip_bt656_bus {
+	unsigned char num_channels;
+	unsigned char pixmux;
+	unsigned char channels[16];
+};
+
+/*
+ * The vip_clk_polarity structure contains the regmap, offset and bit field
+ * definitions to control each port clock polarity.
+ */
+struct vip_clk_polarity {
+	struct regmap	*rm_pol;
+	u32		rm_offset;
+	u32		rm_bit_field[4];
 };
 
 /*
@@ -118,28 +129,17 @@ struct vip_shared {
 };
 
 /*
- * The vip_bt656_bus structure contains vip specific bt656 bus data.
+ * The vip_parser structures contains the memory mapped
+ * info to access the parser registers.
  */
-struct vip_bt656_bus {
-	unsigned char num_channels;
-	unsigned char pixmux;
-	unsigned char channels[16];
+struct vip_parser {
+	void __iomem		*base;
 };
 
-/*
- * The vip_clk_polarity structure contains the regmap, offset and bit field
- * definitions to control each port clock polarity.
- */
-struct vip_clk_polarity {
-	struct regmap	*rm_pol;
-	u32		rm_offset;
-	u32		rm_bit_field[4];
-};
 /*
  * There are two vip_slice structures, one for each vip slice: VIP1 & VIP2.
  */
 struct vip_slice {
-	struct v4l2_device	*v4l2_dev;
 	struct vip_shared	*shared;
 	struct resource		*res;
 	struct vip_clk_polarity *pclk_pol;
@@ -155,7 +155,7 @@ struct vip_slice {
 
 	char			name[16];
 	/* parser data handle */
-	struct vip_parser_data	*parser;
+	struct vip_parser	*parser;
 	/* scaler data handle */
 	struct sc_data		*sc;
 	/* scaler port assignation */

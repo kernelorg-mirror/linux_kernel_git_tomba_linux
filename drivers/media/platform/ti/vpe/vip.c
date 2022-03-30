@@ -770,7 +770,7 @@ static void add_stream_dtds(struct vip_stream *stream)
 
 static void enable_irqs(struct vip_slice *slice, int irq_num, int list_num)
 {
-	struct vip_parser_data *parser = slice->parser;
+	struct vip_parser *parser = slice->parser;
 	u32 reg_addr = VIP_INTC_INTRx_ENA_SETy(irq_num, 0);
 	u32 irq_val = (1 << (list_num * 2)) |
 		      (VIP_VIP1_PARSER_INT << (irq_num * 1));
@@ -786,7 +786,7 @@ static void enable_irqs(struct vip_slice *slice, int irq_num, int list_num)
 
 static void disable_irqs(struct vip_slice *slice, int irq_num, int list_num)
 {
-	struct vip_parser_data *parser = slice->parser;
+	struct vip_parser *parser = slice->parser;
 	u32 reg_addr = VIP_INTC_INTRx_ENA_CLRy(irq_num, 0);
 	u32 irq_val = (1 << (list_num * 2)) |
 		      (VIP_VIP1_PARSER_INT << (irq_num * 1));
@@ -802,7 +802,7 @@ static void disable_irqs(struct vip_slice *slice, int irq_num, int list_num)
 
 static void clear_irqs(struct vip_slice *slice, int irq_num, int list_num)
 {
-	struct vip_parser_data *parser = slice->parser;
+	struct vip_parser *parser = slice->parser;
 	u32 reg_addr = VIP_INTC_INTRx_STATUS_ENAy(irq_num, 0);
 	u32 irq_val = (1 << (list_num * 2)) |
 		      (VIP_VIP1_PARSER_INT << (irq_num * 1));
@@ -1214,7 +1214,7 @@ static inline void free_scaler(struct vip_port *port)
 static int vip_set_crop_parser(struct vip_port *port)
 {
 	struct vip_slice *slice = port->slice;
-	struct vip_parser_data *parser = slice->parser;
+	struct vip_parser *parser = slice->parser;
 	u32 hcrop = 0, vcrop = 0;
 	u32 width = port->mbus_framefmt.width;
 
@@ -1256,7 +1256,7 @@ static void vip_reset_parser(struct vip_port *port, bool on)
 {
 	u32 config0;
 	struct vip_slice *slice = port->slice;
-	struct vip_parser_data *parser = slice->parser;
+	struct vip_parser *parser = slice->parser;
 
 	config0 = reg_read(parser, VIP_PARSER_PORT(port->port_id));
 
@@ -1271,7 +1271,7 @@ static void vip_reset_parser(struct vip_port *port, bool on)
 static int vip_setup_parser(struct vip_port *port)
 {
 	struct vip_slice *slice = port->slice;
-	struct vip_parser_data *parser = slice->parser;
+	struct vip_parser *parser = slice->parser;
 	struct v4l2_fwnode_endpoint *endpoint = &port->endpoint;
 	struct vip_bt656_bus *bt656_ep = &port->bt656_endpoint;
 	int iface, sync_type;
@@ -1374,7 +1374,7 @@ static void vip_enable_parser(struct vip_port *port, bool on)
 {
 	u32 config0;
 	struct vip_slice *slice = port->slice;
-	struct vip_parser_data *parser = slice->parser;
+	struct vip_parser *parser = slice->parser;
 
 	config0 = reg_read(parser, VIP_PARSER_PORT(port->port_id));
 
@@ -1392,7 +1392,7 @@ static void vip_parser_stop_imm(struct vip_port *port, bool on)
 {
 	u32 config0;
 	struct vip_slice *slice = port->slice;
-	struct vip_parser_data *parser = slice->parser;
+	struct vip_parser *parser = slice->parser;
 
 	if (on)
 		config0 = 0xffffffff;
@@ -1553,7 +1553,7 @@ static void vip_overflow_recovery_work(struct work_struct *work)
 
 static void handle_parser_irqs(struct vip_slice *slice)
 {
-	struct vip_parser_data *parser = slice->parser;
+	struct vip_parser *parser = slice->parser;
 	struct vip_port *porta = slice->ports[VIP_PORTA];
 	struct vip_port *portb = slice->ports[VIP_PORTB];
 	struct vip_stream *stream = NULL;
@@ -2875,7 +2875,7 @@ static int alloc_stream(struct vip_port *port, int stream_id)
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	q->lock = &slice->mutex;
 	q->min_buffers_needed = 3;
-	q->dev = slice->v4l2_dev->dev;
+	q->dev = slice->shared->v4l2_dev.dev;
 
 	ret = vb2_queue_init(q);
 	if (ret)
@@ -2904,7 +2904,7 @@ static int alloc_stream(struct vip_port *port, int stream_id)
 	snprintf(vfd->name, sizeof(vfd->name), "VIP %u:%u:%u",
 	         slice->slice_id,
 		 port->port_id, stream->stream_id);
-	vfd->v4l2_dev = slice->v4l2_dev;
+	vfd->v4l2_dev = &slice->shared->v4l2_dev;
 	vfd->queue = q;
 
 	vfd->lock = &slice->mutex;
@@ -3202,7 +3202,7 @@ static int vip_register_subdev_notif(struct vip_port *port,
 	}
 
 	notifier->ops = &vip_async_ops;
-	ret = v4l2_async_nf_register(slice->v4l2_dev, notifier);
+	ret = v4l2_async_nf_register(&slice->shared->v4l2_dev, notifier);
 	if (ret) {
 		v4l2_dbg(1, debug, port, "Error registering async notifier\n");
 		v4l2_async_nf_cleanup(notifier);
@@ -3364,7 +3364,7 @@ static int vip_probe_slice(struct platform_device *pdev, int slice_id)
 {
 	struct vip_shared *shared = platform_get_drvdata(pdev);
 	struct vip_slice *slice;
-	struct vip_parser_data *parser;
+	struct vip_parser *parser;
 	int ret;
 
 	slice = devm_kzalloc(&pdev->dev, sizeof(*slice), GFP_KERNEL);
@@ -3388,7 +3388,6 @@ static int vip_probe_slice(struct platform_device *pdev, int slice_id)
 	slice->slice_id = slice_id;
 	slice->res = shared->res;
 	slice->base = shared->base;
-	slice->v4l2_dev = &shared->v4l2_dev;
 
 	slice->shared = shared;
 	shared->slices[slice_id] = slice;

@@ -189,7 +189,6 @@ struct vip_port {
 	struct v4l2_subdev	*subdev; /* remote subdev */
 	struct v4l2_fwnode_endpoint endpoint;
 	struct vip_bt656_bus	bt656_endpoint;
-	unsigned int		source_pad; /* remote subdev source pad */
 	/* have new shadow reg values */
 	bool			load_mmrs;
 	/* shadow reg addr/data block */

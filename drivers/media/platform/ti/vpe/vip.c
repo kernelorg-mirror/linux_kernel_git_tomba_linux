@@ -270,20 +270,6 @@ static struct vip_fmt *find_port_format_by_code(struct vip_port *port,
 	return NULL;
 }
 
-static int vip_find_pad(struct v4l2_subdev *sd, int direction)
-{
-	unsigned int pad;
-
-	if (sd->entity.num_pads <= 1)
-		return 0;
-
-	for (pad = 0; pad < sd->entity.num_pads; pad++)
-		if (sd->entity.pads[pad].flags & direction)
-			return pad;
-
-	return -EINVAL;
-}
-
 inline struct vip_port *notifier_to_vip_port(struct v4l2_async_notifier *n)
 {
 	return container_of(n, struct vip_port, notifier);
@@ -3042,8 +3028,9 @@ static int vip_async_bound(struct v4l2_async_notifier *notifier,
 			   struct v4l2_async_subdev *asd)
 {
 	struct vip_port *port = notifier_to_vip_port(notifier);
-	int ret;
 	struct vip_stream *stream;
+	u16 source_pad;
+	int ret;
 
 	if (port->subdev) {
 		v4l2_info(port, "Rejecting subdev %s (Already set!!)",
@@ -3054,34 +3041,28 @@ static int vip_async_bound(struct v4l2_async_notifier *notifier,
 	v4l2_info(port, "Port %c: Using subdev %s for capture\n",
 		  port->port_id == VIP_PORTA ? 'A' : 'B', subdev->name);
 
-	ret = vip_find_pad(subdev, MEDIA_PAD_FL_SOURCE);
-	if (ret < 0)
-		return ret;
-	port->source_pad = ret;
-	v4l2_dbg(1, debug, port, "subdev source_pad: %d\n", port->source_pad);
-
 	ret = vip_create_streams(port, subdev);
 	if (ret)
 		return ret;
 
-
-	/*
-	remote_pad = media_entity_get_fwnode_pad(&subdev->entity,
-					  of_fwnode_handle(phy->source_ep_node),
+	ret = media_entity_get_fwnode_pad(&subdev->entity, subdev->fwnode,
 					  MEDIA_PAD_FL_SOURCE);
-	if (remote_pad < 0) {
+
+	if (ret < 0) {
 		v4l2_err(port, "Source %s has no connected source pad\n",
 			 subdev->name);
-		return remote_pad;
+		return ret;
 	}
-*/
+
+	source_pad = ret;
+
 	// XXX
 	if (WARN_ON(port->endpoint.bus_type != V4L2_MBUS_PARALLEL))
 		return -EINVAL;
 
 	stream = port->cap_streams[0]; //XXX
 
-	ret = media_create_pad_link(&subdev->entity, port->source_pad,
+	ret = media_create_pad_link(&subdev->entity, source_pad,
 	                            &stream->vfd->entity, VIP_PAD_SINK,
 				    MEDIA_LNK_FL_IMMUTABLE |
 					    MEDIA_LNK_FL_ENABLED);

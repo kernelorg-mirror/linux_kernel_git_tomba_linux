@@ -117,7 +117,7 @@ struct vip_shared {
 	struct vpdma_data	vpdma_data;
 	struct vpdma_data	*vpdma;
 	struct v4l2_device	v4l2_dev;
-	struct vip_dev		*devs[VIP_NUM_SLICES];
+	struct vip_slice		*slices[VIP_NUM_SLICES];
 	struct v4l2_ctrl_handler ctrl_handler;
 	const char		*name;
 
@@ -143,9 +143,9 @@ struct vip_clk_polarity {
 	u32		rm_bit_field[4];
 };
 /*
- * There are two vip_dev structure, one for each vip slice: VIP1 & VIP2.
+ * There are two vip_slice structures, one for each vip slice: VIP1 & VIP2.
  */
-struct vip_dev {
+struct vip_slice {
 	struct v4l2_device	*v4l2_dev;
 	struct platform_device *pdev;
 	struct vip_shared	*shared;
@@ -175,11 +175,11 @@ struct vip_dev {
 };
 
 /*
- * There are two vip_port structures for each vip_dev, one for port A
+ * There are two vip_port structures for each vip_slice, one for port A
  * and one for port B.
  */
 struct vip_port {
-	struct vip_dev		*dev;
+	struct vip_slice		*slice;
 	int			port_id;
 
 	unsigned int		flags;

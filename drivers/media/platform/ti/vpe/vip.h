@@ -52,12 +52,7 @@
 #define VIP_VBI_STREAMS_PER_PORT	16
 
 #define VIP_MAX_SUBDEV			5
-/*
- * This value needs to be at least as large as the number of entry in
- * vip_formats[].
- * When vip_formats[] is modified make sure to adjust this value also.
- */
-#define VIP_MAX_ACTIVE_FMT		16
+
 /*
  * Colorspace conversion unit can be in one of 3 modes:
  * NA  - Not Available on this port
@@ -199,8 +194,6 @@ struct vip_port {
 	struct v4l2_fwnode_endpoint endpoint;
 	struct vip_bt656_bus	bt656_endpoint;
 	unsigned int		source_pad; /* remote subdev source pad */
-	struct vip_fmt		*active_fmt[VIP_MAX_ACTIVE_FMT];
-	int			num_active_fmt;
 	/* have new shadow reg values */
 	bool			load_mmrs;
 	/* shadow reg addr/data block */

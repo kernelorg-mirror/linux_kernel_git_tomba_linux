@@ -106,7 +106,7 @@ static const struct vip_srce_info srce_info[5] = {
 	},
 };
 
-static struct vip_fmt vip_formats[VIP_MAX_ACTIVE_FMT] = {
+static struct vip_fmt vip_formats[] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_NV12,
 		.code		= MEDIA_BUS_FMT_UYVY8_2X8,
@@ -245,8 +245,8 @@ static struct vip_fmt *find_port_format_by_pix(struct vip_port *port,
 	struct vip_fmt *fmt;
 	unsigned int k;
 
-	for (k = 0; k < port->num_active_fmt; k++) {
-		fmt = port->active_fmt[k];
+	for (k = 0; k < ARRAY_SIZE(vip_formats); k++) {
+		fmt = &vip_formats[k];
 		if (fmt->fourcc == pixelformat)
 			return fmt;
 	}
@@ -260,8 +260,9 @@ static struct vip_fmt *find_port_format_by_code(struct vip_port *port,
 	struct vip_fmt *fmt;
 	unsigned int k;
 
-	for (k = 0; k < port->num_active_fmt; k++) {
-		fmt = port->active_fmt[k];
+
+	for (k = 0; k < ARRAY_SIZE(vip_formats); k++) {
+		fmt = &vip_formats[k];
 		if (fmt->code == code)
 			return fmt;
 	}
@@ -1785,14 +1786,12 @@ static int vip_s_std(struct file *file, void *fh, v4l2_std_id std)
 static int vip_enum_fmt_vid_cap(struct file *file, void *priv,
 				struct v4l2_fmtdesc *f)
 {
-	struct vip_stream *stream = file2stream(file);
-	struct vip_port *port = stream->port;
 	struct vip_fmt *fmt;
 
-	if (f->index >= port->num_active_fmt)
+	if (f->index >= ARRAY_SIZE(vip_formats))
 		return -EINVAL;
 
-	fmt = port->active_fmt[f->index];
+	fmt = &vip_formats[f->index];
 
 	f->pixelformat = fmt->fourcc;
 
@@ -1949,7 +1948,7 @@ static int vip_try_fmt_vid_cap(struct file *file, void *priv,
 			 f->fmt.pix.pixelformat);
 
 		/* Just get the first one enumerated */
-		fmt = port->active_fmt[0];
+		fmt = &vip_formats[0];
 		f->fmt.pix.pixelformat = fmt->fourcc;
 	}
 
@@ -1961,7 +1960,7 @@ static int vip_try_fmt_vid_cap(struct file *file, void *priv,
 				 f->fmt.pix.pixelformat);
 
 			/* Just get the first one enumerated */
-			fmt = port->active_fmt[0];
+			fmt = &vip_formats[0];
 			f->fmt.pix.pixelformat = fmt->fourcc;
 			/* re-evaluate the csc_direction here */
 			csc_direction =  vip_csc_direction(fmt->code,
@@ -2863,8 +2862,16 @@ static int vip_init_port(struct vip_port *port)
 {
 	int ret;
 	struct vip_fmt *fmt;
-	struct v4l2_subdev_format sd_fmt;
-	struct v4l2_mbus_framefmt *mbus_fmt = &sd_fmt.format;
+	struct v4l2_mbus_framefmt mbus_fmt = {
+		.width = 640,
+		.height = 480,
+		.code = MEDIA_BUS_FMT_UYVY8_2X8,
+		.field = V4L2_FIELD_NONE,
+		.colorspace = V4L2_COLORSPACE_SRGB,
+		.ycbcr_enc = V4L2_YCBCR_ENC_601,
+		.quantization = V4L2_QUANTIZATION_LIM_RANGE,
+		.xfer_func = V4L2_XFER_FUNC_SRGB,
+	};
 
 	if (port->num_streams != 0)
 		goto done;
@@ -2873,54 +2880,27 @@ static int vip_init_port(struct vip_port *port)
 	if (ret)
 		goto done;
 
-	/* Get subdevice current frame format */
-	sd_fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-	sd_fmt.pad = port->source_pad;
-	ret = v4l2_subdev_call(port->subdev, pad, get_fmt, NULL, &sd_fmt);
-	if (ret) {
-		v4l2_err(port, "init_port get_fmt failed in subdev: (%d)\n",
-			 ret);
-		return ret;
-	}
-
-	/* try to find one that matches */
-	fmt = find_port_format_by_code(port, mbus_fmt->code);
-	if (!fmt) {
-		v4l2_dbg(1, debug, port, "subdev default mbus_fmt %04x is not matched.\n",
-			 mbus_fmt->code);
-		/* if all else fails just pick the first one */
-		fmt = port->active_fmt[0];
-
-		mbus_fmt->code = fmt->code;
-		/*
-		sd_fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-		sd_fmt.pad = port->source_pad;
-		ret = v4l2_subdev_call(port->subdev, pad, set_fmt,
-				       NULL, &sd_fmt);
-		if (ret) {
-			v4l2_err(port, "init_port set_fmt failed in subdev: (%d)\n",
-				 ret);
-			return ret;
-		}*/
-	}
+	fmt = find_port_format_by_code(port, mbus_fmt.code);
+	if (WARN_ON(!fmt))
+		return -EINVAL;
 
 	/* Assign current format */
 	port->fmt = fmt;
-	port->mbus_framefmt = *mbus_fmt;
+	port->mbus_framefmt = mbus_fmt;
 
-	v4l2_dbg(3, debug, port, "%s: g_mbus_fmt subdev mbus_code: %04X fourcc:%p4cc size: %dx%d\n",
+	v4l2_dbg(3, debug, port, "%s: init mbus_code: %04X fourcc:%p4cc size: %dx%d\n",
 		 __func__, fmt->code, &fmt->fourcc,
-		 mbus_fmt->width, mbus_fmt->height);
+		 mbus_fmt.width, mbus_fmt.height);
 
-	if (mbus_fmt->field == V4L2_FIELD_ALTERNATE)
+	if (mbus_fmt.field == V4L2_FIELD_ALTERNATE)
 		port->flags |= FLAG_INTERLACED;
 	else
 		port->flags &= ~FLAG_INTERLACED;
 
 	port->c_rect.left	= 0;
 	port->c_rect.top	= 0;
-	port->c_rect.width	= mbus_fmt->width;
-	port->c_rect.height	= mbus_fmt->height;
+	port->c_rect.width	= mbus_fmt.width;
+	port->c_rect.height	= mbus_fmt.height;
 
 	ret = vpdma_alloc_desc_buf(&port->sc_coeff_h, SC_COEF_SRAM_SIZE);
 	if (ret != 0)
@@ -3260,7 +3240,7 @@ static void free_stream(struct vip_stream *stream)
 	stream->port->cap_streams[stream->stream_id] = NULL;
 	kfree(stream);
 }
-
+#if 0
 static int get_subdev_active_format(struct vip_port *port,
 				    struct v4l2_subdev *subdev)
 {
@@ -3316,7 +3296,7 @@ static int get_subdev_active_format(struct vip_port *port,
 	}
 	return 0;
 }
-
+#endif
 static int alloc_port(struct vip_slice *slice, int id, const char *name)
 {
 	struct vip_port *port;
@@ -3356,8 +3336,8 @@ static int vip_create_streams(struct vip_port *port,
 	for (i = 0; i < VIP_CAP_STREAMS_PER_PORT; i++)
 		free_stream(port->cap_streams[i]);
 
-	if (get_subdev_active_format(port, subdev))
-		return -ENODEV;
+	//if (get_subdev_active_format(port, subdev))
+	//	return -ENODEV;
 
 	port->subdev = subdev;
 

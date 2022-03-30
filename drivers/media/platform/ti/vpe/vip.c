@@ -1723,38 +1723,6 @@ static int vip_querycap(struct file *file, void *priv,
 	return 0;
 }
 
-static int vip_querystd(struct file *file, void *fh, v4l2_std_id *std)
-{
-	struct vip_stream *stream = file2stream(file);
-	struct vip_port *port = stream->port;
-
-	*std = stream->vfd->tvnorms;
-	v4l2_subdev_call(port->subdev, video, querystd, std);
-	return 0;
-}
-
-static int vip_g_std(struct file *file, void *fh, v4l2_std_id *std)
-{
-	struct vip_stream *stream = file2stream(file);
-	struct vip_port *port = stream->port;
-
-	*std = stream->vfd->tvnorms;
-	v4l2_subdev_call(port->subdev, video, g_std, std);
-	return 0;
-}
-
-static int vip_s_std(struct file *file, void *fh, v4l2_std_id std)
-{
-	struct vip_stream *stream = file2stream(file);
-	struct vip_port *port = stream->port;
-
-	if (!(std & stream->vfd->tvnorms))
-		return -EINVAL;
-
-	v4l2_subdev_call(port->subdev, video, s_std, std);
-	return 0;
-}
-
 static int vip_enum_fmt_vid_cap(struct file *file, void *priv,
 				struct v4l2_fmtdesc *f)
 {
@@ -2591,10 +2559,6 @@ static int vip_log_status(struct file *file, void *priv)
 static const struct v4l2_ioctl_ops vip_ioctl_ops = {
 	.vidioc_querycap	= vip_querycap,
 
-	.vidioc_querystd	= vip_querystd,
-	.vidioc_g_std		= vip_g_std,
-	.vidioc_s_std		= vip_s_std,
-
 	.vidioc_enum_fmt_vid_cap = vip_enum_fmt_vid_cap,
 	.vidioc_g_fmt_vid_cap	= vip_g_fmt_vid_cap,
 	.vidioc_try_fmt_vid_cap	= vip_try_fmt_vid_cap,
@@ -3059,7 +3023,6 @@ static const struct video_device vip_videodev = {
 	.ioctl_ops	= &vip_ioctl_ops,
 	.minor		= -1,
 	.release	= video_device_release,
-	.tvnorms	= V4L2_STD_NTSC | V4L2_STD_PAL | V4L2_STD_SECAM,
 	.device_caps	= V4L2_CAP_STREAMING | V4L2_CAP_VIDEO_CAPTURE |
 			  V4L2_CAP_READWRITE | V4L2_CAP_IO_MC,
 };

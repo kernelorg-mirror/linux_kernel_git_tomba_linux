@@ -3763,9 +3763,6 @@ static int vip_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, shared);
 
-	v4l2_ctrl_handler_init(&shared->ctrl_handler, 11);
-	shared->v4l2_dev.ctrl_handler = &shared->ctrl_handler;
-
 	for (slice = VIP_SLICE1; slice < VIP_NUM_SLICES; slice++) {
 		ret = vip_probe_slice(pdev, slice);
 		if (ret) {
@@ -3790,7 +3787,6 @@ static int vip_probe(struct platform_device *pdev)
 	return 0;
 
 err_dev_unreg:
-	v4l2_ctrl_handler_free(&shared->ctrl_handler);
 	v4l2_device_unregister(&shared->v4l2_dev);
 err_runtime_put:
 	pm_runtime_put_sync(&pdev->dev);
@@ -3817,7 +3813,6 @@ static int vip_remove(struct platform_device *pdev)
 		free_port(slice->ports[VIP_PORTB]);
 	}
 
-	v4l2_ctrl_handler_free(&shared->ctrl_handler);
 	v4l2_device_unregister(&shared->v4l2_dev);
 
 	media_device_cleanup(&shared->mdev);

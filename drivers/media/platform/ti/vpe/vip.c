@@ -2308,13 +2308,55 @@ static int vip_log_status(struct file *file, void *priv)
 {
 	struct vip_stream *stream = file2stream(file);
 	struct vip_port *port = stream->port;
-	struct vip_slice *vip_dev = port->slice;
-	struct device *dev = &vip_dev->pdev->dev;
+	struct vip_slice *slice = port->slice;
+	struct device *dev = &slice->pdev->dev;
 	u32 v;
+	unsigned int i;
+
+	dev_info(dev, "Slice %u\n", slice->slice_id);
 
 	v = reg_read(port->slice->parser, VIP_PARSER_MAIN_CFG);
 
-	dev_info(dev, "%#x\n", v);
+	dev_info(dev, "VIP_PARSER_MAIN_CFG = %#x\n", v);
+
+	v = reg_read(slice, VIP_CLKC_VIP_DPS(slice->slice_id));
+
+	dev_info(dev, "VIP_CSC_SRC_SELECT = %u",
+		 (v >> VIP_CSC_SRC_SELECT_SHFT) & VIP_CSC_SRC_SELECT_MASK);
+
+	dev_info(dev, "VIP_SC_SRC_SELECT = %u",
+		 (v >> VIP_SC_SRC_SELECT_SHFT) & VIP_SC_SRC_SELECT_MASK);
+
+	dev_info(dev, "VIP_DS1_SRC_SELECT = %u",
+		 (v >> VIP_DS1_SRC_SELECT_SHFT) & VIP_DS1_SRC_SELECT_MASK);
+
+	dev_info(dev, "VIP_DS1_BYPASS = %u", !!(v & VIP_DS1_BYPASS));
+
+	dev_info(dev, "VIP_DS2_SRC_SELECT_MASK = %u",
+		 (v >> VIP_DS2_SRC_SELECT_SHFT) & VIP_DS2_SRC_SELECT_MASK);
+
+	dev_info(dev, "VIP_DS2_BYPASS = %u", !!(v & VIP_DS2_BYPASS));
+
+	dev_info(dev, "VIP_RGB_SRC_DATA_SELECT = %u", !!(v & VIP_RGB_SRC_DATA_SELECT));
+
+	dev_info(dev, "VIP_RGB_OUT_HI_DATA_SELECT = %u", !!(v & VIP_RGB_OUT_HI_DATA_SELECT));
+
+	dev_info(dev, "VIP_RGB_OUT_LO_DATA_SELECT = %u", !!(v & VIP_RGB_OUT_LO_DATA_SELECT));
+
+	dev_info(dev, "VIP_MULTI_CHANNEL_SELECT = %u", !!(v & VIP_MULTI_CHANNEL_SELECT));
+
+	for (i = 0; i < VIP_NUM_PORTS; ++i) {
+		struct vip_port *port = slice->ports[i];
+
+		dev_info(dev, "VIP Port %s\n", i == 0 ? "A" : "B");
+
+		if (!port) {
+			dev_info(dev, "\tnot initialalized\n");
+			continue;
+		}
+
+		dev_info(dev, "\tnum streams %u\n", port->num_streams);
+	}
 
 	return 0;
 }

@@ -106,6 +106,15 @@ static const struct vip_srce_info srce_info[5] = {
 	},
 };
 
+static u32 vip_output_fourccs[] = {
+	V4L2_PIX_FMT_NV12,
+	V4L2_PIX_FMT_UYVY,
+	V4L2_PIX_FMT_YUYV,
+	V4L2_PIX_FMT_VYUY,
+	V4L2_PIX_FMT_YVYU,
+	// XXX add the rest
+};
+
 static struct vip_fmt vip_formats[] = {
 	{
 		.fourcc		= V4L2_PIX_FMT_NV12,
@@ -1712,14 +1721,10 @@ static int vip_querycap(struct file *file, void *priv,
 static int vip_enum_fmt_vid_cap(struct file *file, void *priv,
 				struct v4l2_fmtdesc *f)
 {
-	struct vip_fmt *fmt;
-
-	if (f->index >= ARRAY_SIZE(vip_formats))
+	if (f->index >= ARRAY_SIZE(vip_output_fourccs))
 		return -EINVAL;
 
-	fmt = &vip_formats[f->index];
-
-	f->pixelformat = fmt->fourcc;
+	f->pixelformat = vip_output_fourccs[f->index];
 
 	return 0;
 }

@@ -2935,63 +2935,7 @@ static void free_stream(struct vip_stream *stream)
 	stream->port->cap_streams[stream->stream_id] = NULL;
 	kfree(stream);
 }
-#if 0
-static int get_subdev_active_format(struct vip_port *port,
-				    struct v4l2_subdev *subdev)
-{
-	struct vip_fmt *fmt;
-	struct v4l2_subdev_mbus_code_enum mbus_code;
-	int ret = 0;
-	unsigned int k, i, j;
-	enum vip_csc_state csc;
 
-	/* Enumerate sub device formats and enable all matching local formats */
-	port->num_active_fmt = 0;
-	for (k = 0, i = 0; (ret != -EINVAL); k++) {
-		memset(&mbus_code, 0, sizeof(mbus_code));
-		mbus_code.index = k;
-		mbus_code.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-		ret = v4l2_subdev_call(subdev, pad, enum_mbus_code,
-				       NULL, &mbus_code);
-		if (ret)
-			continue;
-
-		v4l2_dbg(2, debug, port,
-			 "subdev %s: code: %04x idx: %d\n",
-			 subdev->name, mbus_code.code, k);
-
-		for (j = 0; j < ARRAY_SIZE(vip_formats); j++) {
-			fmt = &vip_formats[j];
-			if (mbus_code.code != fmt->code)
-				continue;
-
-			/*
-			 * When the port is configured for BT656
-			 * then none of the downstream unit can be used.
-			 * So here we need to skip all format requiring
-			 * either CSC or CHR_DS
-			 */
-			csc = vip_csc_direction(fmt->code, fmt->finfo);
-			if (port->endpoint.bus_type == V4L2_MBUS_BT656 &&
-			    (csc != VIP_CSC_NA || fmt->coplanar))
-				continue;
-
-			port->active_fmt[i] = fmt;
-			v4l2_dbg(2, debug, port,
-				 "matched fourcc: %p4cc: code: %04x idx: %d\n",
-				 &fmt->fourcc, fmt->code, i);
-			port->num_active_fmt = ++i;
-		}
-	}
-
-	if (i == 0) {
-		v4l2_err(port, "No suitable format reported by subdev %s\n",
-			 subdev->name);
-		return -EINVAL;
-	}
-	return 0;
-}
-#endif
 static int alloc_port(struct vip_slice *slice, int id, const char *name)
 {
 	struct vip_port *port;
@@ -3030,9 +2974,6 @@ static int vip_create_streams(struct vip_port *port,
 
 	for (i = 0; i < VIP_CAP_STREAMS_PER_PORT; i++)
 		free_stream(port->cap_streams[i]);
-
-	//if (get_subdev_active_format(port, subdev))
-	//	return -ENODEV;
 
 	port->subdev = subdev;
 

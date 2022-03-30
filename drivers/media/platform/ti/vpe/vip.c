@@ -1831,11 +1831,9 @@ static int vip_try_fmt_vid_cap(struct file *file, void *priv,
 {
 	struct vip_stream *stream = file2stream(file);
 	struct vip_port *port = stream->port;
-	struct v4l2_subdev_frame_size_enum fse;
 	struct vip_fmt *fmt;
-	u32 best_width, best_height, largest_width, largest_height;
-	int found;
-	enum vip_csc_state csc_direction;
+	//enum vip_csc_state csc_direction;
+	struct v4l2_pix_format *format = &f->fmt.pix;
 
 	fmt = find_port_format_by_pix(port, f->fmt.pix.pixelformat);
 	if (!fmt) {
@@ -1845,9 +1843,8 @@ static int vip_try_fmt_vid_cap(struct file *file, void *priv,
 
 		/* Just get the first one enumerated */
 		fmt = &vip_formats[0];
-		f->fmt.pix.pixelformat = fmt->fourcc;
 	}
-
+#if 0
 	csc_direction =  vip_csc_direction(fmt->code, fmt->finfo);
 	if (csc_direction != VIP_CSC_NA) {
 		if (!is_csc_available(port)) {
@@ -1868,170 +1865,12 @@ static int vip_try_fmt_vid_cap(struct file *file, void *priv,
 				 "Y2R" : "R2Y");
 		}
 	}
+#endif
+	format->pixelformat = fmt->fourcc;
 
-	/*
-	 * Given that sensors might support multiple mbus code we need
-	 * to use the one that matches the requested pixel format
-	 */
-	port->try_mbus_framefmt = port->mbus_framefmt;
-	port->try_mbus_framefmt.code = fmt->code;
+	// XXX check width, height, etc.
 
-	/* check for/find a valid width/height */
-	found = false;
-	best_width = 0;
-	best_height = 0;
-	largest_width = 0;
-	largest_height = 0;
-	fse.pad = port->source_pad;
-	fse.code = fmt->code;
-	fse.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-	for (fse.index = 0; ; fse.index++) {
-		int ret;
 
-		u32 bpp = fmt->vpdma_fmt[0]->depth >> 3;
-
-		ret = v4l2_subdev_call(port->subdev, pad,
-				       enum_frame_size, NULL, &fse);
-		if (ret == -ENOIOCTLCMD) {
-			/*
-			 * if subdev does not support enum_frame_size
-			 * then just try to set_fmt directly
-			 */
-			struct v4l2_subdev_format format = {
-				.which = V4L2_SUBDEV_FORMAT_TRY,
-			};
-			struct v4l2_subdev_state *state;
-
-			state = v4l2_subdev_alloc_state(port->subdev);
-			if (!state)
-				return -ENOMEM;
-
-			v4l2_fill_mbus_format(&format.format, &f->fmt.pix,
-					      fmt->code);
-			ret = v4l2_subdev_call(port->subdev, pad, set_fmt,
-					       state, &format);
-			if (ret)
-				/* here regardless of the reason we give up */
-				break;
-
-			if (f->fmt.pix.width == format.format.width &&
-			    f->fmt.pix.height == format.format.height)
-				found = true;
-
-			largest_width = format.format.width;
-			largest_height = format.format.height;
-			best_width = format.format.width;
-			best_height = format.format.height;
-
-			v4l2_subdev_free_state(state);
-			break;
-
-		} else if (ret) {
-			break;
-		}
-
-		if (!vip_is_size_dma_aligned(bpp, fse.max_width))
-			continue;
-
-		if (fse.max_width >= largest_width &&
-		    fse.max_height >= largest_height) {
-			largest_width = fse.max_width;
-			largest_height = fse.max_height;
-		}
-
-		if (fse.max_width >= f->fmt.pix.width &&
-		    fse.max_height >= f->fmt.pix.height) {
-			if (!best_width ||
-			    ((abs(best_width - f->fmt.pix.width) >=
-			      abs(fse.max_width - f->fmt.pix.width)) &&
-			     (abs(best_height - f->fmt.pix.height) >=
-			      abs(fse.max_height - f->fmt.pix.height)))) {
-				best_width = fse.max_width;
-				best_height = fse.max_height;
-			}
-		}
-
-		if (f->fmt.pix.width == fse.max_width &&
-		    f->fmt.pix.height == fse.max_height) {
-			found = true;
-			break;
-		}
-
-		if (f->fmt.pix.width >= fse.min_width &&
-		    f->fmt.pix.width <= fse.max_width &&
-		    f->fmt.pix.height >= fse.min_height &&
-		    f->fmt.pix.height <= fse.max_height) {
-			found = true;
-			break;
-		}
-	}
-
-	if (found) {
-		port->try_mbus_framefmt.width = f->fmt.pix.width;
-		port->try_mbus_framefmt.height = f->fmt.pix.height;
-		/* No need to check for scaling */
-		goto calc_size;
-	} else if (largest_width && f->fmt.pix.width > largest_width) {
-		port->try_mbus_framefmt.width = largest_width;
-		port->try_mbus_framefmt.height = largest_height;
-	} else if (best_width) {
-		port->try_mbus_framefmt.width = best_width;
-		port->try_mbus_framefmt.height = best_height;
-	} else {
-		/* use existing values as default */
-	}
-
-	if (is_scaler_available(port) &&
-	    csc_direction != VIP_CSC_Y2R &&
-	    !vip_is_mbuscode_raw(fmt->code) &&
-	    f->fmt.pix.height <= port->try_mbus_framefmt.height &&
-	    port->try_mbus_framefmt.height <= SC_MAX_PIXEL_HEIGHT &&
-	    port->try_mbus_framefmt.width <= SC_MAX_PIXEL_WIDTH) {
-		/*
-		 * Scaler is only accessible if the dst colorspace is YUV.
-		 * As the input to the scaler must be in YUV mode only.
-		 *
-		 * Scaling up is allowed only horizontally.
-		 */
-		unsigned int hratio, vratio, width_align, height_align;
-		u32 bpp = fmt->vpdma_fmt[0]->depth >> 3;
-
-		v4l2_dbg(3, debug, stream, "Scaler active on Port %c: requesting %dx%d\n",
-			 port->port_id == VIP_PORTA ? 'A' : 'B',
-			 f->fmt.pix.width, f->fmt.pix.height);
-
-		/* Just make sure everything is properly aligned */
-		width_align = ALIGN(f->fmt.pix.width * bpp, VPDMA_STRIDE_ALIGN);
-		width_align /= bpp;
-		height_align = ALIGN(f->fmt.pix.height, 2);
-
-		f->fmt.pix.width = width_align;
-		f->fmt.pix.height = height_align;
-
-		hratio = f->fmt.pix.width * 1000 /
-			 port->try_mbus_framefmt.width;
-		vratio = f->fmt.pix.height * 1000 /
-			 port->try_mbus_framefmt.height;
-		if (hratio < 125) {
-			f->fmt.pix.width = port->try_mbus_framefmt.width / 8;
-			v4l2_dbg(3, debug, stream, "Horizontal scaling ratio out of range adjusting -> %d\n",
-				 f->fmt.pix.width);
-		}
-
-		if (vratio < 188) {
-			f->fmt.pix.height = port->try_mbus_framefmt.height / 4;
-			v4l2_dbg(3, debug, stream, "Vertical scaling ratio out of range adjusting -> %d\n",
-				 f->fmt.pix.height);
-		}
-		v4l2_dbg(3, debug, stream, "Scaler: got %dx%d\n",
-			 f->fmt.pix.width, f->fmt.pix.height);
-	} else {
-		/* use existing values as default */
-		f->fmt.pix.width = port->try_mbus_framefmt.width;
-		f->fmt.pix.height = port->try_mbus_framefmt.height;
-	}
-
-calc_size:
 	/* That we have a fmt calculate imagesize and bytesperline */
 	return vip_calc_format_size(port, fmt, f);
 }
@@ -2059,8 +1898,6 @@ static int vip_s_fmt_vid_cap(struct file *file, void *priv,
 {
 	struct vip_stream *stream = file2stream(file);
 	struct vip_port *port = stream->port;
-	struct v4l2_subdev_format sfmt;
-	struct v4l2_mbus_framefmt *mf;
 	enum vip_csc_state csc_direction;
 	int ret;
 
@@ -2073,21 +1910,6 @@ static int vip_s_fmt_vid_cap(struct file *file, void *priv,
 		return -EBUSY;
 	}
 
-	/*
-	 * Check if we need the scaler or not
-	 *
-	 * Since on previous S_FMT call the scaler might have been
-	 * allocated if it is not needed in this instance we will
-	 * attempt to free it just in case.
-	 *
-	 * free_scaler() is harmless unless the current port
-	 * allocated it.
-	 */
-	if (f->fmt.pix.width == port->try_mbus_framefmt.width &&
-	    f->fmt.pix.height == port->try_mbus_framefmt.height)
-		free_scaler(port);
-	else
-		allocate_scaler(port);
 
 	port->fmt = find_port_format_by_pix(port,
 					    f->fmt.pix.pixelformat);
@@ -2129,22 +1951,7 @@ static int vip_s_fmt_vid_cap(struct file *file, void *priv,
 		 f->fmt.pix.width, f->fmt.pix.height,
 		 f->fmt.pix.bytesperline, f->fmt.pix.sizeimage);
 
-	mf = &sfmt.format;
-	v4l2_fill_mbus_format(mf, &f->fmt.pix, port->fmt->code);
-	/* Make sure to use the subdev size found in the try_fmt */
-	mf->width = port->try_mbus_framefmt.width;
-	mf->height = port->try_mbus_framefmt.height;
-/*
-	sfmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
-	sfmt.pad = port->source_pad;
-	ret = v4l2_subdev_call(port->subdev, pad, set_fmt, NULL, &sfmt);
-	if (ret) {
-		v4l2_dbg(1, debug, stream, "set_fmt failed in subdev\n");
-		return ret;
-	}
-*/
-	/* Save it */
-	port->mbus_framefmt = *mf;
+	v4l2_fill_mbus_format(&port->mbus_framefmt, &f->fmt.pix, port->fmt->code);
 
 	v4l2_dbg(3, debug, stream, "s_fmt subdev fmt mbus_code: %04X size: %dx%d\n",
 		 port->mbus_framefmt.code,

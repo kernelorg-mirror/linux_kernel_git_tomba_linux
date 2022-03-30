@@ -179,7 +179,6 @@ struct vip_port {
 	unsigned int		flags;
 	struct v4l2_rect	c_rect;		/* crop rectangle */
 	struct v4l2_mbus_framefmt mbus_framefmt;
-	struct v4l2_mbus_framefmt try_mbus_framefmt;
 
 	const char		*name;
 	struct vip_fmt		*fmt;		/* current format info */

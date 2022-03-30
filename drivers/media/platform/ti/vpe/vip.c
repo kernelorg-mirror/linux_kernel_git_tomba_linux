@@ -2802,7 +2802,6 @@ static const struct v4l2_file_operations vip_fops = {
 	.owner		= THIS_MODULE,
 	.open		= vip_open,
 	.release	= vip_release,
-	.read		= vb2_fop_read,
 	.poll		= vb2_fop_poll,
 	.unlocked_ioctl	= video_ioctl2,
 	.mmap		= vb2_fop_mmap,
@@ -2815,7 +2814,7 @@ static const struct video_device vip_videodev = {
 	.minor		= -1,
 	.release	= video_device_release,
 	.device_caps	= V4L2_CAP_STREAMING | V4L2_CAP_VIDEO_CAPTURE |
-			  V4L2_CAP_READWRITE | V4L2_CAP_IO_MC,
+			  V4L2_CAP_IO_MC,
 };
 
 static int alloc_stream(struct vip_port *port, int stream_id)
@@ -2853,7 +2852,7 @@ static int alloc_stream(struct vip_port *port, int stream_id)
 	 */
 	q = &stream->vb_vidq;
 	q->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	q->io_modes = VB2_MMAP | VB2_DMABUF | VB2_READ;
+	q->io_modes = VB2_MMAP | VB2_DMABUF;
 	q->drv_priv = stream;
 	q->buf_struct_size = sizeof(struct vip_buffer);
 	q->ops = &vip_video_qops;

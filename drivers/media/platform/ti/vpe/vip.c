@@ -2309,7 +2309,7 @@ static int vip_log_status(struct file *file, void *priv)
 	struct vip_stream *stream = file2stream(file);
 	struct vip_port *port = stream->port;
 	struct vip_slice *slice = port->slice;
-	struct device *dev = &slice->pdev->dev;
+	struct device *dev = &slice->shared->pdev->dev;
 	u32 v;
 	unsigned int i;
 
@@ -2985,7 +2985,7 @@ static int alloc_port(struct vip_slice *slice, int id, const char *name)
 	if (slice->ports[id])
 		return -EINVAL;
 
-	port = devm_kzalloc(&slice->pdev->dev, sizeof(*port), GFP_KERNEL);
+	port = devm_kzalloc(&slice->shared->pdev->dev, sizeof(*port), GFP_KERNEL);
 	if (!port)
 		return -ENOMEM;
 
@@ -3386,7 +3386,6 @@ static int vip_probe_slice(struct platform_device *pdev, int slice_id)
 	mutex_init(&slice->mutex);
 
 	slice->slice_id = slice_id;
-	slice->pdev = pdev;
 	slice->res = shared->res;
 	slice->base = shared->base;
 	slice->v4l2_dev = &shared->v4l2_dev;
@@ -3406,7 +3405,6 @@ static int vip_probe_slice(struct platform_device *pdev, int slice_id)
 	if (IS_ERR(parser->base))
 		return PTR_ERR(parser->base);
 
-	parser->pdev = pdev;
 	slice->parser = parser;
 
 	slice->sc_assigned = VIP_NOT_ASSIGNED;
@@ -3454,6 +3452,7 @@ static int vip_probe(struct platform_device *pdev)
 	if (!shared)
 		return -ENOMEM;
 
+	shared->pdev = pdev;
 	shared->res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "vip");
 	shared->base = devm_ioremap_resource(&pdev->dev, shared->res);
 	if (IS_ERR(shared->base))

@@ -97,8 +97,6 @@ struct vip_fmt {
  */
 struct vip_parser_data {
 	void __iomem		*base;
-
-	struct platform_device *pdev;
 };
 
 /*
@@ -109,6 +107,7 @@ struct vip_shared {
 	struct list_head	list;
 	struct resource		*res;
 	void __iomem		*base;
+	struct platform_device	*pdev;
 	struct vpdma_data	vpdma_data;
 	struct vpdma_data	*vpdma;
 	struct v4l2_device	v4l2_dev;
@@ -141,7 +140,6 @@ struct vip_clk_polarity {
  */
 struct vip_slice {
 	struct v4l2_device	*v4l2_dev;
-	struct platform_device *pdev;
 	struct vip_shared	*shared;
 	struct resource		*res;
 	struct vip_clk_polarity *pclk_pol;

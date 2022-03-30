@@ -28,6 +28,8 @@
 
 #define VIP_MODULE_NAME		"vip"
 
+#define VIP_PAD_SINK 0
+
 static int debug;
 module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug, "debug level (0-8)");
@@ -2237,7 +2239,7 @@ static int vip_s_fmt_vid_cap(struct file *file, void *priv,
 	/* Make sure to use the subdev size found in the try_fmt */
 	mf->width = port->try_mbus_framefmt.width;
 	mf->height = port->try_mbus_framefmt.height;
-
+/*
 	sfmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
 	sfmt.pad = port->source_pad;
 	ret = v4l2_subdev_call(port->subdev, pad, set_fmt, NULL, &sfmt);
@@ -2245,7 +2247,7 @@ static int vip_s_fmt_vid_cap(struct file *file, void *priv,
 		v4l2_dbg(1, debug, stream, "set_fmt failed in subdev\n");
 		return ret;
 	}
-
+*/
 	/* Save it */
 	port->mbus_framefmt = *mf;
 
@@ -2738,6 +2740,12 @@ static int vip_start_streaming(struct vb2_queue *vq, unsigned int count)
 	struct vip_dev *dev = port->dev;
 	int ret;
 
+	ret = media_pipeline_start(&stream->vfd->entity, &port->pipe);
+	if (ret < 0) {
+		v4l2_err(stream, "Failed to start media pipeline: %d\n", ret);
+		goto error_subdev;
+	}
+
 	vip_setup_scaler(stream);
 
 	/*
@@ -2777,6 +2785,7 @@ static int vip_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	return 0;
 
+// XXX pipeline stop
 error_list_fifo:
 	vpdma_unmap_desc_buf(dev->shared->vpdma, &stream->desc_list.buf);
 	vpdma_reset_desc_list(&stream->desc_list);
@@ -2814,11 +2823,12 @@ static void vip_stop_streaming(struct vb2_queue *vq)
 
 	vip_return_all_buffers(stream, vq, VB2_BUF_STATE_ERROR);
 
-	if (!vb2_is_streaming(vq))
-		return;
+	if (vb2_is_streaming(vq)) {
+		vpdma_unmap_desc_buf(dev->shared->vpdma, &stream->desc_list.buf);
+		vpdma_reset_desc_list(&stream->desc_list);
+	}
 
-	vpdma_unmap_desc_buf(dev->shared->vpdma, &stream->desc_list.buf);
-	vpdma_reset_desc_list(&stream->desc_list);
+	media_pipeline_stop(&stream->vfd->entity);
 }
 
 static const struct vb2_ops vip_video_qops = {
@@ -2882,6 +2892,7 @@ static int vip_init_port(struct vip_port *port)
 		fmt = port->active_fmt[0];
 
 		mbus_fmt->code = fmt->code;
+		/*
 		sd_fmt.which = V4L2_SUBDEV_FORMAT_ACTIVE;
 		sd_fmt.pad = port->source_pad;
 		ret = v4l2_subdev_call(port->subdev, pad, set_fmt,
@@ -2890,7 +2901,7 @@ static int vip_init_port(struct vip_port *port)
 			v4l2_err(port, "init_port set_fmt failed in subdev: (%d)\n",
 				 ret);
 			return ret;
-		}
+		}*/
 	}
 
 	/* Assign current format */
@@ -3101,10 +3112,10 @@ static const struct video_device vip_videodev = {
 	.release	= video_device_release,
 	.tvnorms	= V4L2_STD_NTSC | V4L2_STD_PAL | V4L2_STD_SECAM,
 	.device_caps	= V4L2_CAP_STREAMING | V4L2_CAP_VIDEO_CAPTURE |
-			  V4L2_CAP_READWRITE,
+			  V4L2_CAP_READWRITE | V4L2_CAP_IO_MC,
 };
 
-static int alloc_stream(struct vip_port *port, int stream_id, int vfl_type)
+static int alloc_stream(struct vip_port *port, int stream_id)
 {
 	struct vip_stream *stream;
 	struct vip_dev *dev = port->dev;
@@ -3120,7 +3131,6 @@ static int alloc_stream(struct vip_port *port, int stream_id, int vfl_type)
 
 	stream->port = port;
 	stream->stream_id = stream_id;
-	stream->vfl_type = vfl_type;
 	port->cap_streams[stream_id] = stream;
 
 	snprintf(stream->name, sizeof(stream->name), "%s-%d",
@@ -3174,11 +3184,19 @@ static int alloc_stream(struct vip_port *port, int stream_id, int vfl_type)
 	if (!vfd)
 		goto do_free_dropq;
 	*vfd = vip_videodev;
+	snprintf(vfd->name, sizeof(vfd->name), "VIP %u:%u:%u",
+	         dev->slice_id,
+		 port->port_id, stream->stream_id);
 	vfd->v4l2_dev = dev->v4l2_dev;
 	vfd->queue = q;
 
 	vfd->lock = &dev->mutex;
 	video_set_drvdata(vfd, stream);
+
+	port->pad.flags = MEDIA_PAD_FL_SINK;
+	ret = media_entity_pads_init(&vfd->entity, 1, &port->pad);
+	if (ret < 0)
+		return ret;
 
 	/* Disable ioctl not supported by the sub device */
 	if (!v4l2_subdev_has_op(port->subdev, pad, enum_frame_size))
@@ -3191,7 +3209,7 @@ static int alloc_stream(struct vip_port *port, int stream_id, int vfl_type)
 
 	stream->vfd = vfd;
 
-	ret = video_register_device(vfd, vfl_type, -1);
+	ret = video_register_device(vfd, VFL_TYPE_VIDEO, -1);
 	if (ret) {
 		v4l2_err(stream, "Failed to register video device\n");
 		goto do_free_vfd;
@@ -3346,7 +3364,7 @@ static int vip_create_streams(struct vip_port *port,
 	if (port->endpoint.bus_type == V4L2_MBUS_PARALLEL) {
 		port->flags |= FLAG_MULT_PORT;
 		port->num_streams_configured = 1;
-		alloc_stream(port, 0, VFL_TYPE_VIDEO);
+		alloc_stream(port, 0);
 	} else if (port->endpoint.bus_type == V4L2_MBUS_BT656) {
 		port->flags |= FLAG_MULT_PORT;
 		bus = &port->endpoint.bus.parallel;
@@ -3355,8 +3373,7 @@ static int vip_create_streams(struct vip_port *port,
 		for (i = 0; i < bt656_ep->num_channels; i++) {
 			if (bt656_ep->channels[i] >= 16)
 				continue;
-			alloc_stream(port, bt656_ep->channels[i],
-				     VFL_TYPE_VIDEO);
+			alloc_stream(port, bt656_ep->channels[i]);
 		}
 	}
 	return 0;
@@ -3368,6 +3385,7 @@ static int vip_async_bound(struct v4l2_async_notifier *notifier,
 {
 	struct vip_port *port = notifier_to_vip_port(notifier);
 	int ret;
+	struct vip_stream *stream;
 
 	if (port->subdev) {
 		v4l2_info(port, "Rejecting subdev %s (Already set!!)",
@@ -3388,14 +3406,47 @@ static int vip_async_bound(struct v4l2_async_notifier *notifier,
 	if (ret)
 		return ret;
 
+
+	/*
+	remote_pad = media_entity_get_fwnode_pad(&subdev->entity,
+					  of_fwnode_handle(phy->source_ep_node),
+					  MEDIA_PAD_FL_SOURCE);
+	if (remote_pad < 0) {
+		v4l2_err(port, "Source %s has no connected source pad\n",
+			 subdev->name);
+		return remote_pad;
+	}
+*/
+	// XXX
+	if (WARN_ON(port->endpoint.bus_type != V4L2_MBUS_PARALLEL))
+		return -EINVAL;
+
+	stream = port->cap_streams[0]; //XXX
+
+	ret = media_create_pad_link(&subdev->entity, port->source_pad,
+	                            &stream->vfd->entity, VIP_PAD_SINK,
+				    MEDIA_LNK_FL_IMMUTABLE |
+					    MEDIA_LNK_FL_ENABLED);
+	if (ret) {
+		v4l2_err(port, "Failed to create media link for source %s\n",
+			 subdev->name);
+		return ret;
+	}
+
 	return 0;
 }
 
 static int vip_async_complete(struct v4l2_async_notifier *notifier)
 {
 	struct vip_port *port = notifier_to_vip_port(notifier);
+	int ret;
 
 	v4l2_dbg(1, debug, port, "%s\n", __func__);
+
+	ret = v4l2_device_register_subdev_nodes(&port->dev->shared->v4l2_dev);
+	if (ret)
+		return ret;
+
 	return 0;
 }
 
@@ -3777,6 +3828,19 @@ static int vip_probe(struct platform_device *pdev)
 		goto err_runtime_put;
 	}
 
+	{
+		struct media_device *mdev = &shared->mdev;
+
+		mdev->dev = &pdev->dev;
+		mdev->hw_revision = 1;
+		strscpy(mdev->model, "VIP", sizeof(mdev->model));
+		snprintf(mdev->bus_info, sizeof(mdev->bus_info), "platform:%s",
+			 dev_name(mdev->dev));
+		media_device_init(mdev);
+
+		shared->v4l2_dev.mdev = mdev;
+	}
+
 	ret = v4l2_device_register(&pdev->dev, &shared->v4l2_dev);
 	if (ret)
 		goto err_runtime_put;
@@ -3805,6 +3869,12 @@ static int vip_probe(struct platform_device *pdev)
 		goto err_dev_unreg;
 	}
 
+	ret = media_device_register(&shared->mdev);
+	if (ret) {
+		dev_err(&pdev->dev, "media_device_register failed\n");
+		return ret;
+	}
+
 	return 0;
 
 err_dev_unreg:
@@ -3824,6 +3894,8 @@ static int vip_remove(struct platform_device *pdev)
 	struct vip_dev *dev;
 	int slice;
 
+	media_device_unregister(&shared->mdev);
+
 	for (slice = 0; slice < VIP_NUM_SLICES; slice++) {
 		dev = shared->devs[slice];
 		if (!dev)
@@ -3834,6 +3906,9 @@ static int vip_remove(struct platform_device *pdev)
 	}
 
 	v4l2_ctrl_handler_free(&shared->ctrl_handler);
+	v4l2_device_unregister(&shared->v4l2_dev);
+
+	media_device_cleanup(&shared->mdev);
 
 	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);

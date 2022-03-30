@@ -23,6 +23,7 @@
 #include <media/videobuf2-core.h>
 #include <media/videobuf2-dma-contig.h>
 #include <media/videobuf2-memops.h>
+#include <media/media-device.h>
 
 #include "csc.h"
 #include "sc.h"
@@ -119,6 +120,8 @@ struct vip_shared {
 	struct vip_dev		*devs[VIP_NUM_SLICES];
 	struct v4l2_ctrl_handler ctrl_handler;
 	const char		*name;
+
+	struct media_device	mdev;
 };
 
 /*
@@ -192,10 +195,10 @@ struct vip_port {
 	struct vip_stream	*cap_streams[VIP_CAP_STREAMS_PER_PORT];
 
 	struct v4l2_async_notifier notifier;
-	struct v4l2_subdev	*subdev;
+	struct v4l2_subdev	*subdev; /* remote subdev */
 	struct v4l2_fwnode_endpoint endpoint;
 	struct vip_bt656_bus	bt656_endpoint;
-	unsigned int		source_pad;
+	unsigned int		source_pad; /* remote subdev source pad */
 	struct vip_fmt		*active_fmt[VIP_MAX_ACTIVE_FMT];
 	int			num_active_fmt;
 	/* have new shadow reg values */
@@ -210,6 +213,9 @@ struct vip_port {
 	bool			scaler;
 	/* Show the csc resource state on this port */
 	enum vip_csc_state	csc;
+
+	struct media_pad	pad;
+	struct media_pipeline	pipe;
 };
 
 /*
@@ -221,7 +227,6 @@ struct vip_stream {
 	struct vip_port		*port;
 	int			stream_id;
 	int			list_num;
-	int			vfl_type;
 	char			name[16];
 	struct work_struct	recovery_work;
 	int			num_recovery;

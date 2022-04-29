@@ -186,7 +186,7 @@ struct vip_port {
 	struct vip_stream	*cap_streams[VIP_CAP_STREAMS_PER_PORT];
 
 	struct v4l2_async_notifier notifier;
-	struct v4l2_subdev	*subdev; /* remote subdev */
+	struct v4l2_subdev	*remote_subdev;
 	struct v4l2_fwnode_endpoint endpoint;
 	struct vip_bt656_bus	bt656_endpoint;
 	/* have new shadow reg values */

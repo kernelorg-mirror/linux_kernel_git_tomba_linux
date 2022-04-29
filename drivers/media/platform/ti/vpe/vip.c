@@ -2486,8 +2486,8 @@ static int vip_start_streaming(struct vb2_queue *vq, unsigned int count)
 	set_fmt_params(stream);
 	vip_setup_parser(port);
 
-	if (port->subdev) {
-		ret = v4l2_subdev_call(port->subdev, video, s_stream, 1);
+	if (port->remote_subdev) {
+		ret = v4l2_subdev_call(port->remote_subdev, video, s_stream, 1);
 		if (ret < 0 && ret != -ENOIOCTLCMD) {
 			v4l2_dbg(1, debug, stream, "stream on failed in subdev\n");
 			goto error_subdev;
@@ -2541,8 +2541,8 @@ static void vip_stop_streaming(struct vb2_queue *vq)
 	disable_irqs(slice, slice->slice_id, stream->list_num);
 	clear_irqs(slice, slice->slice_id, stream->list_num);
 
-	if (port->subdev) {
-		ret = v4l2_subdev_call(port->subdev, video, s_stream, 0);
+	if (port->remote_subdev) {
+		ret = v4l2_subdev_call(port->remote_subdev, video, s_stream, 0);
 		if (ret < 0 && ret != -ENOIOCTLCMD)
 			v4l2_dbg(1, debug, stream, "stream on failed in subdev\n");
 	}
@@ -2906,9 +2906,9 @@ static int alloc_stream(struct vip_port *port, int stream_id)
 		return ret;
 
 	/* Disable ioctl not supported by the sub device */
-	if (!v4l2_subdev_has_op(port->subdev, pad, enum_frame_size))
+	if (!v4l2_subdev_has_op(port->remote_subdev, pad, enum_frame_size))
 		v4l2_disable_ioctl(vfd, VIDIOC_ENUM_FRAMESIZES);
-	if (!v4l2_subdev_has_op(port->subdev, pad, enum_frame_interval)) {
+	if (!v4l2_subdev_has_op(port->remote_subdev, pad, enum_frame_interval)) {
 		v4l2_disable_ioctl(vfd, VIDIOC_ENUM_FRAMEINTERVALS);
 		v4l2_disable_ioctl(vfd, VIDIOC_G_PARM);
 		v4l2_disable_ioctl(vfd, VIDIOC_S_PARM);
@@ -2998,7 +2998,7 @@ static void free_port(struct vip_port *port)
 }
 
 static int vip_create_streams(struct vip_port *port,
-			      struct v4l2_subdev *subdev)
+			      struct v4l2_subdev *remote_subdev)
 {
 	struct v4l2_mbus_config_parallel *bus;
 	struct vip_bt656_bus *bt656_ep;
@@ -3007,7 +3007,7 @@ static int vip_create_streams(struct vip_port *port,
 	for (i = 0; i < VIP_CAP_STREAMS_PER_PORT; i++)
 		free_stream(port->cap_streams[i]);
 
-	port->subdev = subdev;
+	port->remote_subdev = remote_subdev;
 
 	if (port->endpoint.bus_type == V4L2_MBUS_PARALLEL) {
 		port->flags |= FLAG_MULT_PORT;
@@ -3028,7 +3028,7 @@ static int vip_create_streams(struct vip_port *port,
 }
 
 static int vip_async_bound(struct v4l2_async_notifier *notifier,
-			   struct v4l2_subdev *subdev,
+			   struct v4l2_subdev *remote_subdev,
 			   struct v4l2_async_subdev *asd)
 {
 	struct vip_port *port = notifier_to_vip_port(notifier);
@@ -3036,25 +3036,25 @@ static int vip_async_bound(struct v4l2_async_notifier *notifier,
 	u16 source_pad;
 	int ret;
 
-	if (port->subdev) {
+	if (port->remote_subdev) {
 		v4l2_info(port, "Rejecting subdev %s (Already set!!)",
-			  subdev->name);
+			  remote_subdev->name);
 		return 0;
 	}
 
 	v4l2_info(port, "Port %c: Using subdev %s for capture\n",
-		  port->port_id == VIP_PORTA ? 'A' : 'B', subdev->name);
+		  port->port_id == VIP_PORTA ? 'A' : 'B', remote_subdev->name);
 
-	ret = vip_create_streams(port, subdev);
+	ret = vip_create_streams(port, remote_subdev);
 	if (ret)
 		return ret;
 
-	ret = media_entity_get_fwnode_pad(&subdev->entity, subdev->fwnode,
+	ret = media_entity_get_fwnode_pad(&remote_subdev->entity, remote_subdev->fwnode,
 					  MEDIA_PAD_FL_SOURCE);
 
 	if (ret < 0) {
 		v4l2_err(port, "Source %s has no connected source pad\n",
-			 subdev->name);
+			 remote_subdev->name);
 		return ret;
 	}
 
@@ -3066,13 +3066,13 @@ static int vip_async_bound(struct v4l2_async_notifier *notifier,
 
 	stream = port->cap_streams[0]; //XXX
 
-	ret = media_create_pad_link(&subdev->entity, source_pad,
+	ret = media_create_pad_link(&remote_subdev->entity, source_pad,
 	                            &stream->vfd->entity, VIP_PAD_SINK,
 				    MEDIA_LNK_FL_IMMUTABLE |
 					    MEDIA_LNK_FL_ENABLED);
 	if (ret) {
 		v4l2_err(port, "Failed to create media link for source %s\n",
-			 subdev->name);
+			 remote_subdev->name);
 		return ret;
 	}
 
@@ -3114,7 +3114,7 @@ static int vip_register_subdev_notif(struct vip_port *port,
 {
 	struct v4l2_async_notifier *notifier = &port->notifier;
 	struct vip_slice *slice = port->slice;
-	struct fwnode_handle *subdev;
+	struct fwnode_handle *remote_subdev;
 	struct v4l2_fwnode_endpoint *vep;
 	struct vip_bt656_bus *bt656_vep;
 	struct v4l2_async_subdev *asd;
@@ -3123,8 +3123,8 @@ static int vip_register_subdev_notif(struct vip_port *port,
 	vep = &port->endpoint;
 	bt656_vep = &port->bt656_endpoint;
 
-	subdev = fwnode_graph_get_remote_port_parent(ep);
-	if (!subdev) {
+	remote_subdev = fwnode_graph_get_remote_port_parent(ep);
+	if (!remote_subdev) {
 		v4l2_dbg(3, debug, port, "can't get remote parent\n");
 		return -EINVAL;
 	}
@@ -3132,7 +3132,7 @@ static int vip_register_subdev_notif(struct vip_port *port,
 	ret = v4l2_fwnode_endpoint_parse(ep, vep);
 	if (ret) {
 		v4l2_dbg(3, debug, port, "Failed to parse endpoint:\n");
-		fwnode_handle_put(subdev);
+		fwnode_handle_put(remote_subdev);
 		return -EINVAL;
 	}
 
@@ -3177,11 +3177,11 @@ static int vip_register_subdev_notif(struct vip_port *port,
 
 	v4l2_async_nf_init(notifier);
 
-	asd = v4l2_async_nf_add_fwnode(notifier, subdev,
+	asd = v4l2_async_nf_add_fwnode(notifier, remote_subdev,
 				       struct v4l2_async_subdev);
 	if (IS_ERR(asd)) {
 		v4l2_dbg(1, debug, port, "Error adding asd\n");
-		fwnode_handle_put(subdev);
+		fwnode_handle_put(remote_subdev);
 		v4l2_async_nf_cleanup(notifier);
 		return -EINVAL;
 	}

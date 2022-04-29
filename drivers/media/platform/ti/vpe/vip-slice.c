@@ -9,6 +9,7 @@
  * Benoit Parrot, <bparrot@ti.com>
  */
 
+#include "media/v4l2-subdev.h"
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
@@ -26,43 +27,65 @@
 
 #include "vip.h"
 
+static inline struct vip_slice *to_vip_slice(struct v4l2_subdev *sd)
+{
+	return container_of(sd, struct vip_slice, sd);
+}
 
-static int cal_camerarx_sd_s_stream(struct v4l2_subdev *sd, int enable)
+static int vip_slice_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	return 0;
 }
 
-static int cal_camerarx_sd_enum_mbus_code(struct v4l2_subdev *sd,
-					  struct v4l2_subdev_state *sd_state,
+static int vip_slice_enum_mbus_code(struct v4l2_subdev *sd,
+					  struct v4l2_subdev_state *state,
 					  struct v4l2_subdev_mbus_code_enum *code)
 {
 	return 0;
 }
 
-static int cal_camerarx_sd_enum_frame_size(struct v4l2_subdev *sd,
-					   struct v4l2_subdev_state *sd_state,
+static int vip_slice_enum_frame_size(struct v4l2_subdev *sd,
+					   struct v4l2_subdev_state *state,
 					   struct v4l2_subdev_frame_size_enum *fse)
 {
 	return 0;
 }
 
 
-static int cal_camerarx_sd_set_fmt(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_state *sd_state,
+static int vip_slice_set_fmt(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_state *state,
 				   struct v4l2_subdev_format *format)
 {
+	struct v4l2_mbus_framefmt *fmt;
+
+	fmt = v4l2_subdev_get_pad_format(sd, state, format->pad);
+	if (!fmt)
+		return -EINVAL;
+
+	*fmt = format->format;
+
+	if (format->pad < 2) {
+		/* propagate */
+
+		fmt = v4l2_subdev_get_pad_format(sd, state, format->pad + 2);
+		if (!fmt)
+			return -EINVAL;
+
+		*fmt = format->format;
+	}
+
 	return 0;
 }
 
-static int cal_camerarx_sd_init_cfg(struct v4l2_subdev *sd,
-				    struct v4l2_subdev_state *sd_state)
+static int vip_slice_init_cfg(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *state)
 {
 	int i;
 
 	struct v4l2_subdev_format format = {
-		.which = sd_state ? V4L2_SUBDEV_FORMAT_TRY
+		.which = state ? V4L2_SUBDEV_FORMAT_TRY
 		: V4L2_SUBDEV_FORMAT_ACTIVE,
-		//.pad = CAL_CAMERARX_PAD_SINK,
+		//.pad = vip_slice_PAD_SINK,
 		.format = {
 			.width = 640,
 			.height = 480,
@@ -77,28 +100,30 @@ static int cal_camerarx_sd_init_cfg(struct v4l2_subdev *sd,
 
 	for (i = 0; i < 2; ++i) {
 		format.pad = i;
-		return cal_camerarx_sd_set_fmt(sd, sd_state, &format);
+		return vip_slice_set_fmt(sd, state, &format);
 	}
+
+	return 0;
 }
 
-static const struct v4l2_subdev_video_ops cal_camerarx_video_ops = {
-	.s_stream = cal_camerarx_sd_s_stream,
+static const struct v4l2_subdev_video_ops vip_slice_video_ops = {
+	.s_stream = vip_slice_s_stream,
 };
 
-static const struct v4l2_subdev_pad_ops cal_camerarx_pad_ops = {
-	.init_cfg = cal_camerarx_sd_init_cfg,
-	.enum_mbus_code = cal_camerarx_sd_enum_mbus_code,
-	.enum_frame_size = cal_camerarx_sd_enum_frame_size,
-	.get_fmt = cal_camerarx_sd_get_fmt,
-	.set_fmt = cal_camerarx_sd_set_fmt,
+static const struct v4l2_subdev_pad_ops vip_slice_pad_ops = {
+	.init_cfg = vip_slice_init_cfg,
+	.enum_mbus_code = vip_slice_enum_mbus_code,
+	.enum_frame_size = vip_slice_enum_frame_size,
+	.get_fmt = v4l2_subdev_get_fmt,
+	.set_fmt = vip_slice_set_fmt,
 };
 
-static const struct v4l2_subdev_ops cal_camerarx_subdev_ops = {
-	.video = &cal_camerarx_video_ops,
-	.pad = &cal_camerarx_pad_ops,
+static const struct v4l2_subdev_ops vip_slice_subdev_ops = {
+	.video = &vip_slice_video_ops,
+	.pad = &vip_slice_pad_ops,
 };
 
-static struct media_entity_operations cal_camerarx_media_ops = {
+static struct media_entity_operations vip_slice_media_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };
 
@@ -107,7 +132,7 @@ int vip_create_slice_subdev(struct vip_slice *slice)
 	struct v4l2_subdev *sd = &slice->sd;
 	int ret;
 
-	v4l2_subdev_init(sd, &cal_camerarx_subdev_ops);
+	v4l2_subdev_init(sd, &vip_slice_subdev_ops);
 	sd->entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
 	sd->flags = V4L2_SUBDEV_FL_HAS_DEVNODE;
 	strncpy(sd->name, slice->name, sizeof(sd->name));
@@ -117,24 +142,24 @@ int vip_create_slice_subdev(struct vip_slice *slice)
 	slice->pads[1].flags = MEDIA_PAD_FL_SINK;
 	slice->pads[2].flags = MEDIA_PAD_FL_SOURCE;
 	slice->pads[3].flags = MEDIA_PAD_FL_SOURCE;
-	sd->entity.ops = &cal_camerarx_media_ops;
+	sd->entity.ops = &vip_slice_media_ops;
 	ret = media_entity_pads_init(&sd->entity, ARRAY_SIZE(slice->pads),
 				     slice->pads);
 	if (ret) {
 		WARN_ON(1);
-		return -EINVAL;
+		return ret;
 	}
 
-	ret = cal_camerarx_sd_init_cfg(sd, NULL);
+	ret = v4l2_subdev_init_finalize(sd);
 	if (ret) {
 		WARN_ON(1);
-		return -EINVAL;
+		return ret;
 	}
 
 	ret = v4l2_device_register_subdev(&slice->shared->v4l2_dev, sd);
 	if (ret) {
 		WARN_ON(1);
-		return -EINVAL;
+		return ret;
 	}
 
 	return 0;
@@ -143,5 +168,6 @@ int vip_create_slice_subdev(struct vip_slice *slice)
 void vip_destroy_slice_subdev(struct vip_slice *slice)
 {
 	v4l2_device_unregister_subdev(&slice->sd);
+	v4l2_subdev_cleanup(&slice->sd);
 	media_entity_cleanup(&slice->sd.entity);
 }

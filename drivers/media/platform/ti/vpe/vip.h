@@ -164,6 +164,9 @@ struct vip_slice {
 	struct csc_data		*csc;
 	/* csc port assignation */
 	int			csc_assigned;
+
+	struct v4l2_subdev	sd;
+	struct media_pad	pads[4];
 };
 
 /*
@@ -511,4 +514,9 @@ enum sync_types {
 #define VIP_ANC_SRCNUM_STOP_IMM_SHFT	0
 #define VIP_YUV_SRCNUM_STOP_IMM_SHFT	16
 
-#endif
+
+void vip_destroy_slice_subdev(struct vip_slice *slice);
+int vip_create_slice_subdev(struct vip_slice *slice);
+
+
+#endif /* __TI_VIP_H */

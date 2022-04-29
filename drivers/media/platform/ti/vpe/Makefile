@@ -9,6 +9,6 @@ ti-vpe-y := vpe.o
 ti-vpdma-y := vpdma.o
 ti-sc-y := sc.o
 ti-csc-y := csc.o
-ti-vip-y := vip.o
+ti-vip-y := vip.o vip-slice.o
 
 ccflags-$(CONFIG_VIDEO_TI_VPE_DEBUG) += -DDEBUG

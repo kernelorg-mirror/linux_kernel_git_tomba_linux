@@ -294,10 +294,12 @@ static bool vip_is_mbuscode_rgb(u32 code)
 	return ((code & 0xff00) == 0x1000);
 }
 
+#if 0
 static bool vip_is_mbuscode_raw(u32 code)
 {
 	return ((code & 0xff00) == 0x3000);
 }
+#endif
 
 /*
  * This is not an accurate conversion but it is only used to
@@ -3067,11 +3069,23 @@ static int vip_async_bound(struct v4l2_async_notifier *notifier,
 	stream = port->cap_streams[0]; //XXX
 
 	ret = media_create_pad_link(&remote_subdev->entity, source_pad,
-	                            &stream->vfd->entity, VIP_PAD_SINK,
+	                            &port->slice->sd.entity, port->port_id,
 				    MEDIA_LNK_FL_IMMUTABLE |
 					    MEDIA_LNK_FL_ENABLED);
 	if (ret) {
 		v4l2_err(port, "Failed to create media link for source %s\n",
+			 remote_subdev->name);
+		return ret;
+	}
+
+
+	ret = media_create_pad_link(&port->slice->sd.entity, port->port_id + 2,
+	                            &stream->vfd->entity, VIP_PAD_SINK,
+				    MEDIA_LNK_FL_IMMUTABLE |
+					    MEDIA_LNK_FL_ENABLED);
+
+	if (ret) {
+		v4l2_err(port, "Failed to create media link for vip stream %s\n",
 			 remote_subdev->name);
 		return ret;
 	}
@@ -3330,6 +3344,10 @@ static int vip_probe_complete(struct platform_device *pdev)
 		slice->pclk_pol = pol;
 		port = slice->ports[port_id];
 
+		ret = vip_create_slice_subdev(slice);
+		if (ret)
+			return ret;
+
 		vip_register_subdev_notif(port, ep);
 		fwnode_handle_put(ep);
 		fwnode_handle_put(port_node);
@@ -3540,6 +3558,7 @@ static int vip_remove(struct platform_device *pdev)
 
 		free_port(slice->ports[VIP_PORTA]);
 		free_port(slice->ports[VIP_PORTB]);
+		vip_destroy_slice_subdev(slice);
 	}
 
 	v4l2_device_unregister(&shared->v4l2_dev);

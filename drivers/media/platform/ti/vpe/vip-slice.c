@@ -32,11 +32,6 @@ static inline struct vip_slice *to_vip_slice(struct v4l2_subdev *sd)
 	return container_of(sd, struct vip_slice, sd);
 }
 
-static int vip_slice_s_stream(struct v4l2_subdev *sd, int enable)
-{
-	return 0;
-}
-
 static int vip_slice_enum_mbus_code(struct v4l2_subdev *sd,
 					  struct v4l2_subdev_state *state,
 					  struct v4l2_subdev_mbus_code_enum *code)
@@ -106,9 +101,51 @@ static int vip_slice_init_cfg(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static const struct v4l2_subdev_video_ops vip_slice_video_ops = {
-	.s_stream = vip_slice_s_stream,
-};
+static int vip_slice_enable_streams(struct v4l2_subdev *sd,
+		      struct v4l2_subdev_state *state, u32 pad,
+		      u64 streams_mask)
+{
+	struct vip_slice *slice = to_vip_slice(sd);
+	struct vip_port *port = slice->ports[pad - 2];
+	int ret;
+
+	if (pad != 2 && pad != 3)
+		return -EINVAL;
+
+	if (streams_mask != BIT(0))
+		return -EINVAL;
+
+	ret = v4l2_subdev_call(port->remote_subdev, video, s_stream, 1);
+	if (ret < 0 && ret != -ENOIOCTLCMD) {
+		WARN_ON(1);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int vip_slice_disable_streams(struct v4l2_subdev *sd,
+		       struct v4l2_subdev_state *state, u32 pad,
+		       u64 streams_mask)
+{
+	struct vip_slice *slice = to_vip_slice(sd);
+	struct vip_port *port = slice->ports[pad - 2];
+	int ret;
+
+	if (pad != 2 && pad != 3)
+		return -EINVAL;
+
+	if (streams_mask != BIT(0))
+		return -EINVAL;
+
+	ret = v4l2_subdev_call(port->remote_subdev, video, s_stream, 0);
+	if (ret < 0 && ret != -ENOIOCTLCMD) {
+		WARN_ON(1);
+		return ret;
+	}
+
+	return 0;
+}
 
 static const struct v4l2_subdev_pad_ops vip_slice_pad_ops = {
 	.init_cfg = vip_slice_init_cfg,
@@ -116,10 +153,11 @@ static const struct v4l2_subdev_pad_ops vip_slice_pad_ops = {
 	.enum_frame_size = vip_slice_enum_frame_size,
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = vip_slice_set_fmt,
+	.enable_streams = vip_slice_enable_streams,
+	.disable_streams = vip_slice_disable_streams,
 };
 
 static const struct v4l2_subdev_ops vip_slice_subdev_ops = {
-	.video = &vip_slice_video_ops,
 	.pad = &vip_slice_pad_ops,
 };
 

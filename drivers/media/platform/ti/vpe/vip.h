@@ -193,8 +193,6 @@ struct vip_port {
 	/* Show the csc resource state on this port */
 	enum vip_csc_state	csc;
 
-	struct media_pad	pad;
-	struct media_pipeline	pipe;
 };
 
 /*
@@ -206,6 +204,8 @@ struct vip_stream {
 	struct vip_port		*port;
 	int			stream_id;
 	int			list_num;
+	struct media_pad	pad;
+	struct media_pipeline	pipe;
 	char			name[16];
 	struct work_struct	recovery_work;
 	int			num_recovery;
@@ -265,6 +265,7 @@ enum sync_types {
 
 #define VIP_NOT_ASSIGNED	-1
 
+u32 vip_port_to_slice_sink_pad(struct vip_port *port);
 u32 vip_port_to_slice_source_pad(struct vip_port *port);
 
 /*

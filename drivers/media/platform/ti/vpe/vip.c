@@ -2439,7 +2439,7 @@ static int vip_start_streaming(struct vb2_queue *vq, unsigned int count)
 	struct vip_slice *slice = port->slice;
 	int ret;
 
-	ret = media_pipeline_start(&stream->vfd->entity, &port->pipe);
+	ret = media_pipeline_start(&stream->vfd->entity, &stream->pipe);
 	if (ret < 0) {
 		v4l2_err(stream, "Failed to start media pipeline: %d\n", ret);
 		goto error_subdev;
@@ -2871,19 +2871,10 @@ static int alloc_stream(struct vip_port *port, int stream_id)
 	vfd->lock = &slice->mutex;
 	video_set_drvdata(vfd, stream);
 
-	port->pad.flags = MEDIA_PAD_FL_SINK;
-	ret = media_entity_pads_init(&vfd->entity, 1, &port->pad);
+	stream->pad.flags = MEDIA_PAD_FL_SINK;
+	ret = media_entity_pads_init(&vfd->entity, 1, &stream->pad);
 	if (ret < 0)
 		return ret;
-
-	/* Disable ioctl not supported by the sub device */
-	if (!v4l2_subdev_has_op(port->remote_subdev, pad, enum_frame_size))
-		v4l2_disable_ioctl(vfd, VIDIOC_ENUM_FRAMESIZES);
-	if (!v4l2_subdev_has_op(port->remote_subdev, pad, enum_frame_interval)) {
-		v4l2_disable_ioctl(vfd, VIDIOC_ENUM_FRAMEINTERVALS);
-		v4l2_disable_ioctl(vfd, VIDIOC_G_PARM);
-		v4l2_disable_ioctl(vfd, VIDIOC_S_PARM);
-	}
 
 	stream->vfd = vfd;
 
@@ -2968,15 +2959,12 @@ static void free_port(struct vip_port *port)
 	free_stream(port->cap_streams[0]);
 }
 
-static int vip_create_streams(struct vip_port *port,
-			      struct v4l2_subdev *remote_subdev)
+static int vip_create_streams(struct vip_port *port)
 {
 	int i;
 
 	for (i = 0; i < VIP_CAP_STREAMS_PER_PORT; i++)
 		free_stream(port->cap_streams[i]);
-
-	port->remote_subdev = remote_subdev;
 
 	port->flags |= FLAG_MULT_PORT;
 	alloc_stream(port, 0);
@@ -2990,7 +2978,7 @@ static int vip_async_bound(struct v4l2_async_notifier *notifier,
 {
 	struct vip_port *port = notifier_to_vip_port(notifier);
 	struct vip_stream *stream;
-	u16 source_pad;
+	u16 remote_source_pad;
 	int ret;
 
 	if (port->remote_subdev) {
@@ -3002,7 +2990,9 @@ static int vip_async_bound(struct v4l2_async_notifier *notifier,
 	v4l2_info(port, "Port %c: Using subdev %s for capture\n",
 		  port->port_id == VIP_PORTA ? 'A' : 'B', remote_subdev->name);
 
-	ret = vip_create_streams(port, remote_subdev);
+	port->remote_subdev = remote_subdev;
+
+	ret = vip_create_streams(port);
 	if (ret)
 		return ret;
 
@@ -3015,16 +3005,10 @@ static int vip_async_bound(struct v4l2_async_notifier *notifier,
 		return ret;
 	}
 
-	source_pad = ret;
+	remote_source_pad = ret;
 
-	// XXX
-	if (WARN_ON(port->endpoint.bus_type != V4L2_MBUS_PARALLEL))
-		return -EINVAL;
-
-	stream = port->cap_streams[0]; //XXX
-
-	ret = media_create_pad_link(&remote_subdev->entity, source_pad,
-	                            &port->slice->sd.entity, port->port_id,
+	ret = media_create_pad_link(&remote_subdev->entity, remote_source_pad,
+	                            &port->slice->sd.entity, vip_port_to_slice_sink_pad(port),
 				    MEDIA_LNK_FL_IMMUTABLE |
 					    MEDIA_LNK_FL_ENABLED);
 	if (ret) {
@@ -3033,8 +3017,9 @@ static int vip_async_bound(struct v4l2_async_notifier *notifier,
 		return ret;
 	}
 
+	stream = port->cap_streams[0]; //XXX
 
-	ret = media_create_pad_link(&port->slice->sd.entity, port->port_id + 2,
+	ret = media_create_pad_link(&port->slice->sd.entity, vip_port_to_slice_source_pad(port),
 	                            &stream->vfd->entity, VIP_PAD_SINK,
 				    MEDIA_LNK_FL_IMMUTABLE |
 					    MEDIA_LNK_FL_ENABLED);

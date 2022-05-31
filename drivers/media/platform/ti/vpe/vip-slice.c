@@ -55,6 +55,11 @@ static struct vip_port *vip_slice_pad_to_port(struct vip_slice *slice, u32 pad)
 	return slice->ports[pad % 2];
 }
 
+u32 vip_port_to_slice_sink_pad(struct vip_port *port)
+{
+	return port->port_id;
+}
+
 u32 vip_port_to_slice_source_pad(struct vip_port *port)
 {
 	return port->port_id + 2;

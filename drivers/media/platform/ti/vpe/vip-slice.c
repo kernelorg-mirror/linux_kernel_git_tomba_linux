@@ -27,6 +27,39 @@
 
 #include "vip.h"
 
+#define VIP_SLICE_NUM_PADS 4
+
+static bool vip_slice_pad_is_sink(u32 pad)
+{
+	return pad == 0 || pad == 1;
+}
+
+static bool vip_slice_pad_is_source(u32 pad)
+{
+	return pad == 2 || pad == 3;
+}
+
+static u32 vip_slice_invert_pad(u32 pad)
+{
+	if (vip_slice_pad_is_source(pad))
+		return pad - 2;
+	else
+		return pad + 2;
+}
+
+static struct vip_port *vip_slice_pad_to_port(struct vip_slice *slice, u32 pad)
+{
+	if (WARN_ON(pad >= VIP_SLICE_NUM_PADS))
+		return NULL;
+
+	return slice->ports[pad % 2];
+}
+
+u32 vip_port_to_slice_source_pad(struct vip_port *port)
+{
+	return port->port_id + 2;
+}
+
 static inline struct vip_slice *to_vip_slice(struct v4l2_subdev *sd)
 {
 	return container_of(sd, struct vip_slice, sd);
@@ -59,10 +92,10 @@ static int vip_slice_set_fmt(struct v4l2_subdev *sd,
 
 	*fmt = format->format;
 
-	if (format->pad < 2) {
-		/* propagate */
+	if (vip_slice_pad_is_sink(format->pad)) {
+		/* propagate to source pad */
 
-		fmt = v4l2_subdev_get_pad_format(sd, state, format->pad + 2);
+		fmt = v4l2_subdev_get_pad_format(sd, state, vip_slice_invert_pad(format->pad));
 		if (!fmt)
 			return -EINVAL;
 
@@ -106,10 +139,10 @@ static int vip_slice_enable_streams(struct v4l2_subdev *sd,
 		      u64 streams_mask)
 {
 	struct vip_slice *slice = to_vip_slice(sd);
-	struct vip_port *port = slice->ports[pad - 2];
+	struct vip_port *port = vip_slice_pad_to_port(slice, pad);
 	int ret;
 
-	if (pad != 2 && pad != 3)
+	if (!vip_slice_pad_is_source(pad))
 		return -EINVAL;
 
 	if (streams_mask != BIT(0))
@@ -129,10 +162,10 @@ static int vip_slice_disable_streams(struct v4l2_subdev *sd,
 		       u64 streams_mask)
 {
 	struct vip_slice *slice = to_vip_slice(sd);
-	struct vip_port *port = slice->ports[pad - 2];
+	struct vip_port *port = vip_slice_pad_to_port(slice, pad);
 	int ret;
 
-	if (pad != 2 && pad != 3)
+	if (!vip_slice_pad_is_source(pad))
 		return -EINVAL;
 
 	if (streams_mask != BIT(0))

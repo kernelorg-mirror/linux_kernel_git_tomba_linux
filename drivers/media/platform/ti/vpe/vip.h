@@ -265,6 +265,8 @@ enum sync_types {
 
 #define VIP_NOT_ASSIGNED	-1
 
+u32 vip_port_to_slice_source_pad(struct vip_port *port);
+
 /*
  * Register offsets and field selectors
  */

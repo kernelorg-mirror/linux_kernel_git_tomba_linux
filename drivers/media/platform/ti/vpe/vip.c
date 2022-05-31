@@ -2458,7 +2458,7 @@ static int vip_start_streaming(struct vb2_queue *vq, unsigned int count)
 	vip_setup_parser(port);
 
 	ret = v4l2_subdev_call_state_active(&slice->sd, pad, enable_streams,
-	                                    port->port_id + 2, // XXX port id to source pad
+	                                    vip_port_to_slice_source_pad(port),
 	                                    BIT(0));
 	if (ret) {
 		v4l2_dbg(1, debug, stream, "stream on failed in subdev\n");
@@ -2513,7 +2513,7 @@ static void vip_stop_streaming(struct vb2_queue *vq)
 	clear_irqs(slice, slice->slice_id, stream->list_num);
 
 	ret = v4l2_subdev_call_state_active(&slice->sd, pad, disable_streams,
-	                                    port->port_id + 2, // XXX port id to source pad
+	                                    vip_port_to_slice_source_pad(port),
 	                                    BIT(0));
 	if (ret < 0 && ret != -ENOIOCTLCMD)
 		v4l2_dbg(1, debug, stream, "stream on failed in subdev\n");

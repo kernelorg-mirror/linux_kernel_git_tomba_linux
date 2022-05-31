@@ -92,15 +92,6 @@ struct vip_fmt {
 };
 
 /*
- * The vip_bt656_bus structure contains vip specific bt656 bus data.
- */
-struct vip_bt656_bus {
-	unsigned char num_channels;
-	unsigned char pixmux;
-	unsigned char channels[16];
-};
-
-/*
  * The vip_clk_polarity structure contains the regmap, offset and bit field
  * definitions to control each port clock polarity.
  */
@@ -183,15 +174,12 @@ struct vip_port {
 
 	const char		*name;
 	struct vip_fmt		*fmt;		/* current format info */
-	/* Number of channels/streams configured */
-	int			num_streams_configured;
 	int			num_streams;	/* count of open streams */
 	struct vip_stream	*cap_streams[VIP_CAP_STREAMS_PER_PORT];
 
 	struct v4l2_async_notifier notifier;
 	struct v4l2_subdev	*remote_subdev;
 	struct v4l2_fwnode_endpoint endpoint;
-	struct vip_bt656_bus	bt656_endpoint;
 	/* have new shadow reg values */
 	bool			load_mmrs;
 	/* shadow reg addr/data block */

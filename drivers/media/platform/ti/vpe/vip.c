@@ -1270,7 +1270,6 @@ static int vip_setup_parser(struct vip_port *port)
 	struct vip_slice *slice = port->slice;
 	struct vip_parser *parser = slice->parser;
 	struct v4l2_fwnode_endpoint *endpoint = &port->endpoint;
-	struct vip_bt656_bus *bt656_ep = &port->bt656_endpoint;
 	int iface, sync_type;
 	u32 flags = 0, config0;
 
@@ -1293,61 +1292,31 @@ static int vip_setup_parser(struct vip_port *port)
 		iface = DUAL_8B_INTERFACE;
 	}
 
-	if (endpoint->bus_type == V4L2_MBUS_BT656) {
-		flags = endpoint->bus.parallel.flags;
-
-		/*
-		 * Ideally, this should come from subdev
-		 * port->fmt can be anything once CSC is enabled
-		 */
-		if (vip_is_mbuscode_rgb(port->fmt->code)) {
-			sync_type = EMBEDDED_SYNC_SINGLE_RGB_OR_YUV444;
-		} else {
-			switch (bt656_ep->num_channels) {
-			case 4:
-				sync_type = EMBEDDED_SYNC_4X_MULTIPLEXED_YUV422;
-				break;
-			case 2:
-				sync_type = EMBEDDED_SYNC_2X_MULTIPLEXED_YUV422;
-				break;
-			case 1:
-				sync_type = EMBEDDED_SYNC_SINGLE_YUV422;
-				break;
-			default:
-				sync_type =
-				EMBEDDED_SYNC_LINE_MULTIPLEXED_YUV422;
-			}
-			if (bt656_ep->pixmux == 0)
-				sync_type =
-				EMBEDDED_SYNC_LINE_MULTIPLEXED_YUV422;
-		}
-
-	} else if (endpoint->bus_type == V4L2_MBUS_PARALLEL) {
-		flags = endpoint->bus.parallel.flags;
-
-		if (vip_is_mbuscode_rgb(port->fmt->code))
-			sync_type = DISCRETE_SYNC_SINGLE_RGB_24B;
-		else
-			sync_type = DISCRETE_SYNC_SINGLE_YUV422;
-
-		if (flags & V4L2_MBUS_HSYNC_ACTIVE_HIGH)
-			config0 |= VIP_HSYNC_POLARITY;
-		else if (flags & V4L2_MBUS_HSYNC_ACTIVE_LOW)
-			config0 &= ~VIP_HSYNC_POLARITY;
-
-		if (flags & V4L2_MBUS_VSYNC_ACTIVE_HIGH)
-			config0 |= VIP_VSYNC_POLARITY;
-		else if (flags & V4L2_MBUS_VSYNC_ACTIVE_LOW)
-			config0 &= ~VIP_VSYNC_POLARITY;
-
-		config0 &= ~VIP_USE_ACTVID_HSYNC_ONLY;
-		config0 |= VIP_ACTVID_POLARITY;
-		config0 |= VIP_DISCRETE_BASIC_MODE;
-
-	} else {
-		v4l2_err(port, "Device doesn't support CSI2");
+	if (endpoint->bus_type != V4L2_MBUS_PARALLEL) {
+		v4l2_err(port, "Unsupported bus type %u\n", endpoint->bus_type);
 		return -EINVAL;
 	}
+
+	flags = endpoint->bus.parallel.flags;
+
+	if (vip_is_mbuscode_rgb(port->fmt->code))
+		sync_type = DISCRETE_SYNC_SINGLE_RGB_24B;
+	else
+		sync_type = DISCRETE_SYNC_SINGLE_YUV422;
+
+	if (flags & V4L2_MBUS_HSYNC_ACTIVE_HIGH)
+		config0 |= VIP_HSYNC_POLARITY;
+	else if (flags & V4L2_MBUS_HSYNC_ACTIVE_LOW)
+		config0 &= ~VIP_HSYNC_POLARITY;
+
+	if (flags & V4L2_MBUS_VSYNC_ACTIVE_HIGH)
+		config0 |= VIP_VSYNC_POLARITY;
+	else if (flags & V4L2_MBUS_VSYNC_ACTIVE_LOW)
+		config0 &= ~VIP_VSYNC_POLARITY;
+
+	config0 &= ~VIP_USE_ACTVID_HSYNC_ONLY;
+	config0 |= VIP_ACTVID_POLARITY;
+	config0 |= VIP_DISCRETE_BASIC_MODE;
 
 	if (flags & V4L2_MBUS_PCLK_SAMPLE_FALLING) {
 		vip_set_pclk_invert(port);
@@ -3002,8 +2971,6 @@ static void free_port(struct vip_port *port)
 static int vip_create_streams(struct vip_port *port,
 			      struct v4l2_subdev *remote_subdev)
 {
-	struct v4l2_mbus_config_parallel *bus;
-	struct vip_bt656_bus *bt656_ep;
 	int i;
 
 	for (i = 0; i < VIP_CAP_STREAMS_PER_PORT; i++)
@@ -3011,21 +2978,9 @@ static int vip_create_streams(struct vip_port *port,
 
 	port->remote_subdev = remote_subdev;
 
-	if (port->endpoint.bus_type == V4L2_MBUS_PARALLEL) {
-		port->flags |= FLAG_MULT_PORT;
-		port->num_streams_configured = 1;
-		alloc_stream(port, 0);
-	} else if (port->endpoint.bus_type == V4L2_MBUS_BT656) {
-		port->flags |= FLAG_MULT_PORT;
-		bus = &port->endpoint.bus.parallel;
-		bt656_ep = &port->bt656_endpoint;
-		port->num_streams_configured = bt656_ep->num_channels;
-		for (i = 0; i < bt656_ep->num_channels; i++) {
-			if (bt656_ep->channels[i] >= 16)
-				continue;
-			alloc_stream(port, bt656_ep->channels[i]);
-		}
-	}
+	port->flags |= FLAG_MULT_PORT;
+	alloc_stream(port, 0);
+
 	return 0;
 }
 
@@ -3130,12 +3085,10 @@ static int vip_register_subdev_notif(struct vip_port *port,
 	struct vip_slice *slice = port->slice;
 	struct fwnode_handle *remote_subdev;
 	struct v4l2_fwnode_endpoint *vep;
-	struct vip_bt656_bus *bt656_vep;
 	struct v4l2_async_subdev *asd;
-	int ret, rval;
+	int ret;
 
 	vep = &port->endpoint;
-	bt656_vep = &port->bt656_endpoint;
 
 	remote_subdev = fwnode_graph_get_remote_port_parent(ep);
 	if (!remote_subdev) {
@@ -3148,45 +3101,6 @@ static int vip_register_subdev_notif(struct vip_port *port,
 		v4l2_dbg(3, debug, port, "Failed to parse endpoint:\n");
 		fwnode_handle_put(remote_subdev);
 		return -EINVAL;
-	}
-
-	if (vep->bus_type == V4L2_MBUS_BT656) {
-		if (fwnode_property_present(ep, "ti,vip-pixel-mux"))
-			bt656_vep->pixmux = 1;
-		else
-			bt656_vep->pixmux = 0;
-		v4l2_dbg(3, debug, port, "ti,vip-pixel-mux %u\n",
-			 bt656_vep->pixmux);
-
-		bt656_vep->num_channels = 0;
-		rval = fwnode_property_read_u8_array(ep, "ti,vip-channels",
-						     NULL, 0);
-		if (rval > 0) {
-			bt656_vep->num_channels =
-				min_t(int, ARRAY_SIZE(bt656_vep->channels),
-				      rval);
-
-			fwnode_property_read_u8_array(ep, "ti,vip-channels",
-						      bt656_vep->channels,
-						      bt656_vep->num_channels);
-		} else {
-			/* channels is not specified then assume 1 channel */
-			bt656_vep->num_channels = 1;
-			bt656_vep->channels[0] = 0;
-		}
-
-		v4l2_dbg(3, debug, port, "ti,vip-channels %u\n",
-			 bt656_vep->num_channels);
-
-		if (bt656_vep->pixmux &&
-		    (bt656_vep->num_channels != 1 &&
-		     bt656_vep->num_channels != 2 &&
-		     bt656_vep->num_channels != 4)) {
-			v4l2_warn(port,
-				  "ti,vip-pixel-mux is set but number of channels is not 1, 2 or 4: (%u), disabling ti,vip-pixel-mux.\n",
-				 bt656_vep->num_channels);
-			bt656_vep->pixmux = 0;
-		}
 	}
 
 	v4l2_async_nf_init(notifier);

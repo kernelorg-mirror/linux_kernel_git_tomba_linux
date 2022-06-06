@@ -229,6 +229,16 @@ struct vip_stream {
 	struct vb2_queue	vb_vidq;
 };
 
+// XXX
+/*
+ vip_port->fmt = DMA output format
+ port->mbuf_framefmt = sensor mbus fmt
+ stream->width & co = sensor mbus fmt
+ */
+
+
+
+
 /*
  * VIP Enumerations
  */

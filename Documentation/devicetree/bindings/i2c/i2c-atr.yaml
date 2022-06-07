@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: GPL-2.0
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/i2c/i2c-atr.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: i2c bus address translator properties.
+
+maintainers:
+  - Tomi Valkeinen <tomi.valkeinen@ideasonboard.com>
+
+description: |+
+  An i2c bus address translator will have several child busses that are numbered
+  uniquely in a device dependent manner.  The nodes for an i2c bus
+  address translator will have one child node for each child bus.
+
+properties:
+  $nodename:
+    pattern: '^i2c-atr'
+
+  '#address-cells':
+    const: 1
+
+  '#size-cells':
+    const: 0
+
+patternProperties:
+  '^i2c@[0-9a-f]+$':
+    $ref: /schemas/i2c/i2c-controller.yaml
+    unevaluatedProperties: false
+
+    properties:
+      reg:
+        description: The atr selector sub-bus number for the child I2C bus.
+        maxItems: 1
+
+additionalProperties: true
+
+examples:
+  - |
+    deser@3d {
+      compatible = "ti,ds90ub960-q1";
+
+      i2c-atr {
+          #address-cells = <1>;
+          #size-cells = <0>;
+
+          i2c@0 {
+              #address-cells = <1>;
+              #size-cells = <0>;
+              reg = <0>;
+
+              sensor@21 {
+                  compatible = "sony,imx390";
+                  reg = <0x21>;
+              };
+          };
+      };
+    };
+...

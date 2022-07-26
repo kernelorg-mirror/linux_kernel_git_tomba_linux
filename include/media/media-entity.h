@@ -884,6 +884,24 @@ static inline bool media_entity_is_streaming(const struct media_entity *entity)
 }
 
 /**
+ * media_entity_pipeline - Get the media pipeline an entity is part of
+ * @entity: The entity
+ *
+ * This function returns the media pipeline that an entity has been associated
+ * with when constructing the pipeline with media_pipeline_start(). The pointer
+ * remains valid until media_pipeline_stop() is called.
+ *
+ * In general, entities can be part of multiple pipelines, when carrying
+ * multiple streams (either on different pads, or on the same pad using
+ * multiplexed streams). This function is ill-defined in that case. It
+ * currently returns the pipeline associated with the first pad of the entity.
+ *
+ * Return: The media_pipeline the entity is part of, or NULL if the entity is
+ * not part of any pipeline.
+ */
+struct media_pipeline *media_entity_pipeline(struct media_entity *entity);
+
+/**
  * media_entity_get_fwnode_pad - Get pad number from fwnode
  *
  * @entity: The entity

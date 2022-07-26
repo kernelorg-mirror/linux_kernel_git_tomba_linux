@@ -99,12 +99,32 @@ struct media_graph {
 /**
  * struct media_pipeline - Media pipeline related information
  *
+ * @mdev:		The media device the pipeline is part of
+ * @pads:		List of media_pipeline_pad
  * @start_count:	Media pipeline start - stop count
- * @graph:		Media graph walk during pipeline start / stop
  */
 struct media_pipeline {
+	struct media_device *mdev;
+	struct list_head pads;
 	int start_count;
-	struct media_graph graph;
+};
+
+/**
+ * struct media_pipeline_pad - A pad part of a media pipeline
+ *
+ * @list:		Entry in the media_pad pads list
+ * @pipe:		The media_pipeline that the pad is part of
+ * @pad:		The media pad
+ *
+ * This structure associate a pad with a media pipeline. Instances of
+ * media_pipeline_pad are created by media_pipeline_start() when it builds the
+ * pipeline, and stored in the &media_pad.pads list. media_pipeline_stop()
+ * removes the entries from the list and deletes them.
+ */
+struct media_pipeline_pad {
+	struct list_head list;
+	struct media_pipeline *pipe;
+	struct media_pad *pad;
 };
 
 /**
@@ -186,6 +206,8 @@ enum media_pad_signal_type {
  * @flags:	Pad flags, as defined in
  *		:ref:`include/uapi/linux/media.h <media_header>`
  *		(seek for ``MEDIA_PAD_FL_*``)
+ * @pipe:	Pipeline this pad belongs to. Use media_entity_pipeline() to
+ *		access this field.
  */
 struct media_pad {
 	struct media_gobj graph_obj;	/* must be first field in struct */
@@ -193,6 +215,12 @@ struct media_pad {
 	u16 index;
 	enum media_pad_signal_type sig_type;
 	unsigned long flags;
+
+	/*
+	 * The fields below are private, and should only be accessed via
+	 * appropriate functions.
+	 */
+	struct media_pipeline *pipe;
 };
 
 /**
@@ -277,7 +305,6 @@ enum media_entity_type {
  * @links:	List of data links.
  * @ops:	Entity operations.
  * @use_count:	Use count for the entity.
- * @pipe:	Pipeline this entity belongs to.
  * @info:	Union with devnode information.  Kept just for backward
  *		compatibility.
  * @info.dev:	Contains device major and minor info.
@@ -312,8 +339,6 @@ struct media_entity {
 	const struct media_entity_operations *ops;
 
 	int use_count;
-
-	struct media_pipeline *pipe;
 
 	union {
 		struct {
@@ -880,6 +905,18 @@ struct media_link *media_entity_find_link(struct media_pad *source,
 struct media_pad *media_entity_remote_pad(const struct media_pad *pad);
 
 /**
+ * media_pad_is_streaming - Test if a pad is part of a streaming pipeline
+ * @pad: The pad
+ *
+ * Return: True if the pad is part of a pipeline started with the
+ * media_pipeline_start() function, false otherwise.
+ */
+static inline bool media_pad_is_streaming(const struct media_pad *pad)
+{
+	return pad->pipe;
+}
+
+/**
  * media_entity_is_streaming - Test if an entity is part of a streaming pipeline
  * @entity: The entity
  *
@@ -888,7 +925,14 @@ struct media_pad *media_entity_remote_pad(const struct media_pad *pad);
  */
 static inline bool media_entity_is_streaming(const struct media_entity *entity)
 {
-	return entity->pipe;
+	struct media_pad *pad;
+
+	media_entity_for_each_pad(entity, pad) {
+		if (media_pad_is_streaming(pad))
+			return true;
+	}
+
+	return false;
 }
 
 /**

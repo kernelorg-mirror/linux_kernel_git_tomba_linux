@@ -414,8 +414,8 @@ __must_check int __media_pipeline_start(struct media_entity *entity,
 	struct media_link *link;
 	int ret;
 
-	if (pipe->streaming_count) {
-		pipe->streaming_count++;
+	if (pipe->start_count) {
+		pipe->start_count++;
 		return 0;
 	}
 
@@ -498,7 +498,7 @@ __must_check int __media_pipeline_start(struct media_entity *entity,
 		}
 	}
 
-	pipe->streaming_count++;
+	pipe->start_count++;
 
 	return 0;
 
@@ -551,7 +551,7 @@ void __media_pipeline_stop(struct media_entity *entity)
 	if (WARN_ON(!pipe))
 		return;
 
-	if (--pipe->streaming_count)
+	if (--pipe->start_count)
 		return;
 
 	media_graph_walk_start(graph, entity);

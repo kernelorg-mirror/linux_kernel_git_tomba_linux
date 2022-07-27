@@ -1036,6 +1036,28 @@ void media_pipeline_stop(struct media_entity *entity);
 void __media_pipeline_stop(struct media_entity *entity);
 
 /**
+ * media_pipeline_alloc_start - Mark a pipeline as streaming
+ * @entity: Starting entity
+ *
+ * media_pipeline_alloc_start() is similar to media_pipeline_start() but
+ * instead of working on a given pipeline the function will allocate a new
+ * pipeline if needed.
+ *
+ * Calls to media_pipeline_alloc_start() must be matched with
+ * media_pipeline_stop_free().
+ */
+__must_check int media_pipeline_alloc_start(struct media_entity *entity);
+
+/**
+ * media_pipeline_stop_free - Mark a pipeline as not streaming
+ * @entity: Starting entity
+ *
+ * media_pipeline_stop_free() is similar to media_pipeline_stop() but will
+ * also free the pipeline when the start_count drops to 0.
+ */
+void media_pipeline_stop_free(struct media_entity *entity);
+
+/**
  * media_devnode_create() - creates and initializes a device node interface
  *
  * @mdev:	pointer to struct &media_device

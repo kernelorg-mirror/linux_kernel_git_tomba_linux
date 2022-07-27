@@ -579,6 +579,55 @@ void media_pipeline_stop(struct media_entity *entity)
 }
 EXPORT_SYMBOL_GPL(media_pipeline_stop);
 
+__must_check int media_pipeline_alloc_start(struct media_entity *entity)
+{
+	struct media_device *mdev = entity->graph_obj.mdev;
+	struct media_pipeline *pipe;
+	int ret;
+	bool new_pipe = false;
+
+	mutex_lock(&mdev->graph_mutex);
+
+	/*
+	 * Is the entity already part of a pipeline? If not, we need to allocate
+	 * a pipe.
+	 */
+	pipe = media_entity_pipeline(entity);
+	if (!pipe) {
+		pipe = kzalloc(sizeof(*pipe), GFP_KERNEL);
+		new_pipe = true;
+	}
+
+	ret = __media_pipeline_start(entity, pipe);
+	if (ret) {
+		if (new_pipe)
+			kfree(pipe);
+	}
+
+	mutex_unlock(&mdev->graph_mutex);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(media_pipeline_alloc_start);
+
+void media_pipeline_stop_free(struct media_entity *entity)
+{
+	struct media_device *mdev = entity->graph_obj.mdev;
+	struct media_pipeline *pipe;
+
+	mutex_lock(&mdev->graph_mutex);
+
+	pipe = media_entity_pipeline(entity);
+
+	__media_pipeline_stop(entity);
+
+	if (pipe && pipe->start_count == 0)
+		kfree(pipe);
+
+	mutex_unlock(&mdev->graph_mutex);
+}
+EXPORT_SYMBOL_GPL(media_pipeline_stop_free);
+
 /* -----------------------------------------------------------------------------
  * Links management
  */

@@ -769,7 +769,7 @@ static int cal_start_streaming(struct vb2_queue *vq, unsigned int count)
 		v4l2_subdev_unlock_state(state);
 	}
 
-	ret = media_pipeline_start(&ctx->vdev.entity, &ctx->phy->pipe);
+	ret = media_pipeline_alloc_start(&ctx->vdev.entity);
 	if (ret < 0) {
 		ctx_err(ctx, "Failed to start media pipeline: %d\n", ret);
 		goto error_release_buffers;
@@ -823,7 +823,7 @@ error_stop:
 	cal_ctx_unprepare(ctx);
 
 error_pipeline:
-	media_pipeline_stop(&ctx->vdev.entity);
+	media_pipeline_stop_free(&ctx->vdev.entity);
 error_release_buffers:
 	cal_release_buffers(ctx, VB2_BUF_STATE_QUEUED);
 
@@ -848,7 +848,7 @@ static void cal_stop_streaming(struct vb2_queue *vq)
 
 	cal_release_buffers(ctx, VB2_BUF_STATE_ERROR);
 
-	media_pipeline_stop(&ctx->vdev.entity);
+	media_pipeline_stop_free(&ctx->vdev.entity);
 
 	if (cal_mc_api)
 		ctx->phy = NULL;

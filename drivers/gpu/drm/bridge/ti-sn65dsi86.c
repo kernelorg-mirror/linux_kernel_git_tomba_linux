@@ -14,6 +14,7 @@
 #include <linux/gpio/driver.h>
 #include <linux/i2c.h>
 #include <linux/iopoll.h>
+#include <linux/media-bus-format.h>
 #include <linux/module.h>
 #include <linux/of_graph.h>
 #include <linux/pm_runtime.h>
@@ -806,14 +807,6 @@ static void ti_sn_bridge_set_dsi_rate(struct ti_sn65dsi86 *pdata)
 	regmap_write(pdata->regmap, SN_DSIA_CLK_FREQ_REG, val);
 }
 
-static unsigned int ti_sn_bridge_get_bpp(struct drm_connector *connector)
-{
-	if (connector->display_info.bpc <= 6)
-		return 18;
-	else
-		return 24;
-}
-
 /*
  * LUT index corresponds to register value and
  * LUT values corresponds to dp data rate supported
@@ -1053,6 +1046,7 @@ exit:
 static void ti_sn_bridge_atomic_enable(struct drm_bridge *bridge,
 				       struct drm_bridge_state *old_bridge_state)
 {
+	struct drm_bridge_state *new_bridge_state = drm_priv_to_bridge_state(bridge->base.state);
 	struct ti_sn65dsi86 *pdata = bridge_to_ti_sn65dsi86(bridge);
 	struct drm_connector *connector;
 	const char *last_err_str = "No supported DP rate";
@@ -1067,6 +1061,22 @@ static void ti_sn_bridge_atomic_enable(struct drm_bridge *bridge,
 							     bridge->encoder);
 	if (!connector) {
 		dev_err_ratelimited(pdata->dev, "Could not get the connector\n");
+		return;
+	}
+
+	switch (new_bridge_state->output_bus_cfg.format) {
+	case MEDIA_BUS_FMT_RGB888_1X24:
+		bpp = 24;
+		break;
+	case MEDIA_BUS_FMT_RGB666_1X18:
+		bpp = 18;
+		break;
+	case MEDIA_BUS_FMT_FIXED:
+		bpp = connector->display_info.bpc <= 6 ? 18 : 24;
+		break;
+	default:
+		dev_err(pdata->dev, "Bad output format 0x%04x\n",
+			new_bridge_state->output_bus_cfg.format);
 		return;
 	}
 
@@ -1095,9 +1105,8 @@ static void ti_sn_bridge_atomic_enable(struct drm_bridge *bridge,
 		drm_dp_dpcd_writeb(&pdata->aux, DP_EDP_CONFIGURATION_SET,
 				   DP_ALTERNATE_SCRAMBLER_RESET_ENABLE);
 
-	bpp = ti_sn_bridge_get_bpp(connector);
 	/* Set the DP output format (18 bpp or 24 bpp) */
-	val = bpp == 18 ? BPP_18_RGB : 0;
+	val = (bpp == 18) ? BPP_18_RGB : 0;
 	regmap_update_bits(pdata->regmap, SN_DATA_FORMAT_REG, BPP_18_RGB, val);
 
 	/* DP lane config */
@@ -1211,6 +1220,56 @@ static struct edid *ti_sn_bridge_get_edid(struct drm_bridge *bridge,
 	return drm_get_edid(connector, &pdata->aux.ddc);
 }
 
+static u32 *
+sn65dsi83_atomic_get_input_bus_fmts(struct drm_bridge *bridge,
+				    struct drm_bridge_state *bridge_state,
+				    struct drm_crtc_state *crtc_state,
+				    struct drm_connector_state *conn_state,
+				    u32 input_fmt,
+				    unsigned int *num_input_fmts)
+{
+	static const int MAX_INPUT_BUS_FORMATS = 1;
+	u32 *input_fmts;
+
+	*num_input_fmts = 0;
+
+	input_fmts = kcalloc(MAX_INPUT_BUS_FORMATS, sizeof(*input_fmts),
+			     GFP_KERNEL);
+	if (!input_fmts)
+		return NULL;
+
+	/* This is the DSI-end bus format */
+	input_fmts[0] = MEDIA_BUS_FMT_RGB888_1X24;
+	*num_input_fmts = MAX_INPUT_BUS_FORMATS;
+
+	return input_fmts;
+}
+
+static u32 *
+sn65dsi83_atomic_get_output_bus_fmts(struct drm_bridge *bridge,
+				     struct drm_bridge_state *bridge_state,
+				     struct drm_crtc_state *crtc_state,
+				     struct drm_connector_state *conn_state,
+				     unsigned int *num_output_fmts)
+{
+	static const int MAX_OUTPUT_BUS_FORMATS = 2;
+	u32 *output_fmts;
+
+	*num_output_fmts = 0;
+
+	output_fmts = kcalloc(MAX_OUTPUT_BUS_FORMATS, sizeof(*output_fmts),
+			      GFP_KERNEL);
+	if (!output_fmts)
+		return NULL;
+
+	output_fmts[0] = MEDIA_BUS_FMT_RGB888_1X24;
+	output_fmts[1] = MEDIA_BUS_FMT_RGB666_1X18;
+
+	*num_output_fmts = MAX_OUTPUT_BUS_FORMATS;
+
+	return output_fmts;
+}
+
 static const struct drm_bridge_funcs ti_sn_bridge_funcs = {
 	.attach = ti_sn_bridge_attach,
 	.detach = ti_sn_bridge_detach,
@@ -1226,6 +1285,8 @@ static const struct drm_bridge_funcs ti_sn_bridge_funcs = {
 	.atomic_reset = drm_atomic_helper_bridge_reset,
 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
+	.atomic_get_output_bus_fmts = sn65dsi83_atomic_get_output_bus_fmts,
+	.atomic_get_input_bus_fmts = sn65dsi83_atomic_get_input_bus_fmts,
 };
 
 static void ti_sn_bridge_parse_lanes(struct ti_sn65dsi86 *pdata,

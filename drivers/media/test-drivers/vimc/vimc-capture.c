@@ -241,13 +241,12 @@ static void vimc_cap_return_all_buffers(struct vimc_cap_device *vcap,
 static int vimc_cap_start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct vimc_cap_device *vcap = vb2_get_drv_priv(vq);
-	struct media_entity *entity = &vcap->vdev.entity;
 	int ret;
 
 	vcap->sequence = 0;
 
 	/* Start the media pipeline */
-	ret = media_pipeline_start(entity, &vcap->stream.pipe);
+	ret = video_device_pipeline_start(&vcap->vdev, &vcap->stream.pipe);
 	if (ret) {
 		vimc_cap_return_all_buffers(vcap, VB2_BUF_STATE_QUEUED);
 		return ret;
@@ -255,7 +254,7 @@ static int vimc_cap_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	ret = vimc_streamer_s_stream(&vcap->stream, &vcap->ved, 1);
 	if (ret) {
-		media_pipeline_stop(entity);
+		video_device_pipeline_stop(&vcap->vdev);
 		vimc_cap_return_all_buffers(vcap, VB2_BUF_STATE_QUEUED);
 		return ret;
 	}
@@ -274,7 +273,7 @@ static void vimc_cap_stop_streaming(struct vb2_queue *vq)
 	vimc_streamer_s_stream(&vcap->stream, &vcap->ved, 0);
 
 	/* Stop the media pipeline */
-	media_pipeline_stop(&vcap->vdev.entity);
+	video_device_pipeline_stop(&vcap->vdev);
 
 	/* Release all active buffers */
 	vimc_cap_return_all_buffers(vcap, VB2_BUF_STATE_ERROR);

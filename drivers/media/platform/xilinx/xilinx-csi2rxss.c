@@ -82,6 +82,8 @@
 #define XCSI_IER_INTR_MASK	(XCSI_ISR_ALLINTR_MASK &\
 				 ~(XCSI_ISR_STOP | XCSI_ISR_VCXFE))
 
+#define XCSI_VC_SELECTION	0x2c
+
 #define XCSI_SPKTR_OFFSET	0x30
 #define XCSI_SPKTR_DATA		GENMASK(23, 8)
 #define XCSI_SPKTR_VC		GENMASK(7, 6)
@@ -211,7 +213,8 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  * @datatype: Data type filter
  * @enable_active_lanes: If number of active lanes can be modified
  * @en_vcx: If more than 4 VC are enabled
- * @@enabled_source_streams: Mask of enabled source streams
+ * @enabled_source_streams: Mask of enabled source streams
+ * @vcs_enable_count: Per-virtual channel enable count
  * @events: counter for events
  * @vcx_events: counter for vcx_events
  *
@@ -233,6 +236,7 @@ struct xcsi2rxss_state {
 	bool en_vcx;
 
 	u64 enabled_source_streams;
+	s8 vcs_enable_count[XCSI_MAX_VCX];
 
 	u32 events[XCSI_NUM_EVENTS];
 	u32 vcx_events[XCSI_VCX_NUM_EVENTS];
@@ -364,6 +368,7 @@ static int xcsi2rxss_start_stream(struct xcsi2rxss_state *csi2rx)
 
 	/* enable core */
 	xcsi2rxss_set(csi2rx, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
+	xcsi2rxss_write(csi2rx, XCSI_VC_SELECTION, 0);
 
 	ret = xcsi2rxss_soft_reset(csi2rx);
 	if (ret) {
@@ -497,31 +502,127 @@ static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
  * xvip Operations
  */
 
+static int xcsi2rxss_streams_to_vcs_count(struct xcsi2rxss_state *csi2rx,
+					  struct v4l2_subdev_state *state,
+					  u64 streams_mask,
+					  u8 vcs_count[XCSI_MAX_VCX])
+{
+	struct v4l2_mbus_frame_desc fd = {};
+	struct v4l2_subdev_route *route;
+	struct v4l2_subdev *source_sd;
+	struct media_pad *source_pad;
+	u64 sink_streams = 0;
+	unsigned int i;
+	int ret;
+
+	/* Translate the streams on the source pad to the sink pad. */
+	for_each_active_route(&state->routing, route) {
+		if (route->source_pad == XVIP_PAD_SOURCE &&
+		    (streams_mask & BIT_ULL(route->source_stream)))
+			sink_streams |= BIT_ULL(route->sink_stream);
+	}
+
+	/* Find the source subdev. */
+	source_pad = media_pad_remote_pad_first(&csi2rx->xvip.pads[XVIP_PAD_SINK]);
+	if (!source_pad) {
+		dev_dbg(csi2rx->xvip.dev, "%s: no connected source\n", __func__);
+		return -EPIPE;
+	}
+
+	source_sd = media_entity_to_v4l2_subdev(source_pad->entity);
+	if (!source_sd) {
+		dev_dbg(csi2rx->xvip.dev, "%s: no connected source\n", __func__);
+		return -EPIPE;
+	}
+
+	/*
+	 * Map the sink streams to virtual channels using the frame
+	 * descriptors. If the .get_frame_desc() operation isn't supported,
+	 * assume all virtual channels are needed.
+	 */
+	ret = v4l2_subdev_call(source_sd, pad, get_frame_desc,
+			       source_pad->index, &fd);
+	if (ret) {
+		dev_dbg(csi2rx->xvip.dev,
+			"failed to get frame descriptors from '%s':%u: %d\n",
+			source_sd->name, source_pad->index, ret);
+		for (i = 0; i < XCSI_MAX_VCX; ++i)
+			vcs_count[i] = 1;
+		return 0;
+	}
+
+	for (i = 0; i < fd.num_entries; ++i) {
+		const struct v4l2_mbus_frame_desc_entry *entry = &fd.entry[i];
+
+		if (entry->bus.csi2.vc >= XCSI_MAX_VCX) {
+			dev_warn(csi2rx->xvip.dev, "invalid virtual channel %u\n",
+				 entry->bus.csi2.vc);
+			continue;
+		}
+
+		if (sink_streams & BIT_ULL(entry->stream))
+			vcs_count[entry->bus.csi2.vc]++;
+	}
+
+	return 0;
+}
+
 static int xcsi2rxss_enable_streams(struct v4l2_subdev *sd,
 				    struct v4l2_subdev_state *state, u32 pad,
 				    u64 streams_mask)
 {
 	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
-	int ret = 0;
+	u8 vcs_count[XCSI_MAX_VCX] = {};
+	u32 vcs_changed_mask = 0;
+	u32 vcs_enabled_mask = 0;
+	unsigned int i;
+	int ret;
 
 	if (pad != XVIP_PAD_SOURCE)
 		return -EINVAL;
 
-	mutex_lock(&csi2rx->lock);
+	/*
+	 * Compute the virtual channels use counts corresponding to the streams
+	 * to be enabled.
+	 */
+	ret = xcsi2rxss_streams_to_vcs_count(csi2rx, state, streams_mask,
+					     vcs_count);
+	if (ret < 0)
+		return ret;
 
 	/* Enable the HW if not yet enabled. */
 	if (!csi2rx->enabled_source_streams) {
+		mutex_lock(&csi2rx->lock);
 		xcsi2rxss_reset_event_counters(csi2rx);
 		ret = xcsi2rxss_start_stream(csi2rx);
+		mutex_unlock(&csi2rx->lock);
 		if (ret)
-			goto done;
+			return ret;
 	}
 
 	csi2rx->enabled_source_streams |= streams_mask;
 
-done:
-	mutex_unlock(&csi2rx->lock);
-	return ret;
+	/*
+	 * Update the use counts for virtual channels, and compute the bitmask
+	 * of all enabled and newly enabled VCs.
+	 */
+	for (i = 0; i < XCSI_MAX_VCX; ++i) {
+		if (csi2rx->vcs_enable_count[i] || vcs_count[i])
+			vcs_enabled_mask |= BIT(i);
+
+		if (!csi2rx->vcs_enable_count[i] && vcs_count[i])
+			vcs_changed_mask |= BIT(i);
+
+		csi2rx->vcs_enable_count[i] += vcs_count[i];
+	}
+
+	if (vcs_changed_mask) {
+		dev_dbg(csi2rx->xvip.dev, "Enabling virtual channels 0x%04x\n",
+			vcs_changed_mask);
+		xcsi2rxss_write(csi2rx, XCSI_VC_SELECTION, vcs_enabled_mask);
+	}
+
+	return 0;
 }
 
 static int xcsi2rxss_disable_streams(struct v4l2_subdev *sd,
@@ -529,21 +630,52 @@ static int xcsi2rxss_disable_streams(struct v4l2_subdev *sd,
 				     u64 streams_mask)
 {
 	struct xcsi2rxss_state *csi2rx = to_xcsi2rxssstate(sd);
+	u8 vcs_count[XCSI_MAX_VCX] = {};
+	u32 vcs_changed_mask = 0;
+	u32 vcs_enabled_mask = 0;
+	unsigned int i;
 
 	if (pad != XVIP_PAD_SOURCE)
 		return -EINVAL;
 
-	mutex_lock(&csi2rx->lock);
+	/*
+	 * Compute the virtual channels use counts corresponding to the streams
+	 * to be disabled. We can ignore errors here, as failures to find a
+	 * source subdev would have been caught at enable time.
+	 */
+	xcsi2rxss_streams_to_vcs_count(csi2rx, state, streams_mask, vcs_count);
+
+	/*
+	 * Update the use counts for virtual channels, and compute the bitmask
+	 * of all enabled and newly disabled VCs.
+	 */
+	for (i = 0; i < XCSI_MAX_VCX; ++i) {
+		WARN_ON(csi2rx->vcs_enable_count[i] < vcs_count[i]);
+
+		if (csi2rx->vcs_enable_count[i] == vcs_count[i] && vcs_count[i])
+			vcs_changed_mask |= BIT(i);
+
+		csi2rx->vcs_enable_count[i] -= vcs_count[i];
+
+		if (csi2rx->vcs_enable_count[i])
+			vcs_enabled_mask |= BIT(i);
+	}
+
+	if (vcs_changed_mask) {
+		dev_dbg(csi2rx->xvip.dev, "Disabling virtual channels 0x%04x\n",
+			vcs_changed_mask);
+		xcsi2rxss_write(csi2rx, XCSI_VC_SELECTION, vcs_enabled_mask);
+	}
 
 	/* Disable the HW is no streams are left enabled. */
 	if (csi2rx->enabled_source_streams == streams_mask) {
+		mutex_lock(&csi2rx->lock);
 		xcsi2rxss_stop_stream(csi2rx);
 		xcsi2rxss_hard_reset(csi2rx);
+		mutex_unlock(&csi2rx->lock);
 	}
 
 	csi2rx->enabled_source_streams &= ~streams_mask;
-
-	mutex_unlock(&csi2rx->lock);
 
 	return 0;
 }

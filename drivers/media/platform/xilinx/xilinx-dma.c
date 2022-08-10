@@ -394,6 +394,19 @@ static void xvip_dma_complete(void *param)
 	vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_DONE);
 }
 
+static void xvip_dma_return_buffers(struct xvip_dma *dma,
+				    enum vb2_buffer_state state)
+{
+	struct xvip_dma_buffer *buf, *nbuf;
+
+	spin_lock_irq(&dma->queued_lock);
+	list_for_each_entry_safe(buf, nbuf, &dma->queued_bufs, queue) {
+		vb2_buffer_done(&buf->buf.vb2_buf, state);
+		list_del(&buf->queue);
+	}
+	spin_unlock_irq(&dma->queued_lock);
+}
+
 static int
 xvip_dma_queue_setup(struct vb2_queue *vq,
 		     unsigned int *nbuffers, unsigned int *nplanes,
@@ -542,7 +555,7 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct xvip_dma *dma = vb2_get_drv_priv(vq);
-	struct xvip_dma_buffer *buf, *nbuf;
+	struct xvip_dma_buffer *buf;
 	struct xvip_pipeline *pipe;
 	int ret;
 
@@ -605,12 +618,7 @@ error_stop:
 error:
 	dmaengine_terminate_all(dma->dma);
 	/* Give back all queued buffers to videobuf2. */
-	spin_lock_irq(&dma->queued_lock);
-	list_for_each_entry_safe(buf, nbuf, &dma->queued_bufs, queue) {
-		vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_QUEUED);
-		list_del(&buf->queue);
-	}
-	spin_unlock_irq(&dma->queued_lock);
+	xvip_dma_return_buffers(dma, VB2_BUF_STATE_QUEUED);
 
 	return ret;
 }
@@ -619,7 +627,6 @@ static void xvip_dma_stop_streaming(struct vb2_queue *vq)
 {
 	struct xvip_dma *dma = vb2_get_drv_priv(vq);
 	struct xvip_pipeline *pipe = to_xvip_pipeline(&dma->video);
-	struct xvip_dma_buffer *buf, *nbuf;
 
 	/* Stop the pipeline. */
 	xvip_pipeline_set_stream(pipe, false);
@@ -632,12 +639,7 @@ static void xvip_dma_stop_streaming(struct vb2_queue *vq)
 	video_device_pipeline_stop(&dma->video);
 
 	/* Give back all queued buffers to videobuf2. */
-	spin_lock_irq(&dma->queued_lock);
-	list_for_each_entry_safe(buf, nbuf, &dma->queued_bufs, queue) {
-		vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_ERROR);
-		list_del(&buf->queue);
-	}
-	spin_unlock_irq(&dma->queued_lock);
+	xvip_dma_return_buffers(dma, VB2_BUF_STATE_ERROR);
 }
 
 static const struct vb2_ops xvip_dma_queue_qops = {

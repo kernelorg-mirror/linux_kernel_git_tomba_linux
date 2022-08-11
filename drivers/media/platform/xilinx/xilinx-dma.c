@@ -38,6 +38,24 @@
 #define XVIP_DMA_MIN_HEIGHT		1U
 #define XVIP_DMA_MAX_HEIGHT		8191U
 
+/*
+ * Select the mode of operation for pipeline that have multiple output DMA
+ * engines.
+ *
+ * @XVIP_DMA_MULTI_OUT_MODE_SYNC: Wait for all outputs to be started before
+ *	starting the pipeline
+ * @XVIP_DMA_MULTI_OUT_MODE_ASYNC: Start pipeline branches independently when
+ *	outputs are started
+ */
+enum {
+	XVIP_DMA_MULTI_OUT_MODE_SYNC = 0,
+	XVIP_DMA_MULTI_OUT_MODE_ASYNC = 1,
+};
+
+static int xvip_dma_multi_out_mode = 0;
+module_param_named(multi_out_mode, xvip_dma_multi_out_mode, int, 0444);
+MODULE_PARM_DESC(multi_out_mode, "Multi-output DMA mode (0: sync, 1: async)");
+
 /* -----------------------------------------------------------------------------
  * Helper functions
  */
@@ -280,8 +298,21 @@ static void xvip_dma_submit_vb2_buffer(struct xvip_dma *dma,
  * interface until they are started, which may prevent the pipeline from running
  * due to back-pressure building up along the pipeline all the way to the
  * source if no IP core along the pipeline is able to drop packets. This affects
- * pipelines that have multiple output DMA engines, requiring all of them to be
- * started to operate the pipeline.
+ * pipelines that have multiple output DMA engines.
+ *
+ * The runtime behaviour is controlled through the xvip_dma_multi_out_mode
+ * parameter:
+ *
+ * - When set to XVIP_DMA_MULTI_OUT_MODE_SYNC, the pipeline start is delayed
+ *   until all DMA engines have been started. This mode of operation is the
+ *   default, and needed when the pipeline contains elements that can't drop
+ *   packets.
+ *
+ * - When set to XVIP_DMA_MULTI_OUT_MODE_ASYNC, individual branches of the
+ *   pipeline are started and stopped as output DMA engines are started and
+ *   stopped. This allows capturing multiple streams independently, but only
+ *   works if streams that are stopped can be blocked before they reach the DMA
+ *   engine.
  */
 
 /*
@@ -380,6 +411,9 @@ list_for_each_entry_continue_reverse(dma, &pipe->dmas, pipe_list)	\
  * xvip_pipeline_start - Start the full pipeline
  * @pipe: The pipeline
  *
+ * This function is used in synchronous pipeline mode to start the full
+ * pipeline when all DMA engines have been started.
+ *
  * Return: 0 for success, otherwise error code
  */
 static int xvip_pipeline_start(struct xvip_pipeline *pipe)
@@ -433,6 +467,9 @@ err_output:
 /**
  * xvip_pipeline_stop - Stop the full pipeline
  * @pipe: The pipeline
+ *
+ * This function is used in synchronous pipeline mode to stop the full
+ * pipeline when a DMA engine is stopped.
  */
 static void xvip_pipeline_stop(struct xvip_pipeline *pipe)
 {
@@ -477,17 +514,36 @@ static int xvip_pipeline_start_dma(struct xvip_pipeline *pipe,
 
 	mutex_lock(&pipe->lock);
 
-	if (pipe->input_stream_count + pipe->output_stream_count ==
-	    pipe->num_inputs + pipe->num_outputs - 1) {
-		ret = xvip_pipeline_start(pipe);
-		if (ret < 0)
-			goto done;
-	}
+	switch (xvip_dma_multi_out_mode) {
+	case XVIP_DMA_MULTI_OUT_MODE_SYNC:
+	default:
+		if (pipe->input_stream_count + pipe->output_stream_count ==
+		    pipe->num_inputs + pipe->num_outputs - 1) {
+			ret = xvip_pipeline_start(pipe);
+			if (ret < 0)
+				goto done;
+		}
 
-	if (dma->video.vfl_dir == VFL_DIR_RX)
-		pipe->output_stream_count++;
-	else
-		pipe->input_stream_count++;
+		if (dma->video.vfl_dir == VFL_DIR_RX)
+			pipe->output_stream_count++;
+		else
+			pipe->input_stream_count++;
+
+		break;
+
+	case XVIP_DMA_MULTI_OUT_MODE_ASYNC:
+		ret = xvip_dma_start(dma);
+		if (ret)
+			goto done;
+
+		ret = xvip_pipeline_enable_branch(pipe, dma);
+		if (ret) {
+			xvip_dma_stop(dma);
+			goto done;
+		}
+
+		break;
+	}
 
 done:
 	mutex_unlock(&pipe->lock);
@@ -515,14 +571,25 @@ static void xvip_pipeline_stop_dma(struct xvip_pipeline *pipe,
 {
 	mutex_lock(&pipe->lock);
 
-	if (dma->video.vfl_dir == VFL_DIR_RX)
-		pipe->output_stream_count--;
-	else
-		pipe->input_stream_count--;
+	switch (xvip_dma_multi_out_mode) {
+	case XVIP_DMA_MULTI_OUT_MODE_SYNC:
+	default:
+		if (dma->video.vfl_dir == VFL_DIR_RX)
+			pipe->output_stream_count--;
+		else
+			pipe->input_stream_count--;
 
-	if (pipe->input_stream_count + pipe->output_stream_count ==
-	    pipe->num_inputs + pipe->num_outputs - 1)
-		xvip_pipeline_stop(pipe);
+		if (pipe->input_stream_count + pipe->output_stream_count ==
+		    pipe->num_inputs + pipe->num_outputs - 1)
+			xvip_pipeline_stop(pipe);
+
+		break;
+
+	case XVIP_DMA_MULTI_OUT_MODE_ASYNC:
+		xvip_pipeline_disable_branch(pipe, dma);
+		xvip_dma_stop(dma);
+		break;
+	}
 
 	mutex_unlock(&pipe->lock);
 }

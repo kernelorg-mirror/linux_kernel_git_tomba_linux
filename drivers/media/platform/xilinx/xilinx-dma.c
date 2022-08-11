@@ -273,73 +273,181 @@ static void xvip_dma_submit_vb2_buffer(struct xvip_dma *dma,
  * Pipeline Stream Management
  */
 
+/*
+ * Pipelines carry one or more streams, with the sources and sinks being either
+ * live (such as camera sensors or HDMI connectors) or DMA engines. DMA engines
+ * at the outputs of the pipeline don't accept packets on their AXI stream slave
+ * interface until they are started, which may prevent the pipeline from running
+ * due to back-pressure building up along the pipeline all the way to the
+ * source if no IP core along the pipeline is able to drop packets. This affects
+ * pipelines that have multiple output DMA engines, requiring all of them to be
+ * started to operate the pipeline.
+ */
+
+/*
+ * Start the DMA engine when the pipeline starts. This function is called for
+ * all DMA engines when the pipeline starts.
+ */
+static int xvip_dma_start(struct xvip_dma *dma)
+{
+	dma_async_issue_pending(dma->dma);
+
+	return 0;
+}
+
+/*
+ * Stop the DMA engine when the pipeline stops. This function is called for all
+ * DMA engines when the pipeline stops.
+ */
+static void xvip_dma_stop(struct xvip_dma *dma)
+{
+	dmaengine_terminate_all(dma->dma);
+}
+
 /**
- * xvip_pipeline_start_stop_dma - Start or stop a DMA engine in the pipeline
+ * xvip_pipeline_enable_branch - Enable streaming on all subdevs in a pipeline
+ *	branch
  * @pipe: The pipeline
- * @dma: The DMA engine
- * @on: True to start, false to stop
+ * @dma: The DMA engine at the end of the branch
  *
  * Return: 0 for success, otherwise error code
  */
-static int xvip_pipeline_start_stop_dma(struct xvip_pipeline *pipe,
-					struct xvip_dma *dma, bool on)
+static int xvip_pipeline_enable_branch(struct xvip_pipeline *pipe,
+				       struct xvip_dma *dma)
 {
 	struct v4l2_subdev *sd;
 	u32 pad;
 	int ret;
 
-	dev_dbg(dma->xdev->dev, "%s streams on %s\n",
-		on ? "Enabling" : "Disabling",
+	dev_dbg(dma->xdev->dev, "Enabling streams on %s\n",
 		dma->video.entity.name);
 
 	sd = xvip_dma_remote_subdev(&dma->pad, &pad);
 	if (!sd)
 		return -ENXIO;
 
-	if (on)
-		ret = v4l2_subdev_enable_streams(sd, pad, BIT(0));
-	else
-		ret = v4l2_subdev_disable_streams(sd, pad, BIT(0));
+	ret = v4l2_subdev_enable_streams(sd, pad, BIT(0));
+	if (ret) {
+		dev_err(dma->xdev->dev, "Failed to enable streams for %s\n",
+			dma->video.entity.name);
+		return ret;
+	}
 
-	if (ret)
-		dev_err(dma->xdev->dev, "Failed to %s streams for %s\n",
-			on ? "enable" : "disable", dma->video.entity.name);
+	return 0;
+}
+
+/**
+ * xvip_pipeline_disable_branch - Disable streaming on all subdevs in a pipeline
+ *	branch
+ * @pipe: The pipeline
+ * @dma: The DMA engine at the end of the branch
+ *
+ * Return: 0 for success, otherwise error code
+ */
+static int xvip_pipeline_disable_branch(struct xvip_pipeline *pipe,
+					struct xvip_dma *dma)
+{
+	struct v4l2_subdev *sd;
+	u32 pad;
+	int ret;
+
+	dev_dbg(dma->xdev->dev, "Disabling streams on %s\n",
+		dma->video.entity.name);
+
+	sd = xvip_dma_remote_subdev(&dma->pad, &pad);
+	if (!sd)
+		return -ENXIO;
+
+	ret = v4l2_subdev_disable_streams(sd, pad, BIT(0));
+	if (ret) {
+		dev_err(dma->xdev->dev, "Failed to disable streams for %s\n",
+			dma->video.entity.name);
+		return ret;
+	}
+
+	return 0;
+}
+
+#define xvip_pipeline_for_each_dma(pipe, dma, type)			\
+list_for_each_entry(dma, &pipe->dmas, pipe_list)			\
+	if (dma->video.vfl_dir == type)
+
+#define xvip_pipeline_for_each_dma_continue_reverse(pipe, dma, type)	\
+list_for_each_entry_continue_reverse(dma, &pipe->dmas, pipe_list)	\
+	if (dma->video.vfl_dir == type)
+
+/**
+ * xvip_pipeline_start - Start the full pipeline
+ * @pipe: The pipeline
+ *
+ * Return: 0 for success, otherwise error code
+ */
+static int xvip_pipeline_start(struct xvip_pipeline *pipe)
+{
+	struct xvip_dma *dma;
+	int ret;
+
+	/*
+	 * First start all the output DMA engines, before starting the
+	 * pipeline. This is required to avoid the slave AXI stream interface
+	 * applying back pressure and stopping the pipeline right when it gets
+	 * started.
+	 */
+	xvip_pipeline_for_each_dma(pipe, dma, VFL_DIR_RX) {
+		ret = xvip_dma_start(dma);
+		if (ret)
+			goto err_output;
+	}
+
+	/* Start all pipeline branches starting from the output DMA engines. */
+	xvip_pipeline_for_each_dma(pipe, dma, VFL_DIR_RX) {
+		ret = xvip_pipeline_enable_branch(pipe, dma);
+		if (ret)
+			goto err_branch;
+	}
+
+	/* Finally start all input DMA engines. */
+	xvip_pipeline_for_each_dma(pipe, dma, VFL_DIR_TX) {
+		ret = xvip_dma_start(dma);
+		if (ret)
+			goto err_input;
+	}
+
+	return 0;
+
+err_input:
+	xvip_pipeline_for_each_dma_continue_reverse(pipe, dma, VFL_DIR_TX)
+		xvip_dma_stop(dma);
+
+err_branch:
+	xvip_pipeline_for_each_dma_continue_reverse(pipe, dma, VFL_DIR_RX)
+		xvip_pipeline_disable_branch(pipe, dma);
+
+err_output:
+	xvip_pipeline_for_each_dma_continue_reverse(pipe, dma, VFL_DIR_RX)
+		xvip_dma_stop(dma);
 
 	return ret;
 }
 
 /**
- * xvip_pipeline_start_stop_dmas - Start or stop all DMA engines in the pipeline
+ * xvip_pipeline_stop - Stop the full pipeline
  * @pipe: The pipeline
- * @on: True to start, false to stop
- *
- * Return: 0 for success, otherwise error code
  */
-static int xvip_pipeline_start_stop_dmas(struct xvip_pipeline *pipe, bool on)
+static void xvip_pipeline_stop(struct xvip_pipeline *pipe)
 {
-	struct xvip_dma *err_dma;
 	struct xvip_dma *dma;
-	int ret;
 
-	list_for_each_entry(dma, &pipe->dmas, pipe_list) {
-		ret = xvip_pipeline_start_stop_dma(pipe, dma, on);
-		if (ret && on)
-			goto error;
+	/* There's no meaningful way to handle errors when disabling. */
 
-		/* There's no meaningful way to handle errors when disabling. */
-	}
+	xvip_pipeline_for_each_dma(pipe, dma, VFL_DIR_TX)
+		xvip_dma_stop(dma);
 
-	return 0;
+	xvip_pipeline_for_each_dma(pipe, dma, VFL_DIR_RX)
+		xvip_pipeline_disable_branch(pipe, dma);
 
-error:
-	list_for_each_entry(err_dma, &pipe->dmas, pipe_list) {
-		if (err_dma == dma)
-			break;
-
-		xvip_pipeline_start_stop_dma(pipe, err_dma, false);
-	}
-
-	return ret;
+	xvip_pipeline_for_each_dma(pipe, dma, VFL_DIR_RX)
+		xvip_dma_stop(dma);
 }
 
 /**
@@ -371,7 +479,7 @@ static int xvip_pipeline_start_dma(struct xvip_pipeline *pipe,
 
 	if (pipe->input_stream_count + pipe->output_stream_count ==
 	    pipe->num_inputs + pipe->num_outputs - 1) {
-		ret = xvip_pipeline_start_stop_dmas(pipe, true);
+		ret = xvip_pipeline_start(pipe);
 		if (ret < 0)
 			goto done;
 	}
@@ -399,8 +507,8 @@ done:
  * to be enabled.
  *
  * This function decrements the pipeline streaming count corresponding to the
- * @dma direction. When the total streaming count reaches zero, it disables all
- * entities in the pipeline.
+ * @dma direction. As soon as the streaming count goes lower than the number of
+ * DMA engines in the pipeline, it disables all entities in the pipeline.
  */
 static void xvip_pipeline_stop_dma(struct xvip_pipeline *pipe,
 				   struct xvip_dma *dma)
@@ -412,8 +520,9 @@ static void xvip_pipeline_stop_dma(struct xvip_pipeline *pipe,
 	else
 		pipe->input_stream_count--;
 
-	if (pipe->input_stream_count == 0 && pipe->output_stream_count == 0)
-		xvip_pipeline_start_stop_dmas(pipe, false);
+	if (pipe->input_stream_count + pipe->output_stream_count ==
+	    pipe->num_inputs + pipe->num_outputs - 1)
+		xvip_pipeline_stop(pipe);
 
 	mutex_unlock(&pipe->lock);
 }
@@ -635,11 +744,6 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	if (ret < 0)
 		goto err_pipe_stop;
 
-	/* Start the DMA engine. This must be done before starting the blocks
-	 * in the pipeline to avoid DMA synchronization issues.
-	 */
-	dma_async_issue_pending(dma->dma);
-
 	/* Start the DMA engine on the pipeline. */
 	ret = xvip_pipeline_start_dma(pipe, dma);
 	if (ret < 0)
@@ -652,7 +756,6 @@ err_pipe_cleanup:
 err_pipe_stop:
 	video_device_pipeline_stop(&dma->video);
 err_return_buffers:
-	dmaengine_terminate_all(dma->dma);
 	/* Give back all queued buffers to videobuf2. */
 	xvip_dma_return_buffers(dma, VB2_BUF_STATE_QUEUED);
 
@@ -666,9 +769,6 @@ static void xvip_dma_stop_streaming(struct vb2_queue *vq)
 
 	/* Stop the DMA engine on the pipeline. */
 	xvip_pipeline_stop_dma(pipe, dma);
-
-	/* Stop and reset the DMA engine. */
-	dmaengine_terminate_all(dma->dma);
 
 	/* Cleanup the pipeline and mark it as being stopped. */
 	xvip_pipeline_cleanup(pipe);

@@ -622,18 +622,18 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	ret = video_device_pipeline_start(&dma->video, &pipe->pipe);
 	mutex_unlock(&dma->xdev->lock);
 	if (ret < 0)
-		goto error;
+		goto err_return_buffers;
 
 	/* Verify that the configured format matches the output of the
 	 * connected subdev.
 	 */
 	ret = xvip_dma_verify_format(dma);
 	if (ret < 0)
-		goto error_stop;
+		goto err_pipe_stop;
 
 	ret = xvip_pipeline_prepare(pipe, dma);
 	if (ret < 0)
-		goto error_stop;
+		goto err_pipe_stop;
 
 	/* Start the DMA engine. This must be done before starting the blocks
 	 * in the pipeline to avoid DMA synchronization issues.
@@ -643,14 +643,15 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	/* Start the DMA engine on the pipeline. */
 	ret = xvip_pipeline_start_dma(pipe, dma);
 	if (ret < 0)
-		goto error_stop;
+		goto err_pipe_cleanup;
 
 	return 0;
 
-error_stop:
+err_pipe_cleanup:
+	xvip_pipeline_cleanup(pipe);
+err_pipe_stop:
 	video_device_pipeline_stop(&dma->video);
-
-error:
+err_return_buffers:
 	dmaengine_terminate_all(dma->dma);
 	/* Give back all queued buffers to videobuf2. */
 	xvip_dma_return_buffers(dma, VB2_BUF_STATE_QUEUED);

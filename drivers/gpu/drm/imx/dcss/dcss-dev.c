@@ -257,8 +257,6 @@ int dcss_dev_suspend(struct device *dev)
 	struct dcss_kms_dev *kms = container_of(ddev, struct dcss_kms_dev, base);
 	int ret;
 
-	drm_bridge_connector_disable_hpd(kms->connector);
-
 	drm_mode_config_helper_suspend(ddev);
 
 	if (pm_runtime_suspended(dev))
@@ -291,8 +289,6 @@ int dcss_dev_resume(struct device *dev)
 	dcss_ctxld_resume(dcss->ctxld);
 
 	drm_mode_config_helper_resume(ddev);
-
-	drm_bridge_connector_enable_hpd(kms->connector);
 
 	return 0;
 }

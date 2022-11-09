@@ -9,6 +9,7 @@
 #include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
+#include <linux/math64.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
@@ -27,6 +28,18 @@
 
 #include "rcar_mipi_dsi.h"
 #include "rcar_mipi_dsi_regs.h"
+
+enum rcar_mipi_dsi_hw_model {
+	RCAR_DSI_R8A779A0,
+	RCAR_DSI_R8A779G0,
+};
+
+struct rcar_mipi_dsi_device_info {
+	enum rcar_mipi_dsi_hw_model model;
+	const struct dsi_clk_config *clk_cfg;
+	u8 m_offset;
+	u8 n_offset;
+};
 
 struct rcar_mipi_dsi {
 	struct device *dev;
@@ -103,24 +116,62 @@ static const u32 hsfreqrange_table[][2] = {
 	{ /* sentinel */ },
 };
 
-struct vco_cntrl_value {
+#define DSI_CLK_CFG(minf, maxf, vco, cpb, gmp, intc, pro) \
+	.min_freq = ((minf) * 1000000U), \
+	.max_freq = ((maxf) * 1000000U), \
+	.vco_cntrl = (vco), \
+	.cpbias_cntrl = (cpb), \
+	.gmp_cntrl = (gmp), \
+	.int_cntrl = (intc), \
+	.prop_cntrl = (pro)
+
+struct dsi_clk_config {
 	u32 min_freq;
 	u32 max_freq;
-	u16 value;
+	u8 vco_cntrl;
+	u8 cpbias_cntrl;
+	u8 gmp_cntrl;
+	u8 int_cntrl;
+	u8 prop_cntrl;
 };
 
-static const struct vco_cntrl_value vco_cntrl_table[] = {
-	{ .min_freq = 40000000U,   .max_freq = 55000000U,   .value = 0x3f },
-	{ .min_freq = 52500000U,   .max_freq = 80000000U,   .value = 0x39 },
-	{ .min_freq = 80000000U,   .max_freq = 110000000U,  .value = 0x2f },
-	{ .min_freq = 105000000U,  .max_freq = 160000000U,  .value = 0x29 },
-	{ .min_freq = 160000000U,  .max_freq = 220000000U,  .value = 0x1f },
-	{ .min_freq = 210000000U,  .max_freq = 320000000U,  .value = 0x19 },
-	{ .min_freq = 320000000U,  .max_freq = 440000000U,  .value = 0x0f },
-	{ .min_freq = 420000000U,  .max_freq = 660000000U,  .value = 0x09 },
-	{ .min_freq = 630000000U,  .max_freq = 1149000000U, .value = 0x03 },
-	{ .min_freq = 1100000000U, .max_freq = 1152000000U, .value = 0x01 },
-	{ .min_freq = 1150000000U, .max_freq = 1250000000U, .value = 0x01 },
+static const struct dsi_clk_config dsi_clk_cfg_r8a779a0[] = {
+	{ DSI_CLK_CFG(   40,   55, 0x3f, 0x10, 0x01, 0x00, 0x0b ) },
+	{ DSI_CLK_CFG(   52,   80, 0x39, 0x10, 0x01, 0x00, 0x0b ) },
+	{ DSI_CLK_CFG(   80,  110, 0x2f, 0x10, 0x01, 0x00, 0x0b ) },
+	{ DSI_CLK_CFG(  105,  160, 0x29, 0x10, 0x01, 0x00, 0x0b ) },
+	{ DSI_CLK_CFG(  160,  220, 0x1f, 0x10, 0x01, 0x00, 0x0b ) },
+	{ DSI_CLK_CFG(  210,  320, 0x19, 0x10, 0x01, 0x00, 0x0b ) },
+	{ DSI_CLK_CFG(  320,  440, 0x0f, 0x10, 0x01, 0x00, 0x0b ) },
+	{ DSI_CLK_CFG(  420,  660, 0x09, 0x10, 0x01, 0x00, 0x0b ) },
+	{ DSI_CLK_CFG(  630, 1149, 0x03, 0x10, 0x01, 0x00, 0x0b ) },
+	{ DSI_CLK_CFG( 1100, 1152, 0x01, 0x10, 0x01, 0x00, 0x0b ) },
+	{ DSI_CLK_CFG( 1150, 1250, 0x01, 0x10, 0x01, 0x00, 0x0c ) },
+	{ /* sentinel */ },
+};
+
+static const struct dsi_clk_config dsi_clk_cfg_r8a779g0[] = {
+	{ DSI_CLK_CFG(   40,   45, 0x2b, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(   45,   55, 0x28, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(   55,   62, 0x28, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(   62,   75, 0x27, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(   75,   91, 0x23, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(   91,  109, 0x20, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  109,  125, 0x20, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  125,  150, 0x1f, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  150,  181, 0x1b, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  181,  219, 0x18, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  219,  250, 0x18, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  250,  300, 0x17, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  300,  363, 0x13, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  363,  455, 0x10, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  455,  500, 0x10, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  500,  600, 0x0f, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  600,  725, 0x0b, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  725,  875, 0x08, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG(  875, 1000, 0x08, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG( 1000, 1200, 0x07, 0x00, 0x00, 0x08, 0x0a ) },
+	{ DSI_CLK_CFG( 1200, 1250, 0x03, 0x00, 0x00, 0x08, 0x0a ) },
 	{ /* sentinel */ },
 };
 
@@ -168,27 +219,112 @@ static int rcar_mipi_dsi_phtw_test(struct rcar_mipi_dsi *dsi, u32 phtw)
  */
 
 struct dsi_setup_info {
-	unsigned long fout;
-	u16 vco_cntrl;
-	u16 prop_cntrl;
 	u16 hsfreqrange;
-	u16 div;
-	unsigned int m;
-	unsigned int n;
+
+	unsigned long fout;
+	u16 m;
+	u16 n;
+	u16 vclk_divider;
+	const struct dsi_clk_config *clkset;
 };
+
+static void rcar_mipi_dsi_pll_calc_r8a779a0(struct rcar_mipi_dsi *dsi,
+					    struct clk *clk,
+					    unsigned long fout_target,
+					    struct dsi_setup_info *setup_info)
+{
+	unsigned int best_err = -1;
+	unsigned long fin;
+
+	fin = clk_get_rate(clk);
+
+	for (unsigned int n = 3; n <= 8; n++) {
+		unsigned long fpfd;
+
+		fpfd = fin / n;
+
+		if (fpfd < 2000000U || fpfd > 8000000U)
+			continue;
+
+		for (unsigned int m = 64; m <= 625; m++) {
+			unsigned int err;
+			u64 fout;
+
+			fout = (u64)fpfd * m;
+
+			if (fout < 320000000U || fout > 1250000000U)
+				continue;
+
+			fout = div64_u64(fout, setup_info->vclk_divider);
+
+			err = abs((long)(fout - fout_target) * 10000 /
+				  (long)fout_target);
+
+			if (err < best_err) {
+				setup_info->m = m;
+				setup_info->n = n;
+				setup_info->fout = (unsigned long)fout;
+				best_err = err;
+
+				if (err == 0)
+					return;
+			}
+		}
+	}
+}
+
+static void rcar_mipi_dsi_pll_calc_r8a779g0(struct rcar_mipi_dsi *dsi,
+					    struct clk *clk,
+					    unsigned long fout_target,
+					    struct dsi_setup_info *setup_info)
+{
+	unsigned int best_err = -1;
+	unsigned long fin;
+
+	fin = clk_get_rate(clk);
+
+	for (unsigned int n = 1; n <= 8; n++) {
+		unsigned long fpfd;
+
+		fpfd = fin / n;
+
+		if (fpfd < 8000000U || fpfd > 24000000U)
+			continue;
+
+		for (unsigned int m = 167; m <= 1000; m++) {
+			unsigned int err;
+			u64 fout;
+
+			fout = div64_u64((u64)fpfd * m, 2);
+
+			if (fout < 2000000000U || fout > 4000000000U)
+				continue;
+
+			fout = div64_u64(fout, setup_info->vclk_divider);
+
+			err = abs((long)(fout - fout_target) * 10000 /
+				  (long)fout_target);
+			if (err < best_err) {
+				setup_info->m = m;
+				setup_info->n = n;
+				setup_info->fout = (unsigned long)fout;
+				best_err = err;
+
+				if (err == 0)
+					return;
+			}
+		}
+	}
+}
 
 static void rcar_mipi_dsi_parameters_calc(struct rcar_mipi_dsi *dsi,
 					  struct clk *clk, unsigned long target,
 					  struct dsi_setup_info *setup_info)
 {
 
-	const struct vco_cntrl_value *vco_cntrl;
+	const struct dsi_clk_config *clkset;
 	unsigned long fout_target;
-	unsigned long fin, fout;
 	unsigned long hsfreq;
-	unsigned int best_err = -1;
-	unsigned int divider;
-	unsigned int n;
 	unsigned int i;
 	unsigned int err;
 
@@ -202,20 +338,13 @@ static void rcar_mipi_dsi_parameters_calc(struct rcar_mipi_dsi *dsi,
 		return;
 
 	/* Find vco_cntrl */
-	for (vco_cntrl = vco_cntrl_table; vco_cntrl->min_freq != 0; vco_cntrl++) {
-		if (fout_target > vco_cntrl->min_freq &&
-		    fout_target <= vco_cntrl->max_freq) {
-			setup_info->vco_cntrl = vco_cntrl->value;
-			if (fout_target >= 1150000000)
-				setup_info->prop_cntrl = 0x0c;
-			else
-				setup_info->prop_cntrl = 0x0b;
+	for (clkset = dsi->info->clk_cfg; clkset->min_freq != 0; clkset++) {
+		if (fout_target > clkset->min_freq &&
+		    fout_target <= clkset->max_freq) {
+			setup_info->clkset = clkset;
 			break;
 		}
 	}
-
-	/* Add divider */
-	setup_info->div = (setup_info->vco_cntrl & 0x30) >> 4;
 
 	/* Find hsfreqrange */
 	hsfreq = fout_target * 2;
@@ -226,42 +355,32 @@ static void rcar_mipi_dsi_parameters_calc(struct rcar_mipi_dsi *dsi,
 		}
 	}
 
-	/*
-	 * Calculate n and m for PLL clock
-	 * Following the HW manual the ranges of n and m are
-	 * n = [3-8] and m = [64-625]
-	 */
-	fin = clk_get_rate(clk);
-	divider = 1 << setup_info->div;
-	for (n = 3; n < 9; n++) {
-		unsigned long fpfd;
-		unsigned int m;
+	switch (dsi->info->model) {
+	case RCAR_DSI_R8A779A0:
+		setup_info->vclk_divider = 1 << ((clkset->vco_cntrl >> 4) & 0x3);
+		rcar_mipi_dsi_pll_calc_r8a779a0(dsi, clk, fout_target, setup_info);
+		break;
 
-		fpfd = fin / n;
+	case RCAR_DSI_R8A779G0:
+		setup_info->vclk_divider = 1 << (((clkset->vco_cntrl >> 3) & 0x7) + 1);
+		rcar_mipi_dsi_pll_calc_r8a779g0(dsi, clk, fout_target, setup_info);
+		break;
 
-		for (m = 64; m < 626; m++) {
-			fout = fpfd * m / divider;
-			err = abs((long)(fout - fout_target) * 10000 /
-				  (long)fout_target);
-			if (err < best_err) {
-				setup_info->m = m - 2;
-				setup_info->n = n - 1;
-				setup_info->fout = fout;
-				best_err = err;
-				if (err == 0)
-					goto done;
-			}
-		}
+	default:
+		return;
 	}
 
-done:
+	err = abs((long)(setup_info->fout - fout_target) * 10000 / (long)fout_target);
+
 	dev_dbg(dsi->dev,
-		"%pC %lu Hz -> Fout %lu Hz (target %lu Hz, error %d.%02u%%), PLL M/N/DIV %u/%u/%u\n",
-		clk, fin, setup_info->fout, fout_target, best_err / 100,
-		best_err % 100, setup_info->m, setup_info->n, setup_info->div);
+		"Fout = %u * %lu / (2 * %u * %u) = %lu (target %lu Hz, error %d.%02u%%)\n",
+		setup_info->m, clk_get_rate(clk), setup_info->n, setup_info->vclk_divider,
+		setup_info->fout, fout_target,
+		err / 100, err % 100);
+
 	dev_dbg(dsi->dev,
 		"vco_cntrl = 0x%x\tprop_cntrl = 0x%x\thsfreqrange = 0x%x\n",
-		setup_info->vco_cntrl, setup_info->prop_cntrl,
+		clkset->vco_cntrl, clkset->prop_cntrl,
 		setup_info->hsfreqrange);
 }
 
@@ -366,17 +485,24 @@ static int rcar_mipi_dsi_startup(struct rcar_mipi_dsi *dsi,
 			return ret;
 	}
 
+	if (dsi->info->model == RCAR_DSI_R8A779G0) {
+		// XXX Hack for whitehawk board, "use_extal_clk"
+		if (true) //mipi_dsi->use_extal_clk)
+			rcar_mipi_dsi_set(dsi, CLOCKSET1, 0x0100000C);
+	}
+
 	/* PLL Clock Setting */
 	rcar_mipi_dsi_clr(dsi, CLOCKSET1, CLOCKSET1_SHADOW_CLEAR);
 	rcar_mipi_dsi_set(dsi, CLOCKSET1, CLOCKSET1_SHADOW_CLEAR);
 	rcar_mipi_dsi_clr(dsi, CLOCKSET1, CLOCKSET1_SHADOW_CLEAR);
 
-	clockset2 = CLOCKSET2_M(setup_info.m) | CLOCKSET2_N(setup_info.n)
-		  | CLOCKSET2_VCO_CNTRL(setup_info.vco_cntrl);
-	clockset3 = CLOCKSET3_PROP_CNTRL(setup_info.prop_cntrl)
-		  | CLOCKSET3_INT_CNTRL(0)
-		  | CLOCKSET3_CPBIAS_CNTRL(0x10)
-		  | CLOCKSET3_GMP_CNTRL(1);
+	clockset2 = CLOCKSET2_M(setup_info.m - dsi->info->m_offset)
+		  | CLOCKSET2_N(setup_info.n - dsi->info->n_offset)
+		  | CLOCKSET2_VCO_CNTRL(setup_info.clkset->vco_cntrl);
+	clockset3 = CLOCKSET3_PROP_CNTRL(setup_info.clkset->prop_cntrl)
+		  | CLOCKSET3_INT_CNTRL(setup_info.clkset->int_cntrl)
+		  | CLOCKSET3_CPBIAS_CNTRL(setup_info.clkset->cpbias_cntrl)
+		  | CLOCKSET3_GMP_CNTRL(setup_info.clkset->gmp_cntrl);
 	rcar_mipi_dsi_write(dsi, CLOCKSET2, clockset2);
 	rcar_mipi_dsi_write(dsi, CLOCKSET3, clockset3);
 
@@ -427,8 +553,21 @@ static int rcar_mipi_dsi_startup(struct rcar_mipi_dsi *dsi,
 		dev_warn(dsi->dev, "unsupported format");
 		return -EINVAL;
 	}
-	vclkset |= VCLKSET_COLOR_RGB | VCLKSET_DIV(setup_info.div)
-		|  VCLKSET_LANE(dsi->lanes - 1);
+
+	vclkset |= VCLKSET_COLOR_RGB | VCLKSET_LANE(dsi->lanes - 1);
+
+	switch (dsi->info->model) {
+	case RCAR_DSI_R8A779A0:
+		vclkset |= VCLKSET_DIV_R8A779A0(__ffs(setup_info.vclk_divider));
+		break;
+
+	case RCAR_DSI_R8A779G0:
+		vclkset |= VCLKSET_DIV_R8A779G0(__ffs(setup_info.vclk_divider) - 1);
+		break;
+
+	default:
+		return -ENODEV;
+	}
 
 	rcar_mipi_dsi_write(dsi, VCLKSET, vclkset);
 
@@ -841,8 +980,25 @@ static int rcar_mipi_dsi_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct rcar_mipi_dsi_device_info r8a779a0_data = {
+	.model = RCAR_DSI_R8A779A0,
+	.clk_cfg = dsi_clk_cfg_r8a779a0,
+	.m_offset = 2,
+	.n_offset = 1,
+
+};
+
+static const struct rcar_mipi_dsi_device_info r8a779g0_data = {
+	.model = RCAR_DSI_R8A779G0,
+	.clk_cfg = dsi_clk_cfg_r8a779g0,
+	.m_offset = 0,
+	.n_offset = 1,
+
+};
+
 static const struct of_device_id rcar_mipi_dsi_of_table[] = {
-	{ .compatible = "renesas,r8a779a0-dsi-csi2-tx" },
+	{ .compatible = "renesas,r8a779a0-dsi-csi2-tx", .data = &r8a779a0_data },
+	{ .compatible = "renesas,r8a779g0-dsi-csi2-tx", .data = &r8a779g0_data },
 	{ }
 };
 

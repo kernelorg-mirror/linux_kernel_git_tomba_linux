@@ -175,6 +175,17 @@ static const struct dsi_clk_config dsi_clk_cfg_r8a779g0[] = {
 	{ /* sentinel */ },
 };
 
+struct dsi_setup_info {
+	unsigned long hsfreq;
+	u16 hsfreqrange;
+
+	unsigned long fout;
+	u16 m;
+	u16 n;
+	u16 vclk_divider;
+	const struct dsi_clk_config *clkset;
+};
+
 static void rcar_mipi_dsi_write(struct rcar_mipi_dsi *dsi, u32 reg, u32 data)
 {
 	iowrite32(data, dsi->mmio + reg);
@@ -195,7 +206,7 @@ static void rcar_mipi_dsi_set(struct rcar_mipi_dsi *dsi, u32 reg, u32 set)
 	rcar_mipi_dsi_write(dsi, reg, rcar_mipi_dsi_read(dsi, reg) | set);
 }
 
-static int rcar_mipi_dsi_phtw_test(struct rcar_mipi_dsi *dsi, u32 phtw)
+static int rcar_mipi_dsi_write_phtw(struct rcar_mipi_dsi *dsi, u32 phtw)
 {
 	u32 status;
 	int ret;
@@ -214,19 +225,144 @@ static int rcar_mipi_dsi_phtw_test(struct rcar_mipi_dsi *dsi, u32 phtw)
 	return ret;
 }
 
+static int rcar_mipi_dsi_write_phtw_arr(struct rcar_mipi_dsi *dsi,
+					const u32 *phtw, unsigned int size)
+{
+	for (unsigned int i = 0; i < size; i++) {
+		int ret = rcar_mipi_dsi_write_phtw(dsi, phtw[i]);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int rcar_mipi_dsi_init_phtw_v3u(struct rcar_mipi_dsi *dsi)
+{
+	static const u32 phtw[] = {
+		0x01020114, 0x01600115, 0x01030116, 0x0102011d,
+		0x011101a4, 0x018601a4, 0x014201a0, 0x010001a3,
+		0x0101011f,
+	};
+
+	return rcar_mipi_dsi_write_phtw_arr(dsi, phtw, ARRAY_SIZE(phtw));
+}
+
+static int rcar_mipi_dsi_post_init_phtw_v3u(struct rcar_mipi_dsi *dsi)
+{
+	static const u32 phtw[] = {
+		0x010c0130, 0x010c0140, 0x010c0150, 0x010c0180,
+		0x010c0190, 0x010a0160, 0x010a0170, 0x01800164,
+		0x01800174,
+	};
+
+	return rcar_mipi_dsi_write_phtw_arr(dsi, phtw, ARRAY_SIZE(phtw));
+}
+
+#define MHZ(v) (v * 1000000U)
+
+static int rcar_mipi_dsi_init_phtw_v4h(struct rcar_mipi_dsi *dsi,
+				       const struct dsi_setup_info *setup_info)
+{
+	static const u32 phtw_init[] = {
+		0x01010100, 0x01030173,
+		0x01000174, 0x01500175,
+		0x01030176, 0x01040166,
+		0x010201AD,
+	};
+
+	if(setup_info->hsfreq < MHZ(450))
+	{
+		rcar_mipi_dsi_write_phtw(dsi, 0x01010100);
+		rcar_mipi_dsi_write_phtw(dsi, 0x011B01AC);
+	}
+
+	rcar_mipi_dsi_write_phtw_arr(dsi, phtw_init, ARRAY_SIZE(phtw_init));
+
+	if (setup_info->hsfreq <= MHZ(1000))
+	{
+		rcar_mipi_dsi_write_phtw(dsi, 0x01020100);
+		rcar_mipi_dsi_write_phtw(dsi, 0x01910170);
+		rcar_mipi_dsi_write_phtw(dsi, 0x01020171);
+		rcar_mipi_dsi_write_phtw(dsi, 0x01110172);
+	}
+	else if (setup_info->hsfreq <= MHZ(1500))
+	{
+		rcar_mipi_dsi_write_phtw(dsi, 0x01020100);
+		rcar_mipi_dsi_write_phtw(dsi, 0x01980170);
+		rcar_mipi_dsi_write_phtw(dsi, 0x01030171);
+		rcar_mipi_dsi_write_phtw(dsi, 0x01100172);
+	}
+	else if (setup_info->hsfreq <= MHZ(2500))
+	{
+		rcar_mipi_dsi_write_phtw(dsi, 0x01020100);
+		rcar_mipi_dsi_write_phtw(dsi, 0x0144016B);
+		rcar_mipi_dsi_write_phtw(dsi, 0x01000172);
+	}
+	else
+	{
+		dev_err(dsi->dev, "unsupport mbps");
+		return -EINVAL;
+	}
+
+	switch (dsi->lanes)
+	{
+		case 1:
+			rcar_mipi_dsi_write_phtw(dsi, 0x01070100);
+			rcar_mipi_dsi_write_phtw(dsi, 0x010E010B);
+			break;
+		case 2:
+			rcar_mipi_dsi_write_phtw(dsi, 0x01090100);
+			rcar_mipi_dsi_write_phtw(dsi, 0x010E010B);
+			break;
+		case 3:
+			rcar_mipi_dsi_write_phtw(dsi, 0x010B0100);
+			rcar_mipi_dsi_write_phtw(dsi, 0x010E010B);
+			break;
+		case 4:
+		default:
+			break;
+	}
+
+	if (setup_info->hsfreq <= MHZ(1500))
+	{
+		rcar_mipi_dsi_write_phtw(dsi, 0x01010100);
+		rcar_mipi_dsi_write_phtw(dsi, 0x01C0016e);
+	}
+
+	return 0;
+}
+
+static int rcar_mipi_dsi_post_init_phtw_v4h(struct rcar_mipi_dsi *dsi,
+					    const struct dsi_setup_info *setup_info)
+{
+	u32 status;
+	int ret;
+
+	if (setup_info->hsfreq <= MHZ(1500))
+	{
+		rcar_mipi_dsi_write_phtw(dsi, 0x01020100);
+		rcar_mipi_dsi_write_phtw(dsi, 0x00000180);
+
+		ret = read_poll_timeout(rcar_mipi_dsi_read, status,
+				status & PHTR_TEST,
+				2000, 10000, false, dsi, PHTR);
+		if (ret < 0)
+		{
+			dev_err(dsi->dev, "failed to test PHTR\n");
+			return ret;
+		}
+
+		rcar_mipi_dsi_write_phtw(dsi, 0x01010100);
+		rcar_mipi_dsi_write_phtw(dsi, 0x0100016e);
+	}
+
+	return 0;
+}
+
 /* -----------------------------------------------------------------------------
  * Hardware Setup
  */
-
-struct dsi_setup_info {
-	u16 hsfreqrange;
-
-	unsigned long fout;
-	u16 m;
-	u16 n;
-	u16 vclk_divider;
-	const struct dsi_clk_config *clkset;
-};
 
 static void rcar_mipi_dsi_pll_calc_r8a779a0(struct rcar_mipi_dsi *dsi,
 					    struct clk *clk,
@@ -348,6 +484,7 @@ static void rcar_mipi_dsi_parameters_calc(struct rcar_mipi_dsi *dsi,
 
 	/* Find hsfreqrange */
 	hsfreq = fout_target * 2;
+	setup_info->hsfreq = hsfreq;
 	for (i = 0; i < ARRAY_SIZE(hsfreqrange_table); i++) {
 		if (hsfreqrange_table[i][0] >= hsfreq) {
 			setup_info->hsfreqrange = hsfreqrange_table[i][1];
@@ -443,7 +580,7 @@ static int rcar_mipi_dsi_startup(struct rcar_mipi_dsi *dsi,
 {
 	struct dsi_setup_info setup_info = {};
 	unsigned int timeout;
-	int ret, i;
+	int ret;
 	int dsi_format;
 	u32 phy_setup;
 	u32 clockset2, clockset3;
@@ -479,10 +616,21 @@ static int rcar_mipi_dsi_startup(struct rcar_mipi_dsi *dsi,
 	phy_setup |= PHYSETUP_HSFREQRANGE(setup_info.hsfreqrange);
 	rcar_mipi_dsi_write(dsi, PHYSETUP, phy_setup);
 
-	for (i = 0; i < ARRAY_SIZE(phtw); i++) {
-		ret = rcar_mipi_dsi_phtw_test(dsi, phtw[i]);
+	switch (dsi->info->model) {
+	case RCAR_DSI_R8A779A0:
+		ret = rcar_mipi_dsi_init_phtw_v3u(dsi);
 		if (ret < 0)
 			return ret;
+		break;
+
+	case RCAR_DSI_R8A779G0:
+		ret = rcar_mipi_dsi_init_phtw_v4h(dsi, &setup_info);
+		if (ret < 0)
+			return ret;
+		break;
+
+	default:
+		return -ENODEV;
 	}
 
 	if (dsi->info->model == RCAR_DSI_R8A779G0) {
@@ -533,10 +681,21 @@ static int rcar_mipi_dsi_startup(struct rcar_mipi_dsi *dsi,
 		return -ETIMEDOUT;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(phtw2); i++) {
-		ret = rcar_mipi_dsi_phtw_test(dsi, phtw2[i]);
+	switch (dsi->info->model) {
+	case RCAR_DSI_R8A779A0:
+		ret = rcar_mipi_dsi_post_init_phtw_v3u(dsi);
 		if (ret < 0)
 			return ret;
+		break;
+
+	case RCAR_DSI_R8A779G0:
+		ret = rcar_mipi_dsi_post_init_phtw_v4h(dsi, &setup_info);
+		if (ret < 0)
+			return ret;
+		break;
+
+	default:
+		return -ENODEV;
 	}
 
 	/* Enable DOT clock */

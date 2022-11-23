@@ -1,0 +1,36 @@
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/gpio/gpio.h>
+
+
+/ {
+	compatible = "brcm,bcm2835";
+
+};
+
+&dsi1 {
+	status = "okay";
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	port {
+		dsi_out_port:endpoint {
+			remote-endpoint = <&panel_dsi_port>;
+		};
+	};
+
+	mypanel@0 {
+		compatible    = "raydium,rm69310";
+		status        = "okay";
+		reg           = <0>;
+		reset-gpios   = <&gpio 26 GPIO_ACTIVE_LOW>;
+
+		port {
+			panel_dsi_port: endpoint {
+				remote-endpoint = <&dsi_out_port>;
+			};
+		};
+	};
+};

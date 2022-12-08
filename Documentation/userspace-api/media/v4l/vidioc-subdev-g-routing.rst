@@ -50,7 +50,10 @@ All stream configurations are reset when ``VIDIOC_SUBDEV_S_ROUTING`` is called. 
 means that the userspace must reconfigure all streams after calling the ioctl
 with e.g. ``VIDIOC_SUBDEV_S_FMT``.
 
-Only subdevices which have both sink and source pads can support routing.
+A special case for routing are routes marked with
+``V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY`` flag. These routes are used to describe
+source endpoints where the stream is internally created (such as a sensor) and
+so the sink fields are unused.
 
 When inspecting routes through ``VIDIOC_SUBDEV_G_ROUTING`` and the application
 provided ``num_routes`` is not big enough to contain all the available routes
@@ -124,6 +127,11 @@ for all the route entries and call ``VIDIOC_SUBDEV_G_ROUTING`` again.
     * - V4L2_SUBDEV_ROUTE_FL_ACTIVE
       - 0
       - The route is enabled. Set by applications.
+    * - V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY
+      - 2
+      - Used to describe a route source endpoint where the stream is internally
+        created (such as a sensor) and so the sink fields are unused. Set by
+        the driver.
 
 Return Value
 ============

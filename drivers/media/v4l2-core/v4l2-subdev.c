@@ -809,12 +809,15 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg,
 			    route->source_stream > V4L2_SUBDEV_MAX_STREAM_ID)
 				return -EINVAL;
 
-			if (route->sink_pad >= sd->entity.num_pads)
-				return -EINVAL;
+			/* Do not check sink pad for source routes */
+			if (!(route->flags & V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY)) {
+				if (route->sink_pad >= sd->entity.num_pads)
+					return -EINVAL;
 
-			if (!(pads[route->sink_pad].flags &
-			      MEDIA_PAD_FL_SINK))
-				return -EINVAL;
+				if (!(pads[route->sink_pad].flags &
+				      MEDIA_PAD_FL_SINK))
+					return -EINVAL;
+			}
 
 			if (route->source_pad >= sd->entity.num_pads)
 				return -EINVAL;
@@ -1333,9 +1336,11 @@ v4l2_subdev_init_stream_configs(struct v4l2_subdev_stream_configs *stream_config
 	/* Count number of formats needed */
 	for_each_active_route(routing, route) {
 		/*
-		 * Each route needs a format on both ends of the route.
+		 * Each route needs a format on both ends of the route, except
+		 * for source streams which only need one format.
 		 */
-		new_configs.num_configs += 2;
+		new_configs.num_configs +=
+			(route->flags & V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY) ? 1 : 2;
 	}
 
 	if (new_configs.num_configs) {
@@ -1354,10 +1359,12 @@ v4l2_subdev_init_stream_configs(struct v4l2_subdev_stream_configs *stream_config
 	idx = 0;
 
 	for_each_active_route(routing, route) {
-		new_configs.configs[idx].pad = route->sink_pad;
-		new_configs.configs[idx].stream = route->sink_stream;
+		if (!(route->flags & V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY)) {
+			new_configs.configs[idx].pad = route->sink_pad;
+			new_configs.configs[idx].stream = route->sink_stream;
 
-		idx++;
+			idx++;
+		}
 
 		new_configs.configs[idx].pad = route->source_pad;
 		new_configs.configs[idx].stream = route->source_stream;
@@ -1544,6 +1551,10 @@ int v4l2_subdev_routing_find_opposite_end(const struct v4l2_subdev_krouting *rou
 
 	for (i = 0; i < routing->num_routes; ++i) {
 		struct v4l2_subdev_route *route = &routing->routes[i];
+
+		/* No "opposite-end" for source routes */
+		if (route->flags & V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY)
+			continue;
 
 		if (route->source_pad == pad &&
 		    route->source_stream == stream) {

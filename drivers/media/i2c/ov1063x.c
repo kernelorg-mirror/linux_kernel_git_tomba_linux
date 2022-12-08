@@ -802,7 +802,7 @@ static int ov1063x_configure(struct ov1063x_priv *priv)
 
 	state = v4l2_subdev_get_locked_active_state(&priv->subdev);
 
-	format = v4l2_subdev_get_pad_format(&priv->subdev, state, 0);
+	format = v4l2_subdev_state_get_stream_format(state, 0, 0);
 	if (!format)
 		return -EINVAL;
 
@@ -1168,12 +1168,11 @@ done:
 	return ret;
 }
 
-static void ov1063x_init_formats(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *state)
+static void ov1063x_init_formats(struct v4l2_subdev_state *state)
 {
 	struct v4l2_mbus_framefmt *format;
 
-	format = v4l2_subdev_get_pad_format(sd, state, 0);
+	format = v4l2_subdev_state_get_stream_format(state, 0, 0);
 	format->code = ov1063x_mbus_formats[0];
 	format->width = ov1063x_framesizes[0].width;
 	format->height = ov1063x_framesizes[0].height;
@@ -1181,18 +1180,49 @@ static void ov1063x_init_formats(struct v4l2_subdev *sd,
 	format->colorspace = V4L2_COLORSPACE_SMPTE170M;
 }
 
+static int _ov10635_set_routing(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *state)
+{
+	struct v4l2_subdev_route routes[] = {
+		{
+			.source_pad = 0,
+			.source_stream = 0,
+			.flags = V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY |
+				 V4L2_SUBDEV_ROUTE_FL_ACTIVE,
+		},
+	};
+
+	struct v4l2_subdev_krouting routing = {
+		.num_routes = ARRAY_SIZE(routes),
+		.routes = routes,
+	};
+
+	int ret;
+
+	ret = v4l2_subdev_set_routing(sd, state, &routing);
+	if (ret)
+		return ret;
+
+	ov1063x_init_formats(state);
+
+	return 0;
+}
+
 static int ov1063x_init_cfg(struct v4l2_subdev *sd,
 			    struct v4l2_subdev_state *state)
 {
 	struct ov1063x_priv *priv = to_ov1063x(sd);
+	int ret;
 
-	ov1063x_init_formats(sd, state);
+	ret = _ov10635_set_routing(sd, state);
+	if (ret)
+		return ret;
 
 	// XXX this is done also for TRY. Move somewhere else.
 	if (true /*which == V4L2_SUBDEV_FORMAT_ACTIVE*/) {
 		struct v4l2_mbus_framefmt *format;
 
-		format = v4l2_subdev_get_pad_format(sd, state, 0);
+		format = v4l2_subdev_state_get_stream_format(state, 0, 0);
 
 		/*
 		 * This assumes that ov1063x_mbus_formats[0] doesn't
@@ -1263,7 +1293,7 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 	u32 code;
 	int ret = 0;
 
-	if (fmt->pad != 0)
+	if (fmt->pad != 0 || fmt->stream != 0)
 		return -EINVAL;
 
 	/*
@@ -1287,7 +1317,7 @@ static int ov1063x_set_fmt(struct v4l2_subdev *sd,
 				       fmt->format.height);
 
 	/* Update the stored format and return it. */
-	format = v4l2_subdev_get_pad_format(sd, state, fmt->pad);
+	format = v4l2_subdev_state_get_stream_format(state, fmt->pad, fmt->stream);
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE &&
 	    priv->streaming != OV1063X_STREAM_OFF) {
@@ -1366,7 +1396,7 @@ static int ov1063x_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 
 	state = v4l2_subdev_lock_and_get_active_state(sd);
 
-	fmt = v4l2_subdev_get_pad_format(sd, state, 0);
+	fmt = v4l2_subdev_state_get_stream_format(state, 0, 0);
 
 	memset(fd, 0, sizeof(*fd));
 
@@ -1389,6 +1419,21 @@ static int ov1063x_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 	return 0;
 }
 
+static int ov1063x_set_routing(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state,
+			       enum v4l2_subdev_format_whence which,
+			       struct v4l2_subdev_krouting *routing)
+{
+	int ret;
+
+	if (routing->num_routes == 0 || routing->num_routes > 1)
+		return -EINVAL;
+
+	ret = _ov10635_set_routing(sd, state);
+
+	return ret;
+}
+
 static const struct v4l2_subdev_core_ops ov1063x_subdev_core_ops = {
 	.log_status		= v4l2_ctrl_subdev_log_status,
 	.subscribe_event	= v4l2_ctrl_subdev_subscribe_event,
@@ -1405,6 +1450,7 @@ static const struct v4l2_subdev_pad_ops ov1063x_subdev_pad_ops = {
 	.enum_frame_size	= ov1063x_enum_frame_sizes,
 	.get_fmt		= v4l2_subdev_get_fmt,
 	.set_fmt		= ov1063x_set_fmt,
+	.set_routing		= ov1063x_set_routing,
 	.get_frame_desc		= ov1063x_get_frame_desc,
 };
 
@@ -1616,7 +1662,8 @@ static int ov1063x_probe(struct i2c_client *client)
 	v4l2_i2c_subdev_set_name(sd, client, priv->name, NULL);
 
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
-		     V4L2_SUBDEV_FL_HAS_EVENTS;
+		     V4L2_SUBDEV_FL_HAS_EVENTS |
+		     V4L2_SUBDEV_FL_STREAMS;
 
 	v4l2_ctrl_handler_init(&priv->hdl, 3);
 	v4l2_ctrl_new_std(&priv->hdl, &ov1063x_ctrl_ops,

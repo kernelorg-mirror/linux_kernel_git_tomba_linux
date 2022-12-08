@@ -223,12 +223,11 @@ static int imx390_s_stream(struct v4l2_subdev *sd, int enable)
 	return 0;
 }
 
-static void imx390_init_formats(struct v4l2_subdev *sd,
-				struct v4l2_subdev_state *state)
+static void imx390_init_formats(struct v4l2_subdev_state *state)
 {
 	struct v4l2_mbus_framefmt *format;
 
-	format = v4l2_subdev_get_pad_format(sd, state, 0);
+	format = v4l2_subdev_state_get_stream_format(state, 0, 0);
 	format->code = imx390_mbus_formats[0];
 	format->width = imx390_framesizes[0].width;
 	format->height = imx390_framesizes[0].height;
@@ -236,12 +235,47 @@ static void imx390_init_formats(struct v4l2_subdev *sd,
 	format->colorspace = V4L2_COLORSPACE_SMPTE170M;
 }
 
+static int _imx390_set_routing(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state)
+{
+	struct v4l2_subdev_route routes[] = {
+		{
+			.source_pad = 0,
+			.source_stream = 0,
+			.flags = V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY |
+				 V4L2_SUBDEV_ROUTE_FL_ACTIVE,
+		},
+		{
+			.source_pad = 0,
+			.source_stream = 1,
+			.flags = V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY,
+		}
+	};
+
+	struct v4l2_subdev_krouting routing = {
+		.num_routes = ARRAY_SIZE(routes),
+		.routes = routes,
+	};
+
+	int ret;
+
+	ret = v4l2_subdev_set_routing(sd, state, &routing);
+	if (ret)
+		return ret;
+
+	imx390_init_formats(state);
+
+	return 0;
+}
+
 static int imx390_init_cfg(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_state *state)
 {
-	imx390_init_formats(sd, state);
+	int ret;
 
-	return 0;
+	ret = _imx390_set_routing(sd, state);
+
+	return ret;
 }
 
 static int imx390_enum_mbus_code(struct v4l2_subdev *sd,
@@ -318,7 +352,7 @@ static int imx390_set_fmt(struct v4l2_subdev *sd,
 				       fmt->format.height);
 
 	/* Update the stored format and return it. */
-	format = v4l2_subdev_get_pad_format(sd, state, fmt->pad);
+	format = v4l2_subdev_state_get_stream_format(state, fmt->pad, fmt->stream);
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE && priv->streaming)
 		return -EBUSY;
@@ -345,7 +379,7 @@ static int imx390_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 
 	state = v4l2_subdev_lock_and_get_active_state(sd);
 
-	fmt = v4l2_subdev_get_pad_format(sd, state, 0);
+	fmt = v4l2_subdev_state_get_stream_format(state, 0, 0);
 	if (!fmt) {
 		ret = -EPIPE;
 		goto out;
@@ -375,6 +409,21 @@ out:
 	return ret;
 }
 
+static int imx390_set_routing(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_state *state,
+			      enum v4l2_subdev_format_whence which,
+			      struct v4l2_subdev_krouting *routing)
+{
+	int ret;
+
+	if (routing->num_routes == 0 || routing->num_routes > 1)
+		return -EINVAL;
+
+	ret = _imx390_set_routing(sd, state);
+
+	return ret;
+}
+
 static const struct v4l2_subdev_video_ops imx390_subdev_video_ops = {
 	.s_stream	= imx390_s_stream,
 };
@@ -385,6 +434,7 @@ static const struct v4l2_subdev_pad_ops imx390_subdev_pad_ops = {
 	.enum_frame_size	= imx390_enum_frame_sizes,
 	.get_fmt		= v4l2_subdev_get_fmt,
 	.set_fmt		= imx390_set_fmt,
+	.set_routing		= imx390_set_routing,
 	.get_frame_desc		= imx390_get_frame_desc,
 };
 
@@ -534,7 +584,8 @@ static int imx390_probe(struct i2c_client *client)
 	v4l2_i2c_subdev_init(sd, client, &imx390_subdev_ops);
 
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
-		     V4L2_SUBDEV_FL_HAS_EVENTS;
+		     V4L2_SUBDEV_FL_HAS_EVENTS |
+		     V4L2_SUBDEV_FL_STREAMS;
 
 	/* Initialize the media entity. */
 	priv->pad.flags = MEDIA_PAD_FL_SOURCE;

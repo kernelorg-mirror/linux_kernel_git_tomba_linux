@@ -574,17 +574,20 @@ Multiplexed streams setup example
 A simple example of a multiplexed stream setup might be as follows:
 
 - Two identical sensors (Sensor A and Sensor B). Each sensor has a single source
-  pad (pad 0) which carries a pixel data stream.
+  pad (pad 0) which carries two streams, pixel data stream and metadata
+  stream.
 
 - Multiplexer bridge (Bridge). The bridge has two sink pads, connected to the
-  sensors (pads 0, 1), and one source pad (pad 2), which outputs two streams.
+  sensors (pads 0, 1), and one source pad (pad 2), which outputs all 4
+  streams.
 
 - Receiver in the SoC (Receiver). The receiver has a single sink pad (pad 0),
-  connected to the bridge, and two source pads (pads 1-2), going to the DMA
-  engine. The receiver demultiplexes the incoming streams to the source pads.
+  connected to the bridge, and four source pads (pads 1-4), going to the DMA
+  engine. The receiver demultiplexes the incoming streams to the four source
+  pads.
 
-- DMA Engines in the SoC (DMA Engine), one for each stream. Each DMA engine is
-  connected to a single source pad in the receiver.
+- Four DMA Engines in the SoC (DMA Engine). Each DMA engine is connected to a
+  single source pad in the receiver.
 
 The sensors, the bridge and the receiver are modeled as V4L2 subdevices,
 exposed to userspace via /dev/v4l-subdevX device nodes. The DMA engines are
@@ -598,6 +601,22 @@ not differ from normal non-multiplexed media controller setup.
 
 2) Configure routing.
 
+.. flat-table:: Sensor routing table (identical on both sensors)
+    :header-rows:  1
+
+    * - Sink Pad/Stream
+      - Source Pad/Stream
+      - Routing Flags
+      - Comments
+    * - 0/0 (unused)
+      - 0/0
+      - V4L2_SUBDEV_ROUTE_FL_ACTIVE | V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY
+      - Pixel data stream. Source route, i.e. the sink fields are unused.
+    * - 0/0 (unused)
+      - 0/1
+      - V4L2_SUBDEV_ROUTE_FL_ACTIVE | V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY
+      - Metadata stream. Source route, i.e. the sink fields are unused.
+
 .. flat-table:: Bridge routing table
     :header-rows:  1
 
@@ -609,10 +628,18 @@ not differ from normal non-multiplexed media controller setup.
       - 2/0
       - V4L2_SUBDEV_ROUTE_FL_ACTIVE
       - Pixel data stream from Sensor A
-    * - 1/0
+    * - 0/1
       - 2/1
       - V4L2_SUBDEV_ROUTE_FL_ACTIVE
+      - Metadata stream from Sensor A
+    * - 1/0
+      - 2/2
+      - V4L2_SUBDEV_ROUTE_FL_ACTIVE
       - Pixel data stream from Sensor B
+    * - 1/1
+      - 2/3
+      - V4L2_SUBDEV_ROUTE_FL_ACTIVE
+      - Metadata stream from Sensor B
 
 .. flat-table:: Receiver routing table
     :header-rows:  1
@@ -628,7 +655,15 @@ not differ from normal non-multiplexed media controller setup.
     * - 0/1
       - 2/0
       - V4L2_SUBDEV_ROUTE_FL_ACTIVE
+      - Metadata stream from Sensor A
+    * - 0/2
+      - 3/0
+      - V4L2_SUBDEV_ROUTE_FL_ACTIVE
       - Pixel data stream from Sensor B
+    * - 0/3
+      - 4/0
+      - V4L2_SUBDEV_ROUTE_FL_ACTIVE
+      - Metadata stream from Sensor B
 
 3) Configure streams
 

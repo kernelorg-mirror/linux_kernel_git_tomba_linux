@@ -441,7 +441,6 @@ struct vidphy_cfg {
  * @axi_clk: Axi lite interface clock
  * @rx_lnk_clk: DP Rx GT clock
  * @rx_vid_clk: DP RX Video clock
- * @rx_dec_clk: DP Rx Decode clock
  * @dp_base: Base address of DP Rx Subsystem
  * @edid_base: Bare Address of EDID block
  * @hdcp1x_keymgmt_base: regmap of HDCP1X Key Management block

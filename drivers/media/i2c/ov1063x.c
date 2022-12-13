@@ -486,6 +486,8 @@ struct ov1063x_priv {
 
 	unsigned int			fps_numerator;
 	unsigned int			fps_denominator;
+
+	bool				embedded_data;
 };
 
 /*
@@ -799,7 +801,6 @@ static int ov1063x_configure(struct ov1063x_priv *priv)
 	unsigned int hts, vts;
 	u32 val;
 	int ret;
-	bool emb;
 
 	state = v4l2_subdev_get_locked_active_state(&priv->subdev);
 
@@ -974,13 +975,11 @@ static int ov1063x_configure(struct ov1063x_priv *priv)
 	ov1063x_write(priv, OV1063X_FORMAT_CTRL00, val, &ret);
 	ov1063x_write(priv, OV1063X_DVP_MOD_SEL, 0, &ret);
 
-	emb = state->routing.routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE;
-
 	ov1063x_update(priv, OV1063X_VFIFO_EMBD_LINE_CTRL,
 		       OV1063X_VFIFO_EMBD_LINE_CTRL_EMBD_EN,
-		       emb ? OV1063X_VFIFO_EMBD_LINE_CTRL_EMBD_EN : 0, &ret);
+		       priv->embedded_data ? OV1063X_VFIFO_EMBD_LINE_CTRL_EMBD_EN : 0, &ret);
 
-	ov1063x_write(priv, OV1063X_EMB_LINE_EN, emb ? 1 : 0, &ret);
+	ov1063x_write(priv, OV1063X_EMB_LINE_EN, priv->embedded_data ? 1 : 0, &ret);
 
 	if (ret)
 		return ret;
@@ -1177,71 +1176,38 @@ done:
 	return ret;
 }
 
-static void ov1063x_init_formats(struct v4l2_subdev_state *state)
-{
-	struct v4l2_mbus_framefmt *format;
-
-	format = v4l2_subdev_state_get_stream_format(state, 0, 0);
-	format->code = ov1063x_mbus_formats[0];
-	format->width = ov1063x_framesizes[0].width;
-	format->height = ov1063x_framesizes[0].height;
-	format->field = V4L2_FIELD_NONE;
-	format->colorspace = V4L2_COLORSPACE_SMPTE170M;
-
-	if (state->routing.routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE) {
-		format = v4l2_subdev_state_get_stream_format(state, 0, 1);
-		format->code = MEDIA_BUS_FMT_METADATA_16;
-		format->width = ov1063x_framesizes[0].width;
-		format->height = 1;
-		format->field = V4L2_FIELD_NONE;
-		format->colorspace = V4L2_COLORSPACE_DEFAULT;
-	}
-}
-
-static int _ov10635_set_routing(struct v4l2_subdev *sd,
-				struct v4l2_subdev_state *state,
-				bool enable_embedded_data)
-{
-	struct v4l2_subdev_route routes[] = {
-		{
-			.source_pad = 0,
-			.source_stream = 0,
-			.flags = V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY |
-				 V4L2_SUBDEV_ROUTE_FL_ACTIVE,
-		},
-		{
-			.source_pad = 0,
-			.source_stream = 1,
-			.flags = V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY,
-		}
-	};
-
-	struct v4l2_subdev_krouting routing = {
-		.num_routes = ARRAY_SIZE(routes),
-		.routes = routes,
-	};
-
-	int ret;
-
-	if (enable_embedded_data)
-		routes[1].flags |= V4L2_SUBDEV_ROUTE_FL_ACTIVE;
-
-	ret = v4l2_subdev_set_routing(sd, state, &routing);
-	if (ret)
-		return ret;
-
-	ov1063x_init_formats(state);
-
-	return 0;
-}
-
 static int ov1063x_init_cfg(struct v4l2_subdev *sd,
 			    struct v4l2_subdev_state *state)
 {
 	struct ov1063x_priv *priv = to_ov1063x(sd);
 	int ret;
+	struct v4l2_subdev_stream_config configs[] = {
+		{
+			.pad = 0,
+			.stream = 0,
+			.fmt = {
+				.code = ov1063x_mbus_formats[0],
+				.width = ov1063x_framesizes[0].width,
+				.height = ov1063x_framesizes[0].height,
+				.field = V4L2_FIELD_NONE,
+				.colorspace = V4L2_COLORSPACE_SMPTE170M,
+			}
+		},
+		{
+			.pad = 0,
+			.stream = 1,
+			.fmt = {
+				.code = MEDIA_BUS_FMT_METADATA_16,
+				.width = ov1063x_framesizes[0].width,
+				.height = 1,
+				.field = V4L2_FIELD_NONE,
+				.colorspace = V4L2_COLORSPACE_DEFAULT,
+			}
+		},
+	};
 
-	ret = _ov10635_set_routing(sd, state, false);
+	ret = v4l2_subdev_init_subpads(sd, state, priv->embedded_data ? 2 : 1,
+				       configs);
 	if (ret)
 		return ret;
 
@@ -1419,6 +1385,7 @@ done:
 static int ov1063x_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 				  struct v4l2_mbus_frame_desc *fd)
 {
+	struct ov1063x_priv *priv = to_ov1063x(sd);
 	struct v4l2_subdev_state *state;
 	struct v4l2_mbus_framefmt *fmt;
 	u32 bpp;
@@ -1448,7 +1415,7 @@ static int ov1063x_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 
 	/* meta stream */
 
-	if (state->routing.routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE) {
+	if (priv->embedded_data) {
 		fd->entry[fd->num_entries].stream = 1;
 
 		fd->entry[fd->num_entries].flags =
@@ -1462,29 +1429,6 @@ static int ov1063x_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 	v4l2_subdev_unlock_state(state);
 
 	return 0;
-}
-
-static int ov1063x_set_routing(struct v4l2_subdev *sd,
-			       struct v4l2_subdev_state *state,
-			       enum v4l2_subdev_format_whence which,
-			       struct v4l2_subdev_krouting *routing)
-{
-	bool enable_embedded;
-	int ret;
-
-	if (routing->num_routes == 0 || routing->num_routes > 2)
-		return -EINVAL;
-
-	/*
-	 * The only thing that can be changed is whether the metadata stream
-	 * is active or not.
-	 */
-	enable_embedded = routing->num_routes == 2 &&
-		(routing->routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE);
-
-	ret = _ov10635_set_routing(sd, state, enable_embedded);
-
-	return ret;
 }
 
 static const struct v4l2_subdev_core_ops ov1063x_subdev_core_ops = {
@@ -1503,7 +1447,6 @@ static const struct v4l2_subdev_pad_ops ov1063x_subdev_pad_ops = {
 	.enum_frame_size	= ov1063x_enum_frame_sizes,
 	.get_fmt		= v4l2_subdev_get_fmt,
 	.set_fmt		= ov1063x_set_fmt,
-	.set_routing		= ov1063x_set_routing,
 	.get_frame_desc		= ov1063x_get_frame_desc,
 };
 
@@ -1667,6 +1610,8 @@ static int ov1063x_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	priv->dev = &client->dev;
+
+	priv->embedded_data = true;
 
 	/* Acquire resources: regmap, GPIOs and clock. The GPIOs are optional. */
 	priv->regmap = devm_regmap_init_i2c(client, &ov1063x_regmap_config);

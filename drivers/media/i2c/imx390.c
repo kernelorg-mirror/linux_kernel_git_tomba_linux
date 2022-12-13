@@ -223,70 +223,36 @@ static int imx390_s_stream(struct v4l2_subdev *sd, int enable)
 	return 0;
 }
 
-static void imx390_init_formats(struct v4l2_subdev_state *state)
-{
-	struct v4l2_mbus_framefmt *format;
-
-	format = v4l2_subdev_state_get_stream_format(state, 0, 0);
-	format->code = imx390_mbus_formats[0];
-	format->width = imx390_framesizes[0].width;
-	format->height = imx390_framesizes[0].height;
-	format->field = V4L2_FIELD_NONE;
-	format->colorspace = V4L2_COLORSPACE_SMPTE170M;
-
-	if (state->routing.routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE) {
-		format = v4l2_subdev_state_get_stream_format(state, 0, 1);
-		format->code = MEDIA_BUS_FMT_METADATA_16;
-		format->width = imx390_framesizes[0].width;
-		format->height = IMX390_METADATA_BEFORE_HEIGHT;
-		format->field = V4L2_FIELD_NONE;
-		format->colorspace = V4L2_COLORSPACE_DEFAULT;
-	}
-}
-
-static int _imx390_set_routing(struct v4l2_subdev *sd,
-			       struct v4l2_subdev_state *state,
-			       bool enable_embedded_data)
-{
-	struct v4l2_subdev_route routes[] = {
-		{
-			.source_pad = 0,
-			.source_stream = 0,
-			.flags = V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY |
-				 V4L2_SUBDEV_ROUTE_FL_ACTIVE,
-		},
-		{
-			.source_pad = 0,
-			.source_stream = 1,
-			.flags = V4L2_SUBDEV_ROUTE_FL_SOURCE_ONLY,
-		}
-	};
-
-	struct v4l2_subdev_krouting routing = {
-		.num_routes = ARRAY_SIZE(routes),
-		.routes = routes,
-	};
-
-	int ret;
-
-	if (enable_embedded_data)
-		routes[1].flags |= V4L2_SUBDEV_ROUTE_FL_ACTIVE;
-
-	ret = v4l2_subdev_set_routing(sd, state, &routing);
-	if (ret)
-		return ret;
-
-	imx390_init_formats(state);
-
-	return 0;
-}
-
 static int imx390_init_cfg(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_state *state)
 {
 	int ret;
+	struct v4l2_subdev_stream_config configs[] = {
+		{
+			.pad = 0,
+			.stream = 0,
+			.fmt = {
+				.code = imx390_mbus_formats[0],
+				.width = imx390_framesizes[0].width,
+				.height = imx390_framesizes[0].height,
+				.field = V4L2_FIELD_NONE,
+				.colorspace = V4L2_COLORSPACE_SMPTE170M,
+			}
+		},
+		{
+			.pad = 0,
+			.stream = 1,
+			.fmt = {
+				.code = MEDIA_BUS_FMT_METADATA_16,
+				.width = imx390_framesizes[0].width,
+				.height = IMX390_METADATA_BEFORE_HEIGHT,
+				.field = V4L2_FIELD_NONE,
+				.colorspace = V4L2_COLORSPACE_DEFAULT,
+			}
+		},
+	};
 
-	ret = _imx390_set_routing(sd, state, false);
+	ret = v4l2_subdev_init_subpads(sd, state, 2, configs);
 
 	return ret;
 }
@@ -426,46 +392,20 @@ static int imx390_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 	fd->num_entries++;
 
 	/* meta stream */
-	if (state->routing.routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE) {
-		fd->entry[fd->num_entries].stream = 1;
+	fd->entry[fd->num_entries].stream = 1;
 
-		fd->entry[fd->num_entries].flags =
-			V4L2_MBUS_FRAME_DESC_FL_LEN_MAX;
-		fd->entry[fd->num_entries].length =
-			fmt->width * IMX390_METADATA_BEFORE_HEIGHT * bpp / 8;
-		fd->entry[fd->num_entries].pixelcode = fmt->code;
-		fd->entry[fd->num_entries].bus.csi2.vc = 0;
-		fd->entry[fd->num_entries].bus.csi2.dt = 0x12; /* Metadata */
+	fd->entry[fd->num_entries].flags =
+		V4L2_MBUS_FRAME_DESC_FL_LEN_MAX;
+	fd->entry[fd->num_entries].length =
+		fmt->width * IMX390_METADATA_BEFORE_HEIGHT * bpp / 8;
+	fd->entry[fd->num_entries].pixelcode = fmt->code;
+	fd->entry[fd->num_entries].bus.csi2.vc = 0;
+	fd->entry[fd->num_entries].bus.csi2.dt = 0x12; /* Metadata */
 
-		fd->num_entries++;
-	}
+	fd->num_entries++;
 
 out:
 	v4l2_subdev_unlock_state(state);
-
-	return ret;
-}
-
-static int imx390_set_routing(struct v4l2_subdev *sd,
-			      struct v4l2_subdev_state *state,
-			      enum v4l2_subdev_format_whence which,
-			      struct v4l2_subdev_krouting *routing)
-{
-	bool enable_embedded;
-	int ret;
-
-	if (routing->num_routes == 0 || routing->num_routes > 2)
-		return -EINVAL;
-
-	/*
-	 * The only thing that can be changed is whether the metadata stream
-	 * is active or not.
-	 */
-	enable_embedded =
-		routing->num_routes == 2 &&
-		(routing->routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE);
-
-	ret = _imx390_set_routing(sd, state, enable_embedded);
 
 	return ret;
 }
@@ -480,7 +420,6 @@ static const struct v4l2_subdev_pad_ops imx390_subdev_pad_ops = {
 	.enum_frame_size	= imx390_enum_frame_sizes,
 	.get_fmt		= v4l2_subdev_get_fmt,
 	.set_fmt		= imx390_set_fmt,
-	.set_routing		= imx390_set_routing,
 	.get_frame_desc		= imx390_get_frame_desc,
 };
 

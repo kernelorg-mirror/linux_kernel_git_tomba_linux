@@ -1878,4 +1878,8 @@ extern const struct v4l2_subdev_ops v4l2_subdev_call_wrappers;
 void v4l2_subdev_notify_event(struct v4l2_subdev *sd,
 			      const struct v4l2_event *ev);
 
+int v4l2_subdev_init_subpads(struct v4l2_subdev *sd,
+			     struct v4l2_subdev_state *state, u32 num_configs,
+			     const struct v4l2_subdev_stream_config *configs);
+
 #endif /* _V4L2_SUBDEV_H */

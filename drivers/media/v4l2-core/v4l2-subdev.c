@@ -1039,7 +1039,6 @@ v4l2_subdev_link_validate_get_format(struct media_pad *pad, u32 stream,
 static void __v4l2_link_validate_get_streams(struct media_pad *pad,
 					     u64 *streams_mask)
 {
-	struct v4l2_subdev_route *route;
 	struct v4l2_subdev_state *state;
 	struct v4l2_subdev *subdev;
 
@@ -1051,22 +1050,15 @@ static void __v4l2_link_validate_get_streams(struct media_pad *pad,
 	if (WARN_ON(!state))
 		return;
 
-	for_each_active_route(&state->routing, route) {
-		u32 route_pad;
-		u32 route_stream;
+	for (unsigned int i = 0; i < state->stream_configs.num_configs; ++i) {
+		const struct v4l2_subdev_stream_config *config;
 
-		if (pad->flags & MEDIA_PAD_FL_SOURCE) {
-			route_pad = route->source_pad;
-			route_stream = route->source_stream;
-		} else {
-			route_pad = route->sink_pad;
-			route_stream = route->sink_stream;
-		}
+		config = &state->stream_configs.configs[i];
 
-		if (route_pad != pad->index)
+		if (config->pad != pad->index)
 			continue;
 
-		*streams_mask |= BIT_ULL(route_stream);
+		*streams_mask |= BIT_ULL(config->stream);
 	}
 }
 
@@ -1322,9 +1314,9 @@ EXPORT_SYMBOL_GPL(v4l2_subdev_cleanup);
 
 #if defined(CONFIG_VIDEO_V4L2_SUBDEV_API)
 
-static int
-v4l2_subdev_init_stream_configs(struct v4l2_subdev_stream_configs *stream_configs,
-				const struct v4l2_subdev_krouting *routing)
+static int v4l2_subdev_init_stream_configs_from_routing(
+	struct v4l2_subdev_stream_configs *stream_configs,
+	const struct v4l2_subdev_krouting *routing)
 {
 	struct v4l2_subdev_stream_configs new_configs = { 0 };
 	struct v4l2_subdev_route *route;
@@ -1417,7 +1409,7 @@ int v4l2_subdev_set_routing(struct v4l2_subdev *sd,
 
 	new_routing.num_routes = src->num_routes;
 
-	r = v4l2_subdev_init_stream_configs(&state->stream_configs,
+	r = v4l2_subdev_init_stream_configs_from_routing(&state->stream_configs,
 					    &new_routing);
 	if (r) {
 		kfree(new_routing.routes);
@@ -2007,3 +1999,27 @@ void v4l2_subdev_notify_event(struct v4l2_subdev *sd,
 	v4l2_subdev_notify(sd, V4L2_DEVICE_NOTIFY_EVENT, (void *)ev);
 }
 EXPORT_SYMBOL_GPL(v4l2_subdev_notify_event);
+
+int v4l2_subdev_init_subpads(struct v4l2_subdev *sd,
+			     struct v4l2_subdev_state *state,
+			     u32 num_configs,
+			     const struct v4l2_subdev_stream_config *configs)
+{
+	struct v4l2_subdev_stream_configs new_configs = { 0 };
+	size_t bytes;
+
+	if (unlikely(check_mul_overflow((size_t)num_configs,
+					sizeof(*configs), &bytes)))
+		return -EOVERFLOW;
+
+	new_configs.num_configs = num_configs;
+	new_configs.configs = kmemdup(configs, bytes, GFP_KERNEL);
+	if (!new_configs.configs)
+		return -ENOMEM;
+
+	kvfree(state->stream_configs.configs);
+	state->stream_configs = new_configs;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(v4l2_subdev_init_subpads);

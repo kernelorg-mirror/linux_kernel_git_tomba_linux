@@ -1601,19 +1601,6 @@ endmenu
 
 menu "Video serializers and deserializers"
 
-config VIDEO_DS90UB960
-	tristate "TI DS90UB960 Deserializer"
-	depends on OF && I2C && VIDEO_DEV
-	select MEDIA_CONTROLLER
-	select VIDEO_V4L2_SUBDEV_API
-	select V4L2_FWNODE
-	select REGMAP_I2C
-	select OF_GPIO
-	select I2C_ATR
-	help
-	  Device driver for the Texas Instruments DS90UB960
-	  FPD-Link III Deserializer
-
 config VIDEO_DS90UB913
 	tristate "TI DS90UB913 Serializer"
 	depends on OF && I2C && VIDEO_DEV
@@ -1626,6 +1613,19 @@ config VIDEO_DS90UB913
 	help
 	  Device driver for the Texas Instruments DS90UB913
 	  FPD-Link III Serializer.
+
+config VIDEO_DS90UB960
+	tristate "TI DS90UB960 Deserializer"
+	depends on OF && I2C && VIDEO_DEV
+	select MEDIA_CONTROLLER
+	select VIDEO_V4L2_SUBDEV_API
+	select V4L2_FWNODE
+	select REGMAP_I2C
+	select OF_GPIO
+	select I2C_ATR
+	help
+	  Device driver for the Texas Instruments DS90UB960
+	  FPD-Link III Deserializer
 
 endmenu
 

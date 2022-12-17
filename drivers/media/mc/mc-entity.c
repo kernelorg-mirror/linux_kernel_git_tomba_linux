@@ -337,7 +337,7 @@ EXPORT_SYMBOL_GPL(media_entity_has_route);
  *
  * Reserve resources for graph walk in media device's current
  * state. The memory must be released using
- * media_graph_walk_free().
+ * media_graph_walk_cleanup().
  *
  * Returns error on failure, zero on success.
  */

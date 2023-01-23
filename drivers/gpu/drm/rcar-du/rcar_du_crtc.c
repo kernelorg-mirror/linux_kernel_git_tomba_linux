@@ -747,10 +747,29 @@ static void rcar_du_crtc_atomic_enable(struct drm_crtc *crtc,
 		rcar_cmm_enable(rcrtc->cmm);
 	rcar_du_crtc_get(rcrtc);
 
+#if 0
+XXX
+
+DU pixel clock from DU PLL, LVDS output is used
+- enable: crtc, lvds
+- disable: lvds, crtc
+
+DU pixel clock from LVDS encoder, LVDS output is used
+- enable: crtc, lvds pll, lvds
+- disable: lvds, crtc, lvds pll
+
+DU pixel clock from LVDS encoder, LVDS output is not used
+- enable: lvds pll, crtc
+- disable: crtc, lvds pll
+
+#endif
+
 	/*
 	 * On D3/E3 the dot clock is provided by the LVDS encoder attached to
-	 * the DU channel. We need to enable its clock output explicitly if
-	 * the LVDS output is disabled.
+	 * the DU channel. If the LVDS output itself will not be used, we need
+	 * to enable the LVDS clock output explicitly before enabling the crtc.
+	 *
+	 * XXX would be nicer to enable only below, after crtc start...
 	 */
 	if (rcdu->info->lvds_clk_mask & BIT(rcrtc->index) &&
 	    rstate->outputs == BIT(RCAR_DU_OUTPUT_DPAD0)) {
@@ -758,7 +777,7 @@ static void rcar_du_crtc_atomic_enable(struct drm_crtc *crtc,
 		const struct drm_display_mode *mode =
 			&crtc->state->adjusted_mode;
 
-		rcar_lvds_pclk_enable(bridge, mode->clock * 1000);
+		rcar_lvds_pclk_enable(bridge, mode->clock * 1000, true);
 	}
 
 	/*
@@ -781,6 +800,24 @@ static void rcar_du_crtc_atomic_enable(struct drm_crtc *crtc,
 	 * of this restriction on the first displayed frame.
 	 */
 	rcar_du_cmm_setup(crtc);
+
+	/*
+	 * On D3/E3 the dot clock is provided by the LVDS encoder attached to
+	 * the DU channel. If the LVDS output is used, we need to enable the
+	 * LVDS clock output explicitly after enabling the crtc so that
+	 * we can disable the LVDS clock output only after disabling the crtc.
+	 * See rcar_du_crtc_atomic_enable().
+	 *
+	 * XXX It would be much nicer to have only one call to rcar_lvds_pclk_enable() in rcar_du_crtc_atomic_enable...
+	 */
+	if (rcdu->info->lvds_clk_mask & BIT(rcrtc->index) &&
+	    rstate->outputs & (BIT(RCAR_DU_OUTPUT_LVDS0) | BIT(RCAR_DU_OUTPUT_LVDS0))) {
+		struct drm_bridge *bridge = rcdu->lvds[rcrtc->index];
+		const struct drm_display_mode *mode =
+			&crtc->state->adjusted_mode;
+
+		rcar_lvds_pclk_enable(bridge, mode->clock * 1000, false);
+	}
 }
 
 static void rcar_du_crtc_atomic_disable(struct drm_crtc *crtc,
@@ -795,8 +832,7 @@ static void rcar_du_crtc_atomic_disable(struct drm_crtc *crtc,
 	rcar_du_crtc_stop(rcrtc);
 	rcar_du_crtc_put(rcrtc);
 
-	if (rcdu->info->lvds_clk_mask & BIT(rcrtc->index) &&
-	    rstate->outputs == BIT(RCAR_DU_OUTPUT_DPAD0)) {
+	if (rcdu->info->lvds_clk_mask & BIT(rcrtc->index)) {
 		struct drm_bridge *bridge = rcdu->lvds[rcrtc->index];
 
 		/*

@@ -105,6 +105,9 @@ static const struct ub913_format_info ub913_formats[] = {
 	{ .incode = MEDIA_BUS_FMT_UYVY8_2X8, .outcode = MEDIA_BUS_FMT_UYVY8_1X16 },
 	{ .incode = MEDIA_BUS_FMT_VYUY8_2X8, .outcode = MEDIA_BUS_FMT_VYUY8_1X16 },
 	{ .incode = MEDIA_BUS_FMT_YVYU8_2X8, .outcode = MEDIA_BUS_FMT_YVYU8_1X16 },
+
+	/* Metadata hacks */
+	{ .incode = MEDIA_BUS_FMT_META_8, .outcode = MEDIA_BUS_FMT_META_8 },
 };
 
 static const struct ub913_format_info *ub913_find_format(u32 incode)

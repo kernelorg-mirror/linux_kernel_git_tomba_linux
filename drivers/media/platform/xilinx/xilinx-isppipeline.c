@@ -58,7 +58,6 @@ enum xisp_bayer_format {
  * @ctrl_handler: V4L2 Control Handler
  * @bayer_fmt: IP or Hardware specific video format
  * @rst_gpio: GPIO reset line to bring ISP pipeline out of reset
- * @npads: number of pads
  * @max_width: Maximum width supported by this instance
  * @max_height: Maximum height supported by this instance
  * @rgain: Expected red gain
@@ -77,7 +76,6 @@ struct xisp_dev {
 	struct v4l2_ctrl_handler ctrl_handler;
 	enum xisp_bayer_format bayer_fmt;
 	struct gpio_desc *rst_gpio;
-	u16 npads;
 	u16 max_width;
 	u16 max_height;
 	u16 rgain;
@@ -450,8 +448,6 @@ static int xisp_parse_of(struct xisp_dev *xisp)
 {
 	struct device *dev = xisp->xvip.dev;
 	struct device_node *node = dev->of_node;
-	struct device_node *ports;
-	struct device_node *port;
 	int rval;
 
 	rval = of_property_read_u16(node, "xlnx,max-height",
@@ -504,33 +500,6 @@ static int xisp_parse_of(struct xisp_dev *xisp)
 	rval = of_property_read_bool(node, "xlnx,mode-reg");
 	if (rval)
 		xisp->mode_reg = of_property_read_bool(node, "xlnx,mode-reg");
-
-	ports = of_get_child_by_name(node, "ports");
-	if (!ports)
-		ports = node;
-
-	/* Get the format description for each pad */
-	for_each_child_of_node(ports, port) {
-		struct device_node *endpoint;
-
-		if (!port->name || of_node_cmp(port->name, "port"))
-			continue;
-
-		endpoint = of_get_next_child(port, NULL);
-		if (!endpoint) {
-			dev_err(dev, "No port at\n");
-			return -EINVAL;
-		}
-
-		/* Count the number of ports. */
-		xisp->npads++;
-	}
-
-	/* validate number of ports */
-	if (xisp->npads > XISP_NO_OF_PADS) {
-		dev_err(dev, "invalid number of ports %u\n", xisp->npads);
-		return -EINVAL;
-	}
 
 	xisp->rst_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(xisp->rst_gpio)) {

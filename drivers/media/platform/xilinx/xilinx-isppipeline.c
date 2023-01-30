@@ -53,7 +53,6 @@ enum xisp_bayer_format {
 /*
  * struct xisp_dev - Xilinx ISP pipeline device structure
  * @xvip: Xilinx Video IP device
- * @pads: media pads
  * @formats: V4L2 media bus formats
  * @ctrl_handler: V4L2 Control Handler
  * @bayer_fmt: IP or Hardware specific video format
@@ -71,7 +70,6 @@ enum xisp_bayer_format {
  */
 struct xisp_dev {
 	struct xvip_device xvip;
-	struct media_pad pads[XISP_NO_OF_PADS];
 	struct v4l2_mbus_framefmt formats[XISP_NO_OF_PADS];
 	struct v4l2_ctrl_handler ctrl_handler;
 	enum xisp_bayer_format bayer_fmt;
@@ -513,6 +511,8 @@ static int xisp_parse_of(struct xisp_dev *xisp)
 
 static const struct xvip_device_info xisp_info = {
 	.has_axi_lite = true,
+	.num_sinks = 1,
+	.num_sources = 1,
 };
 
 static int xisp_probe(struct platform_device *pdev)
@@ -563,12 +563,10 @@ static int xisp_probe(struct platform_device *pdev)
 	xisp->formats[XVIP_PAD_SOURCE].height = XISP_MIN_HEIGHT;
 	xisp->formats[XVIP_PAD_SOURCE].code = MEDIA_BUS_FMT_RBG888_1X24;
 
-	xisp->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	xisp->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
-
 	/* Init Media Entity */
 	subdev->entity.ops = &xisp_media_ops;
-	rval = media_entity_pads_init(&subdev->entity, XISP_NO_OF_PADS, xisp->pads);
+	rval = media_entity_pads_init(&subdev->entity, XISP_NO_OF_PADS,
+				      xisp->xvip.pads);
 	if (rval < 0)
 		goto media_error;
 

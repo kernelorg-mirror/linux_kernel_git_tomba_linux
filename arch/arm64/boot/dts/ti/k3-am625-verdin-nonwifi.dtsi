@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+/*
+ * Copyright 2023 Toradex
+ */
+
+/* TODO: Add non Wi-Fi variant specific configuration */
+
+&sdhci2 {
+	pinctrl-0 = <&pinctrl_sdhci2>;
+	bus-width = <4>;
+	status = "disabled";
+};
+
+&main_uart5 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_uart5>;
+	status = "disabled";
+};
+

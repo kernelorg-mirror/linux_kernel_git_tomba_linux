@@ -30,9 +30,6 @@ e37c8d37dd3c ravb: Remove TX internal delay setting
 d276493fd6c2 ravb: Issue gpio reset to AVB1/AVB2 PHYs
 68c8cf248f51 arm64: dts: renesas: whitehawk: Add phy-reset-gpios to reset PHYs before initialization
 51cb5f1f83b6 net: ethernet: renesas: rcar_gen4_ptp: Revise R-Car V4H gPTP's clock frequency
-6cdb77edda1a drm: rcar-du: Fix the DIV bit of VCLKSET register
-976c1ecbf72b drm: rcar-du: Update information based on HW 0.53
-9dc8bba15574 drm: rcar-du: Change the phtw function
 cd0513b0a8be thermal: rcar_gen3_thermal: Fix rcar_gen3_thermal_mcelsius_to_temp() return 0
 debcaf2c0296 thermal: rcar_gen3_thermal: Add support ECM
 6a7cc61fed35 thermal: rcar_gen3_thermal: Read calibration from hardware on R-Car S4
@@ -153,37 +150,22 @@ f579310d2ed3 arm64: dts: renesas: r8a77995-draak: Set max dot clock for vga
 9138f2baa207 drm: bridge: max96789: Add basic function for max96789
 72058c09a66e drm: rcar-du: Fix DU setting for V4H
 84cd63a1f9df drm: rcar-du: Add DSC driver
-9485f372f4cc drm: rcar-du: Support YCbCr 10 bit pixel format
-ffb24cc21c56 media: vsp1: Add YCbCr 10 bit format setting
-00e6c30c493c media: v4l2: Add YCbCr 10 bit format which support on vsp1
-c8cafec03b80 drm: rcar-du: Add DSI device for R8A779G0
 72050da8baf1 media: vsp1: Add setting for Gen4 devices
-4acbf7bb875e media: vsp1: Add IP VERSION for R8A779G0
 62ad796fd2cb drm: rcar-du: Adapt the code to gen4 device
-b784dfae50ee drm: rcar-du: Introduce R8A779G0 device
 580a8138882b drm: rcar-du: lvds: Seperate the disable process of LVDS
 11a5640d342c drm: rcar-du: Add check for member of rstate in rcar_du_crtc_state structure
 4d326eb16e9b drm: rcar-du: Change supporting format of DU in R8A779A0
 4409f463dc6c drm: rcar-du: Add setting for PnMR for R8A779A0
-59c814ff03fc drm: rcar-du: Add new pixel formats support for R8A779A0
-3fd6b5b5d541 media: vsp1: Add setting for new pixel formats in R8A779A0
-4c4f100f8bb0 media: vsp1: Add support for new pixel formats in R8A779A0
-8a2a3897a430 media: videodev2.h: Add new pixel format for vsp1 on R8A779A0
 0b29b25ab439 drm: bridge: ti-sn65dsi86: Add setting options for SN65DSI86
 cb3df6f55863 drm: rcar-du: Disable TV synchronized mode in V3U
 de5241d52cc6 drm: rcar-du: Add DIDSRO register setting for V3U
-c7b9de4f7b6a drm: rcar-du: Accessing to reserved registers at V3U is prohibited
-bda8cf6a5bdc v4l: vsp1: Add new registers which are introduced in V3U
 4287f91b1fb9 drm: rcar-du: Add hot plug event function at resume
 441c24bfdab0 vsp1: Add display interrupt wait after setting STRCMD bit
 24940f87e199 drm: rcar-du: Add register access check
-352663e60e53 drm: rcar-du: Fix DPLL workaround for H3 ES1.x
 b4427db080d7 drm: bridge: simple-bridge: Add dot clock valid check
 ff86df8f2aa2 drm: rcar-du: Add support for colorkey alpha blending
 dffa26bbdf08 v4l: vsp1: Add support for colorkey alpha blending
 3860e36d582d v4l: vsp1: Add underrun debug messege option
-c3c1e53601fc drm: rcar-du: Fix LVDS stop sequence
-ae6af8c6bfff drm: rcar-du: Add CPG reset and release
 0a1de0131e5c media: i2c: max9286: Delay initialize timing in launching driver
 17da051cfc67 media: i2c: ov5647: Add test pattern control
 092fce881478 media: i2c: ov5647: Add V4L2_CID_PIXEL_RATE control
@@ -191,7 +173,6 @@ c541b27e85d7 media: ov5647: Fix return codes from ov5647_write/ov5647_read funct
 1e15a520d473 media: i2c: add camera lvds support
 5213db1803d3 media: i2c: add ov5642 sensor driver
 cad649943834 media: rcar-vin: Auto select RESET_CONTROLLER
-b73a682b50b9 drm: rcar-du: lvds: Auto select RESET_CONTROLLER
 5232944262ff media: rcar-vin: Add interrupt for V4L2_FIELD_ALTERNATE format
 7d98f3641087 media: rcar-vin: Fix the init process of VIN driver
 536c7ac9272f media: rcar-csi2: Add pin-swap option for WhiteHawk

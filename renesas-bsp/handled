@@ -612,3 +612,41 @@ dde33d1d22bd media: i2c: adv7180: Add std update when getting format
 3be1a176425a drm/bridge: adv7511: Add frequency and vrefresh limitation option
 # Userspace shouldn't move planes between active CRTCs
 3e69390afef7 drm: rcar-du: Fix possible crtcs for plane when using VSPDL
+# ba43122d9a9e drm: rcar-du: Add r8a779g0 support
+b784dfae50ee drm: rcar-du: Introduce R8A779G0 device
+# b0fe83d25bf9 drm: rcar-du: dsi: Add r8A779g0 support
+c8cafec03b80 drm: rcar-du: Add DSI device for R8A779G0
+# b0fe83d25bf9 drm: rcar-du: dsi: Add r8A779g0 support
+9dc8bba15574 drm: rcar-du: Change the phtw function
+# b0fe83d25bf9 drm: rcar-du: dsi: Add r8A779g0 support
+976c1ecbf72b drm: rcar-du: Update information based on HW 0.53
+# b0fe83d25bf9 drm: rcar-du: dsi: Add r8A779g0 support
+6cdb77edda1a drm: rcar-du: Fix the DIV bit of VCLKSET register
+# 99c4d56cb07b drm: rcar-du: Add new formats (2-10-10-10 ARGB, Y210)
+59c814ff03fc drm: rcar-du: Add new pixel formats support for R8A779A0
+# 99c4d56cb07b drm: rcar-du: Add new formats (2-10-10-10 ARGB, Y210)
+9485f372f4cc drm: rcar-du: Support YCbCr 10 bit pixel format
+# d59537618b10 drm: rcar-du: lvds: Add reset control
+b73a682b50b9 drm: rcar-du: lvds: Auto select RESET_CONTROLLER
+# d59537618b10 drm: rcar-du: lvds: Add reset control
+ae6af8c6bfff drm: rcar-du: Add CPG reset and release
+# ef3ecff176e1 drm: rcar-du: lvds: Fix stop sequence
+c3c1e53601fc drm: rcar-du: Fix LVDS stop sequence
+# 783d7fd66aed drm: rcar-du: Fix setting a reserved bit in DPLLCR
+352663e60e53 drm: rcar-du: Fix DPLL workaround for H3 ES1.x
+# 3f328a62acd4 drm: rcar-du: Stop accessing non-existent registers on gen4
+c7b9de4f7b6a drm: rcar-du: Accessing to reserved registers at V3U is prohibited
+# a18e380dc647 media: renesas: vsp1: Add new formats (2-10-10-10 ARGB, Y210, Y212)
+ffb24cc21c56 media: vsp1: Add YCbCr 10 bit format setting
+# a18e380dc647 media: renesas: vsp1: Add new formats (2-10-10-10 ARGB, Y210, Y212)
+3fd6b5b5d541 media: vsp1: Add setting for new pixel formats in R8A779A0
+# a18e380dc647 media: renesas: vsp1: Add new formats (2-10-10-10 ARGB, Y210, Y212)
+4c4f100f8bb0 media: vsp1: Add support for new pixel formats in R8A779A0
+# a18e380dc647 media: renesas: vsp1: Add new formats (2-10-10-10 ARGB, Y210, Y212)
+bda8cf6a5bdc v4l: vsp1: Add new registers which are introduced in V3U
+# b9a2b94bd40e media: Add Y210, Y212 and Y216 formats
+00e6c30c493c media: v4l2: Add YCbCr 10 bit format which support on vsp1
+# 66ba9b438f12 media: Add 2-10-10-10 RGB formats
+8a2a3897a430 media: videodev2.h: Add new pixel format for vsp1 on R8A779A0
+# 2fc4be2ae1b2 media: renesas: vsp1: Add V4H SoC version
+4acbf7bb875e media: vsp1: Add IP VERSION for R8A779G0

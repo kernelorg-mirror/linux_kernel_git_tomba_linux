@@ -16,7 +16,6 @@
 #include <linux/kernel.h>
 #include <linux/version.h>
 
-#include <linux/v4l2-subdev.h>
 #include <linux/videodev2.h>
 
 #include <media/media-device.h> /* for media_set_bus_info() */
@@ -3157,22 +3156,6 @@ static int check_array_args(unsigned int cmd, void *parg, size_t *array_size,
 		break;
 	}
 
-	case VIDIOC_SUBDEV_G_ROUTING:
-	case VIDIOC_SUBDEV_S_ROUTING: {
-		struct v4l2_subdev_routing *route = parg;
-
-		if (route->num_routes > 0) {
-			if (route->num_routes > 256)
-				return -EINVAL;
-
-			*user_ptr = (void __user *)route->routes;
-			*kernel_ptr = (void *)&route->routes;
-			*array_size = sizeof(struct v4l2_plane)
-				    * route->num_routes;
-			ret = 1;
-		}
-		break;
-	}
 	case VIDIOC_G_FMT:
 	case VIDIOC_S_FMT:
 	case VIDIOC_TRY_FMT: {

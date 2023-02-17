@@ -3,8 +3,6 @@
  * Copyright 2023 Toradex
  */
 
-/* TODO: Add non Wi-Fi variant specific configuration */
-
 &sdhci2 {
 	pinctrl-0 = <&pinctrl_sdhci2>;
 	bus-width = <4>;

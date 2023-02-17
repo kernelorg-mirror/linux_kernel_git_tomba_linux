@@ -3,18 +3,29 @@
  * Copyright 2023 Toradex
  */
 
-/* TODO: Add Wi-Fi variant specific configuration */
+/ {
+	wifi_pwrseq: wifi-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_wifi_en>;
+		reset-gpios = <&main_gpio0 22 GPIO_ACTIVE_LOW>;
+	};
+};
+
 
 /* On-module Wi-Fi */
 &sdhci2 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_sdhci2>;
 	bus-width = <4>;
-	non-removable;
-	ti,fails-without-test-cd;
 	cap-power-off-card;
 	keep-power-in-suspend;
+	mmc-pwrseq = <&wifi_pwrseq>;
+	non-removable;
+	ti,fails-without-test-cd;
 	ti,driver-strength-ohm = <50>;
+	vmmc-supply = &reg_3v3;
+	status = "okay";
 };
 
 /* On-module Bluetooth */

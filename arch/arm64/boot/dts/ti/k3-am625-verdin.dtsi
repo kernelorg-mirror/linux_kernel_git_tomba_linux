@@ -190,7 +190,6 @@
 		startup-delay-us = <2000>;
 	};
 
-
 	reg_sdhc1_vqmmc: regulator-sdhci1-vqmmc {
 		compatible = "regulator-gpio";
 		pinctrl-names = "default";
@@ -301,7 +300,7 @@
 	pinctrl_eth_reset: main-gpio0-17-pins-default {
 		pinctrl-single,pins = <
 			AM62X_IOPAD(0x0044, PIN_INPUT, 7) /* (N24) GPMC0_AD2.GPIO0_17 */
-		>    ;
+		>;
 	};
 
 	/* PMIC_BRIDGE_RESET# */
@@ -640,7 +639,6 @@
 			AM62X_IOPAD(0x01f4, PIN_INPUT, 0) /* (D16) EXTINTn */
 		>;
 	};
-
 
 	/* Verdin UART_3, used as the Linux console */
 	pinctrl_uart0: main-uart0-pins-default {

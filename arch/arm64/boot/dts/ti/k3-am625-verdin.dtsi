@@ -199,7 +199,6 @@
 		regulator-name = "LDO1-VSEL-SD (PMIC)";
 		regulator-min-microvolt = <1800000>;
 		regulator-max-microvolt = <3300000>;
-		regulator-boot-on;
 		states = <1800000 0x0>,
 			 <3300000 0x1>;
 		vin-supply = <&reg_sd_3v3_1v8>;
@@ -1160,8 +1159,10 @@
 
 			reg_sd_3v3_1v8: ldo1 {
 				regulator-allow-bypass;
+				regulator-always-on;
+				regulator-boot-on;
 				regulator-max-microvolt = <3300000>;
-				regulator-min-microvolt = <1800000>;
+				regulator-min-microvolt = <3300000>;
 				regulator-name = "+V3.3_1.8_SD (PMIC LDO1)";
 			};
 

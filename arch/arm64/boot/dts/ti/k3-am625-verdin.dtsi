@@ -827,19 +827,19 @@
 
 /* MDIO, shared by Verdin ETH_1 (On-module PHY) and Verdin ETH_2_RGMII */
 &cpsw3g_mdio {
+	assigned-clocks = <&k3_clks 157 20>;
+	assigned-clock-parents = <&k3_clks 157 22>;
+	assigned-clock-rates = <25000000>;
 	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_mdio>;
+	pinctrl-0 = <&pinctrl_eth_clock &pinctrl_mdio>;
 	status = "disabled";
 
 	cpsw3g_phy0: ethernet-phy@0 {
 		reg = <0>;
-		assigned-clocks = <&k3_clks 157 20>;
-		assigned-clock-parents = <&k3_clks 157 22>;
-		assigned-clock-rates = <25000000>;
 		interrupt-parent = <&main_gpio0>;
 		interrupts = <25 IRQ_TYPE_EDGE_FALLING>;
 		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_eth_clock &pinctrl_eth_int &pinctrl_eth_reset>;
+		pinctrl-0 = <&pinctrl_eth_int &pinctrl_eth_reset>;
 		reset-gpios = <&main_gpio0 17 GPIO_ACTIVE_LOW>;
 		reset-assert-us = <10>;
 		reset-deassert-us = <1000>;

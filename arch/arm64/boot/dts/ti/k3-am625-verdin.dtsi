@@ -1174,16 +1174,16 @@
 			reg_1v8a: ldo3 {
 				regulator-always-on;
 				regulator-boot-on;
-				regulator-max-microvolt = <18000000>;
-				regulator-min-microvolt = <18000000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-min-microvolt = <1800000>;
 				regulator-name = "+V1.8A (PMIC LDO3)";
 			};
 
 			reg_eth_2v5: ldo4 {
 				regulator-always-on;
 				regulator-boot-on;
-				regulator-max-microvolt = <25000000>;
-				regulator-min-microvolt = <25000000>;
+				regulator-max-microvolt = <2500000>;
+				regulator-min-microvolt = <2500000>;
 				regulator-name = "+V2.5_ETH (PMIC LDO4)";
 			};
 		};

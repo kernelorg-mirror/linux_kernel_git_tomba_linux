@@ -1121,7 +1121,8 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_pmic_extint>;
 		interrupt-parent = <&gic500>;
-		interrupts = <GIC_SPI 256 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts = <GIC_SPI 224 IRQ_TYPE_LEVEL_HIGH>;
+
 		buck1-supply = <&reg_vsodimm>;
 		buck2-supply = <&reg_vsodimm>;
 		buck3-supply = <&reg_vsodimm>;

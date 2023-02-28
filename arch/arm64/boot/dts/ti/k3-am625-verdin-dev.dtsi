@@ -69,7 +69,7 @@
 /* Verdin ETH_2_RGMII */
 &cpsw_port2 {
 	phy-handle = <&cpsw3g_phy1>;
-	phy-mode = "rgmii-id";
+	phy-mode = "rgmii-rxid";
 	status = "okay";
 };
 

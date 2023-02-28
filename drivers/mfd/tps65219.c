@@ -369,7 +369,7 @@ static int tps65219_probe(struct i2c_client *client,
 	       sizeof(tps65219_regulator_cell));
 	pwr_button = of_property_read_bool(tps->dev->of_node, "power-button");
 	if (!pwr_button)
-		of_property_read_bool(tps->dev->of_node, "ti,power-button");
+		pwr_button = of_property_read_bool(tps->dev->of_node, "ti,power-button");
 	if (pwr_button)
 		memcpy(&cells[nr_cells++], &tps65219_pwrbutton_cell,
 		       sizeof(tps65219_pwrbutton_cell));

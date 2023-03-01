@@ -834,6 +834,7 @@
 	status = "disabled";
 
 	cpsw3g_phy0: ethernet-phy@0 {
+		compatible = "ethernet-phy-id2000.a231";
 		reg = <0>;
 		interrupt-parent = <&main_gpio0>;
 		interrupts = <25 IRQ_TYPE_EDGE_FALLING>;

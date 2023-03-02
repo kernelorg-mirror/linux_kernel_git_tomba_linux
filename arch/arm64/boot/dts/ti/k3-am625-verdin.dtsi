@@ -950,8 +950,6 @@
 		"";
 
 	verdin_ctrl_sleep_moci: ctrl-sleep-moci-hog {
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_ctrl_sleep_moci>;
 		gpio-hog;
 		/* Verdin CTRL_SLEEP_MOCI# (SODIMM 256) */
 		gpios = <31 GPIO_ACTIVE_HIGH>;

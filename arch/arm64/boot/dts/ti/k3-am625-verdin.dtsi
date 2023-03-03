@@ -782,7 +782,7 @@
 
 &cpsw3g {
 	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_rgmii1>; // TODO: move pinctrl to &cpsw_port1 ?
+	pinctrl-0 = <&pinctrl_rgmii1>;
 	status = "disabled";
 };
 

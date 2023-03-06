@@ -211,7 +211,7 @@
 };
 
 /* Verdin CTRL_WAKE1_MICO# */
-&verdin_key_wakeup {
+&verdin_gpio_keys {
 	status = "okay";
 };
 

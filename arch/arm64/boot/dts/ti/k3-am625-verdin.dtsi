@@ -86,19 +86,19 @@
 		id-gpios = <&main_gpio1 19 GPIO_ACTIVE_HIGH>;
 	};
 
-	gpio-keys {
+	verdin_gpio_keys: gpio-keys {
 		compatible = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_ctrl_wake1_mico>;
+		status = "disabled";
 
 		verdin_key_wakeup: key-wakeup {
-			pinctrl-names = "default";
-			pinctrl-0 = <&pinctrl_ctrl_wake1_mico>;
 			debounce-interval = <10>;
 			/* Verdin CTRL_WAKE1_MICO# (SODIMM 252) */
 			gpios = <&main_gpio0 32 GPIO_ACTIVE_LOW>;
 			label = "Wake-Up";
 			linux,code = <KEY_WAKEUP>;
 			wakeup-source;
-			status = "disabled";
 		};
 	};
 

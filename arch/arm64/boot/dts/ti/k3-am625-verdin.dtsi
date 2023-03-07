@@ -380,6 +380,20 @@
 		>;
 	};
 
+	/* Verdin I2S_2_D_OUT as GPIO (conflict with Verdin I2S_2 interface) */
+	pinctrl_i2s_2_d_out_gpio: main-gpio0-34-pins-default {
+		pinctrl-single,pins = <
+			AM62X_IOPAD(0x008c, PIN_INPUT, 7) /* (L25) GPMC0_WEn.GPIO0_34 */ /* SODIMM 46 */
+		>;
+	};
+
+	/* Verdin I2S_2_BCLK as GPIO (conflict with Verdin I2S_2 interface) */
+	pinctrl_i2s_2_bclk_gpio: main-gpio0-35-pins-default {
+		pinctrl-single,pins = <
+			AM62X_IOPAD(0x0090, PIN_INPUT, 7) /* (M24) GPMC0_BE0n_CLE.GPIO0_35 */ /* SODIMM 42 */
+		>;
+	};
+
 	/* Verdin GPIO_6 */
 	pinctrl_gpio_6: main-gpio0-36-pins-default {
 		pinctrl-single,pins = <
@@ -896,8 +910,8 @@
 		"SODIMM_256",
 		"SODIMM_252",
 		"",
-		"",
-		"",
+		"SODIMM_46",
+		"SODIMM_42",
 		"SODIMM_218",
 		"",
 		"SODIMM_189",

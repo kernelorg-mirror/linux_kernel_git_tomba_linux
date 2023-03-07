@@ -844,6 +844,20 @@
 	status = "disabled";
 };
 
+&dss_ports {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* VP2: DPI Output */
+	port@1 {
+		reg = <1>;
+
+		dpi_out: endpoint {
+			remote-endpoint = <&rgb_in>;
+		};
+	};
+};
+
 &ecap0_pwm {
 	status = "disabled";
 };
@@ -1091,10 +1105,11 @@
 
 			port@0 {
 				reg = <0>;
+
 				rgb_in: endpoint {
 					data-lines = <18>;
+					remote-endpoint = <&dpi_out>;
 				};
-
 			};
 
 			port@1 {

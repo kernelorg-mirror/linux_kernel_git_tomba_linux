@@ -450,10 +450,10 @@
 		>;
 	};
 
-	/* Verdin DSI_1_INT# */
+	/* Verdin DSI_1_INT# (pulled-up as active-low) */
 	pinctrl_dsi1_int: main-gpio1-49-pins-default {
 		pinctrl-single,pins = <
-			AM62X_IOPAD(0x0244, PIN_INPUT, 7) /* (C17) MMC1_SDWP.GPIO1_49 */ /* SODIMM 17 */
+			AM62X_IOPAD(0x0244, PIN_INPUT_PULLUP, 7) /* (C17) MMC1_SDWP.GPIO1_49 */ /* SODIMM 17 */
 		>;
 	};
 

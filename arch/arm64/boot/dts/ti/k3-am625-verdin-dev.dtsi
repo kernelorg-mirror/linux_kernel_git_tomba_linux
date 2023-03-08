@@ -191,6 +191,7 @@
 &sdhci1 {
 	/* limit to 100MHz to prevent signal integrity issues */
 	max-frequency = <100000000>;
+	ti,driver-strength-ohm = <33>;
 	status = "okay";
 };
 

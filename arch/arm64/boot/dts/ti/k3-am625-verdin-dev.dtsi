@@ -154,12 +154,11 @@
 };
 
 /* Verdin UART_1, connector X50 through RS485 transceiver. */
-/* TODO: enable it, currently reserved by TIFS firmware */
 &main_uart1 {
 	linux,rs485-enabled-at-boot-time;
 	rs485-rts-active-low;
 	rs485-rx-during-tx;
-	status = "reserved";
+	status = "okay";
 };
 
 /* Verdin I2S_1 */

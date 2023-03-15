@@ -156,7 +156,11 @@
 /* Verdin UART_1, connector X50 through RS485 transceiver. */
 &main_uart1 {
 	linux,rs485-enabled-at-boot-time;
-	rs485-rts-active-low;
+	/*
+	 * The 8250 OMAP driver interprets rs485-rts-active-high and its
+	 * ioctl equivalent as driving RTS low on send.
+	 */
+	rs485-rts-active-high;
 	rs485-rx-during-tx;
 	status = "okay";
 };
@@ -220,5 +224,5 @@
 /* Verdin UART_2 */
 /* TODO: enable it, currently reserved by DM firmware */
 &wkup_uart0 {
-	status = "reserved";
+	status = "okay";
 };

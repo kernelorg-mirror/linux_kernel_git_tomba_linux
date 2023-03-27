@@ -864,6 +864,10 @@ static void tc358768_bridge_pre_enable(struct drm_bridge *bridge)
 	if (mode->flags & DRM_MODE_FLAG_PHSYNC)
 		tc358768_update_bits(priv, TC358768_PP_MISC, BIT(0), BIT(0));
 
+	/* PDataF: Parallel Data Format */
+	val = 1; /* FIXME: hardcoded for Verdin AM62 V1.0 */
+	tc358768_update_bits(priv, TC358768_CONFCTL, BIT(8) | BIT(9), val << 8);
+
 	/* Start DSI Tx */
 	tc358768_write(priv, TC358768_DSI_START, 0x1);
 

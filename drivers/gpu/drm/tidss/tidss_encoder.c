@@ -22,10 +22,29 @@ static int tidss_encoder_atomic_check(struct drm_encoder *encoder,
 	struct drm_device *ddev = encoder->dev;
 	struct tidss_crtc_state *tcrtc_state = to_tidss_crtc_state(crtc_state);
 	struct drm_display_info *di = &conn_state->connector->display_info;
+	struct drm_bridge_state *br_state = NULL;
 	struct drm_bridge *bridge;
 	bool bus_flags_set = false;
 
 	dev_dbg(ddev->dev, "%s\n", __func__);
+
+	/*
+	 * Take bus format from the first bridge, if not present get it from
+	 * the connector display_info
+	 */
+	bridge = drm_bridge_chain_get_first_bridge(encoder);
+	if (bridge)
+		br_state = drm_atomic_get_new_bridge_state(crtc_state->state,
+							   bridge);
+	if (br_state) {
+		tcrtc_state->bus_format = br_state->input_bus_cfg.format;
+	} else if (di->bus_formats && di->num_bus_formats > 0) {
+		tcrtc_state->bus_format = di->bus_formats[0];
+	} else {
+		dev_err(ddev->dev, "%s: No bus_formats in connected display\n",
+			__func__);
+		return -EINVAL;
+	}
 
 	/*
 	 * Take the bus_flags from the first bridge that defines
@@ -41,14 +60,7 @@ static int tidss_encoder_atomic_check(struct drm_encoder *encoder,
 		break;
 	}
 
-	if (!di->bus_formats || di->num_bus_formats == 0)  {
-		dev_err(ddev->dev, "%s: No bus_formats in connected display\n",
-			__func__);
-		return -EINVAL;
-	}
-
 	// XXX any cleaner way to set bus format and flags?
-	tcrtc_state->bus_format = di->bus_formats[0];
 	if (!bus_flags_set)
 		tcrtc_state->bus_flags = di->bus_flags;
 

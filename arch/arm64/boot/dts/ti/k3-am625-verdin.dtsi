@@ -46,40 +46,38 @@
 		usb1 = &usb1;
 	};
 
-	clocks {
-		/* DSI Bridge REFCLK */
-		clk_dsi_bridge_refclk_fixed: clock-dsi-bridge-refclk-fixed {
-			compatible = "fixed-clock";
-			#clock-cells = <0>;
-			clock-frequency = <20000000>;
-		};
+	/* DSI Bridge REFCLK */
+	clk_dsi_bridge_refclk_fixed: clock-dsi-bridge-refclk-fixed {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <20000000>;
+	};
 
-		clk_dsi_bridge_refclk: clock-dsi-bridge-refclk {
-			compatible = "gpio-gate-clock";
-			pinctrl-names = "default";
-			pinctrl-0 = <&pinctrl_bridge_clk_en>;
-			#clock-cells = <0>;
-			clocks = <&clk_dsi_bridge_refclk_fixed>;
-			/* PMIC_BRIDGE_CLK_EN */
-			enable-gpios = <&main_gpio0 28 GPIO_ACTIVE_HIGH>;
-		};
+	clk_dsi_bridge_refclk: clock-dsi-bridge-refclk {
+		compatible = "gpio-gate-clock";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_bridge_clk_en>;
+		#clock-cells = <0>;
+		clocks = <&clk_dsi_bridge_refclk_fixed>;
+		/* PMIC_BRIDGE_CLK_EN */
+		enable-gpios = <&main_gpio0 28 GPIO_ACTIVE_HIGH>;
+	};
 
-		/* I2S_1_MCLK */
-		clk_i2s1_mclk_fixed: clock-i2s-mclk-fixed {
-			compatible = "fixed-clock";
-			#clock-cells = <0>;
-			clock-frequency = <24576000>;
-		};
+	/* I2S_1_MCLK */
+	clk_i2s1_mclk_fixed: clock-i2s-mclk-fixed {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24576000>;
+	};
 
-		clk_i2s1_mclk: clock-i2s-mclk {
-			compatible = "gpio-gate-clock";
-			pinctrl-names = "default";
-			pinctrl-0 = <&pinctrl_i2s1_mclk_en>;
-			#clock-cells = <0>;
-			clocks = <&clk_i2s1_mclk_fixed>;
-			/* I2S_1_MCLK_EN */
-			enable-gpios = <&main_gpio0 39 GPIO_ACTIVE_HIGH>;
-		};
+	clk_i2s1_mclk: clock-i2s-mclk {
+		compatible = "gpio-gate-clock";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_i2s1_mclk_en>;
+		#clock-cells = <0>;
+		clocks = <&clk_i2s1_mclk_fixed>;
+		/* I2S_1_MCLK_EN */
+		enable-gpios = <&main_gpio0 39 GPIO_ACTIVE_HIGH>;
 	};
 
 	extcon_usb0: extcon-usb0 {

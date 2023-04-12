@@ -29,7 +29,7 @@
 			"Line", "Line In";
 
 		dailink_master: simple-audio-card,codec {
-			clocks = <&clk_i2s1_mclk>;
+			clocks = <&k3_clks 157 10>;
 			sound-dai = <&nau8822_1a>;
 		};
 
@@ -95,8 +95,15 @@
 	/* Audio Codec */
 	nau8822_1a: audio-codec@1a {
 		compatible = "nuvoton,nau8822";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_i2s1_mclk>; /* Configure AUDIO_EXT_REFCLK1 pin as output */
 		reg = <0x1a>;
 		#sound-dai-cells = <0>;
+
+		/* POSTDIV4_16FF_MAIN_2_HSDIVOUT8_CLK -> AUDIO_EXT_REFCLK1 */
+		assigned-clocks = <&k3_clks 157 10>;
+		assigned-clock-parents = <&k3_clks 157 18>;
+		assigned-clock-rates = <25000000>; /* for 48KHz +/- 1.7% */
 	};
 
 	/* IO Expander */

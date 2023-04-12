@@ -63,23 +63,6 @@
 		enable-gpios = <&main_gpio0 28 GPIO_ACTIVE_HIGH>;
 	};
 
-	/* I2S_1_MCLK */
-	clk_i2s1_mclk_fixed: clock-i2s-mclk-fixed {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <24576000>;
-	};
-
-	clk_i2s1_mclk: clock-i2s-mclk {
-		compatible = "gpio-gate-clock";
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_i2s1_mclk_en>;
-		#clock-cells = <0>;
-		clocks = <&clk_i2s1_mclk_fixed>;
-		/* I2S_1_MCLK_EN */
-		enable-gpios = <&main_gpio0 39 GPIO_ACTIVE_HIGH>;
-	};
-
 	extcon_usb0: extcon-usb0 {
 		compatible = "linux,extcon-usb-gpio";
 		id-gpios = <&main_gpio1 19 GPIO_ACTIVE_HIGH>;
@@ -406,13 +389,6 @@
 		>;
 	};
 
-	/* I2S_1_MCLK_EN */
-	pinctrl_i2s1_mclk_en: main-gpio0-a-pins-default {
-		pinctrl-single,pins = <
-			AM62X_IOPAD(0x00a0, PIN_INPUT, 7) /* (K25) GPMC0_WPn.GPIO0_39 */
-		>;
-	};
-
 	/* Verdin GPIO_5 */
 	pinctrl_gpio_5: main-gpio0-40-pins-default {
 		pinctrl-single,pins = <
@@ -498,6 +474,13 @@
 		pinctrl-single,pins = <
 			AM62X_IOPAD(0x01d0, PIN_INPUT, 2) /* (A15) UART0_CTSn.I2C3_SCL */ /* SODIMM 95 */
 			AM62X_IOPAD(0x01d4, PIN_INPUT, 2) /* (B15) UART0_RTSn.I2C3_SDA */ /* SODIMM 93 */
+		>;
+	};
+
+	/* I2S_1_MCLK */
+	pinctrl_i2s1_mclk: main-system-audio-ext-reflock1-pins-default {
+		pinctrl-single,pins = <
+			AM62X_IOPAD(0x00a0, PIN_OUTPUT, 1) /* (K25) GPMC0_WPn.AUDIO_EXT_REFCLK1 */ /* SODIMM 38 */
 		>;
 	};
 

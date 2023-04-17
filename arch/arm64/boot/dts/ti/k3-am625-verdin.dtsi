@@ -1143,10 +1143,12 @@
 				regulator-name = "+V3.3_1.8_SD (PMIC LDO1)";
 			};
 
-			ldo2 {
-				regulator-max-microvolt = <1200000>;
-				regulator-min-microvolt = <1200000>;
-				regulator-name = "+VLDO2 (PMIC LDO2)";
+			reg_vddr_core: ldo2 {
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-max-microvolt = <850000>;
+				regulator-min-microvolt = <850000>;
+				regulator-name = "+VDDR_CORE (PMIC LDO2)";
 			};
 
 			reg_1v8a: ldo3 {

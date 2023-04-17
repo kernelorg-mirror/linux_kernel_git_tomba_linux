@@ -114,14 +114,6 @@
 		vin-supply = <&reg_vsodimm>;
 	};
 
-	reg_3v3a: regulator-3v3a {
-		compatible = "regulator-fixed";
-		regulator-max-microvolt = <3300000>;
-		regulator-min-microvolt = <3300000>;
-		regulator-name = "On-module +V3.3A";
-		vin-supply = <&reg_vsodimm>;
-	};
-
 	reg_1v2_dsi: regulator-1v2-dsi {
 		compatible = "regulator-fixed";
 		regulator-max-microvolt = <1200000>;

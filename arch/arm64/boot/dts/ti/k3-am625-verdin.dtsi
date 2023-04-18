@@ -46,23 +46,6 @@
 		usb1 = &usb1;
 	};
 
-	/* DSI Bridge REFCLK */
-	clk_dsi_bridge_refclk_fixed: clock-dsi-bridge-refclk-fixed {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <20000000>;
-	};
-
-	clk_dsi_bridge_refclk: clock-dsi-bridge-refclk {
-		compatible = "gpio-gate-clock";
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_bridge_clk_en>;
-		#clock-cells = <0>;
-		clocks = <&clk_dsi_bridge_refclk_fixed>;
-		/* PMIC_BRIDGE_CLK_EN */
-		enable-gpios = <&main_gpio0 28 GPIO_ACTIVE_HIGH>;
-	};
-
 	extcon_usb0: extcon-usb0 {
 		compatible = "linux,extcon-usb-gpio";
 		id-gpios = <&main_gpio1 19 GPIO_ACTIVE_HIGH>;
@@ -315,13 +298,6 @@
 	pinctrl_wifi_wkup_wlan: main-gpio0-27-pins-default {
 		pinctrl-single,pins = <
 			AM62X_IOPAD(0x006c, PIN_INPUT, 7) /* (T22) GPMC0_AD12.GPIO0_27 */
-		>;
-	};
-
-	/* PMIC_BRIDGE_CLK_EN */
-	pinctrl_bridge_clk_en: main-gpio0-28-pins-default {
-		pinctrl-single,pins = <
-			AM62X_IOPAD(0x0070, PIN_INPUT, 7) /* (T24) GPMC0_AD13.GPIO0_28 */
 		>;
 	};
 
@@ -1062,9 +1038,12 @@
 	dsi_bridge: bridge@e {
 		compatible = "toshiba,tc358778";
 		reg = <0xe>;
+		assigned-clocks = <&k3_clks 157 20>;
+		assigned-clock-parents = <&k3_clks 157 22>;
+		assigned-clock-rates = <25000000>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_bridge_reset>;
-		clocks = <&clk_dsi_bridge_refclk>;
+		clocks = <&k3_clks 157 20>;
 		clock-names = "refclk";
 		reset-gpios = <&main_gpio0 20 GPIO_ACTIVE_LOW>;
 		vddc-supply = <&reg_1v2_dsi>;

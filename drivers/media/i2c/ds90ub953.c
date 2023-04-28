@@ -8,6 +8,7 @@
  * Copyright (c) 2023 Tomi Valkeinen <tomi.valkeinen@ideasonboard.com>
  */
 
+#include <linux/bitfield.h>
 #include <linux/clk-provider.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -20,8 +21,10 @@
 #include <linux/property.h>
 #include <linux/rational.h>
 #include <linux/regmap.h>
+#include <linux/units.h>
 
 #include <media/i2c/ds90ub9xx.h>
+#include <media/mipi-csi2.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-mediabus.h>
@@ -31,10 +34,13 @@
 
 #define UB953_PAD_SINK			0
 #define UB953_PAD_SOURCE		1
+#define UB953_PAD_TPG			2
+#define UB953_NUM_PADS			3
 
 #define UB953_NUM_GPIOS			4
 
 #define UB953_DEFAULT_CLKOUT_RATE	25000000UL
+
 
 /* Note: Only sync mode supported for now */
 enum ub953_mode {
@@ -46,6 +52,12 @@ enum ub953_mode {
 	UB953_MODE_NONSYNC_INT,
 	/* FPD-Link III DVP mode */
 	UB953_MODE_DVP,
+};
+
+enum ub953_tpg_pattern {
+	UB953_TPG_RED,
+	UB953_TPG_GREEN,
+	UB953_TPG_BLUE,
 };
 
 struct ub953_hw_data {
@@ -73,7 +85,7 @@ struct ub953_data {
 	struct gpio_chip	gpio_chip;
 
 	struct v4l2_subdev	sd;
-	struct media_pad	pads[2];
+	struct media_pad	pads[UB953_NUM_PADS];
 
 	struct v4l2_async_notifier	notifier;
 
@@ -92,7 +104,37 @@ struct ub953_data {
 	enum ub953_mode		mode;
 
 	const struct ds90ub9xx_platform_data	*plat_data;
+
+	struct v4l2_ctrl_handler	hdl;
+	struct v4l2_ctrl	*tpg_ctrl;
 };
+
+struct ub953_format_info {
+	u32 code;
+	u8 dt;
+	u8 bitspp;
+	u8 block_size;
+};
+
+static const struct ub953_format_info ub953_tpg_formats[] = {
+	/* Only RGB888 supported for now */
+	{
+		.code = MEDIA_BUS_FMT_RGB888_1X24,
+		.dt = MIPI_CSI2_DT_RGB888,
+		.bitspp = 24,
+		.block_size = 3,
+	},
+};
+
+static const struct ub953_format_info *ub953_find_format(u32 code)
+{
+	for (unsigned int i = 0; i < ARRAY_SIZE(ub953_tpg_formats); i++) {
+		if (ub953_tpg_formats[i].code == code)
+			return &ub953_tpg_formats[i];
+	}
+
+	return NULL;
+}
 
 static inline struct ub953_data *sd_to_ub953(struct v4l2_subdev *sd)
 {
@@ -216,7 +258,6 @@ out_unlock:
 	return ret;
 }
 
-__maybe_unused
 static int ub953_write_ind(struct ub953_data *priv, u8 block, u8 reg, u8 val,
 			   int *err)
 {
@@ -245,6 +286,45 @@ static int ub953_write_ind(struct ub953_data *priv, u8 block, u8 reg, u8 val,
 			"Write to IND_ACC_DATA failed when writing %u:0x%02x: %d\n",
 			block, reg, ret);
 	}
+
+out_unlock:
+	mutex_unlock(&priv->reg_lock);
+
+	if (ret && err)
+		*err = ret;
+
+	return ret;
+}
+
+static int ub953_write_ind16(struct ub953_data *priv, u8 block, u8 reg, u16 val,
+			     int *err)
+{
+	int ret;
+
+	if (err && *err)
+		return *err;
+
+	mutex_lock(&priv->reg_lock);
+
+	ret = ub953_select_ind_reg_block(priv, block);
+	if (ret)
+		goto out_unlock;
+
+	ret = regmap_write(priv->regmap, UB953_REG_IND_ACC_ADDR, reg);
+	if (ret)
+		goto out_unlock;
+
+	ret = regmap_write(priv->regmap, UB953_REG_IND_ACC_DATA, val >> 8);
+	if (ret)
+		goto out_unlock;
+
+	ret = regmap_write(priv->regmap, UB953_REG_IND_ACC_ADDR, reg + 1);
+	if (ret)
+		goto out_unlock;
+
+	ret = regmap_write(priv->regmap, UB953_REG_IND_ACC_DATA, val & 0xff);
+	if (ret)
+		goto out_unlock;
 
 out_unlock:
 	mutex_unlock(&priv->reg_lock);
@@ -383,9 +463,62 @@ static void ub953_gpiochip_remove(struct ub953_data *priv)
  * V4L2
  */
 
-static int _ub953_set_routing(struct v4l2_subdev *sd,
-			      struct v4l2_subdev_state *state,
-			      struct v4l2_subdev_krouting *routing)
+static bool ub953_is_tpg_selected(struct v4l2_subdev_state *state)
+{
+	return state->routing.num_routes == 1 &&
+	       state->routing.routes[0].sink_pad == UB953_PAD_TPG;
+}
+
+static int ub953_set_routing_tpg(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state,
+				 const struct v4l2_subdev_krouting *routing)
+{
+	static const struct v4l2_mbus_framefmt format = {
+		.width = 640,
+		.height = 480,
+		.code = MEDIA_BUS_FMT_RGB888_1X24,
+		.field = V4L2_FIELD_NONE,
+		.colorspace = V4L2_COLORSPACE_SRGB,
+		.ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT,
+		.quantization = V4L2_QUANTIZATION_FULL_RANGE,
+		.xfer_func = V4L2_XFER_FUNC_SRGB,
+	};
+
+	const struct v4l2_subdev_route *route;
+	struct v4l2_fract *ival;
+	int ret;
+
+	/* Only a single stream allowed for TPG */
+	if (routing->num_routes != 1)
+		return -EINVAL;
+
+	route = &routing->routes[0];
+
+	/* The route must be active */
+	if (!(route->flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE))
+		return -EINVAL;
+
+	/* Stream ID must be 0 */
+	if (route->sink_stream != 0)
+		return -EINVAL;
+
+	ret = v4l2_subdev_set_routing_with_fmt(sd, state, routing, &format);
+	if (ret)
+		return ret;
+
+	ival = v4l2_subdev_state_get_interval(state, UB953_PAD_TPG, 0);
+	if (!ival)
+		return -EINVAL;
+
+	ival->numerator = 1;
+	ival->denominator = 30;
+
+	return 0;
+}
+
+static int ub953_set_routing_normal(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *state,
+				    const struct v4l2_subdev_krouting *routing)
 {
 	static const struct v4l2_mbus_framefmt format = {
 		.width = 640,
@@ -397,18 +530,8 @@ static int _ub953_set_routing(struct v4l2_subdev *sd,
 		.quantization = V4L2_QUANTIZATION_LIM_RANGE,
 		.xfer_func = V4L2_XFER_FUNC_SRGB,
 	};
-	int ret;
 
-	ret = v4l2_subdev_routing_validate(sd, routing,
-					   V4L2_SUBDEV_ROUTING_ONLY_1_TO_1);
-	if (ret)
-		return ret;
-
-	ret = v4l2_subdev_set_routing_with_fmt(sd, state, routing, &format);
-	if (ret)
-		return ret;
-
-	return 0;
+	return v4l2_subdev_set_routing_with_fmt(sd, state, routing, &format);
 }
 
 static int ub953_set_routing(struct v4l2_subdev *sd,
@@ -417,13 +540,79 @@ static int ub953_set_routing(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_krouting *routing)
 {
 	struct ub953_data *priv = sd_to_ub953(sd);
+	int ret;
 
 	if (which == V4L2_SUBDEV_FORMAT_ACTIVE && priv->enabled_source_streams)
 		return -EBUSY;
 
-	return _ub953_set_routing(sd, state, routing);
+	ret = v4l2_subdev_routing_validate(sd, routing,
+					   V4L2_SUBDEV_ROUTING_ONLY_1_TO_1 |
+					   V4L2_SUBDEV_ROUTING_NO_STREAM_MIX);
+	if (ret)
+		return ret;
+
+	if (routing->num_routes > 0 &&
+	    routing->routes[0].sink_pad == UB953_PAD_TPG)
+		return ub953_set_routing_tpg(sd, state, routing);
+	else
+		return ub953_set_routing_normal(sd, state, routing);
 }
 
+static int ub953_get_frame_desc_tpg(struct v4l2_subdev *sd, unsigned int pad,
+				    struct v4l2_mbus_frame_desc *fd,
+				    struct v4l2_subdev_state *state)
+{
+	const struct ub953_format_info *fmt_info;
+	struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_subdev_route *route;
+
+	fmt = v4l2_subdev_state_get_format(state, UB953_PAD_TPG, 0);
+	if (!fmt)
+		return -EINVAL;
+
+	fmt_info = ub953_find_format(fmt->code);
+	if (!fmt_info)
+		return -EINVAL;
+
+	/* There is exactly one route for TPG */
+	route = &state->routing.routes[0];
+
+	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_CSI2;
+	fd->entry[fd->num_entries].stream = route->source_stream;
+	fd->entry[fd->num_entries].flags = V4L2_MBUS_FRAME_DESC_FL_LEN_MAX;
+	fd->entry[fd->num_entries].length =
+		fmt->width * fmt->height * fmt_info->bitspp / 8;
+	fd->entry[fd->num_entries].pixelcode = fmt->code;
+	fd->entry[fd->num_entries].bus.csi2.vc = 0;
+	fd->entry[fd->num_entries].bus.csi2.dt = fmt_info->dt;
+
+	fd->num_entries++;
+
+	return 0;
+}
+
+static int ub953_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
+				struct v4l2_mbus_frame_desc *fd)
+{
+	struct v4l2_subdev_state *state;
+	int ret;
+
+	if (pad != UB953_PAD_SOURCE)
+		return -EINVAL;
+
+	state = v4l2_subdev_lock_and_get_active_state(sd);
+	if (!state)
+		return -EINVAL;
+
+	if (ub953_is_tpg_selected(state))
+		ret = ub953_get_frame_desc_tpg(sd, pad, fd, state);
+	else
+		ret = __v4l2_subdev_get_frame_desc_passthrough(sd, state, pad, fd);
+
+	v4l2_subdev_unlock_state(state);
+
+	return ret;
+}
 
 static int ub953_set_fmt(struct v4l2_subdev *sd,
 			 struct v4l2_subdev_state *state,
@@ -439,6 +628,11 @@ static int ub953_set_fmt(struct v4l2_subdev *sd,
 	/* No transcoding, source and sink formats must match. */
 	if (format->pad == UB953_PAD_SOURCE)
 		return v4l2_subdev_get_fmt(sd, state, format);
+
+	if (ub953_is_tpg_selected(state)) {
+		if (!ub953_find_format(format->format.code))
+			format->format.code = ub953_tpg_formats[0].code;
+	}
 
 	/* Set sink format */
 	fmt = v4l2_subdev_state_get_format(state, format->pad, format->stream);
@@ -458,6 +652,42 @@ static int ub953_set_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int ub953_get_frame_interval(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *state,
+				    struct v4l2_subdev_frame_interval *fi)
+{
+	struct v4l2_fract *ival;
+
+	if (fi->pad != UB953_PAD_TPG)
+		return -ENOTTY;
+
+	ival = v4l2_subdev_state_get_interval(state, fi->pad, fi->stream);
+	if (!ival)
+		return -EINVAL;
+
+	fi->interval = *ival;
+
+	return 0;
+}
+
+static int ub953_set_frame_interval(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *state,
+				    struct v4l2_subdev_frame_interval *fi)
+{
+	struct v4l2_fract *ival;
+
+	if (fi->pad != UB953_PAD_TPG)
+		return -ENOTTY;
+
+	ival = v4l2_subdev_state_get_interval(state, fi->pad, fi->stream);
+	if (!ival)
+		return -EINVAL;
+
+	*ival = fi->interval;
+
+	return 0;
+}
+
 static int ub953_init_state(struct v4l2_subdev *sd,
 			    struct v4l2_subdev_state *state)
 {
@@ -471,12 +701,12 @@ static int ub953_init_state(struct v4l2_subdev *sd,
 		},
 	};
 
-	struct v4l2_subdev_krouting routing = {
+	const struct v4l2_subdev_krouting routing = {
 		.num_routes = ARRAY_SIZE(routes),
 		.routes = routes,
 	};
 
-	return _ub953_set_routing(sd, state, &routing);
+	return ub953_set_routing_normal(sd, state, &routing);
 }
 
 static int ub953_log_status(struct v4l2_subdev *sd)
@@ -587,6 +817,123 @@ static int ub953_log_status(struct v4l2_subdev *sd)
 	return 0;
 }
 
+static int ub953_enable_tpg(struct ub953_data *priv,
+			    enum ub953_tpg_pattern pattern)
+{
+	const struct ub953_format_info *fmt_info;
+	struct device *dev = &priv->client->dev;
+	struct v4l2_subdev *sd = &priv->sd;
+	struct v4l2_subdev_state *state;
+	struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_fract *ival;
+	const u8 num_cbars = 8;
+	const u8 vc = 0; /* Always VC 0 for now */
+	const u8 vbp = 33;
+	const u8 vfp = 10;
+	const u16 tot_blanking = vbp + vfp + 2;
+	u16 line_size; /* in bytes */
+	u16 bar_size; /* in bytes */
+	u16 act_lpf; /* active lines/frame */
+	u16 tot_lpf; /* tot lines/frame */
+	u64 line_pd; /* Line period in 10-ns units */
+	int ret;
+
+	state = v4l2_subdev_get_locked_active_state(sd);
+
+	fmt = v4l2_subdev_state_get_format(state, UB953_PAD_TPG, 0);
+	if (!fmt)
+		return -EINVAL;
+
+	ival = v4l2_subdev_state_get_interval(state, UB953_PAD_TPG, 0);
+	if (!ival)
+		return -EINVAL;
+
+	fmt_info = ub953_find_format(fmt->code);
+	if (!fmt_info) {
+		dev_err(dev, "unsupported TPG format %#x\n", fmt->code);
+		return -EINVAL;
+	}
+
+	line_size = fmt->width * fmt_info->bitspp / 8;
+	bar_size = rounddown(line_size / num_cbars, fmt_info->block_size);
+	act_lpf = fmt->height;
+	tot_lpf = act_lpf + tot_blanking;
+	line_pd = div_u64((u64)NANO / 10 * ival->numerator,
+			  ival->denominator * tot_lpf);
+
+	if (line_pd > 0xffff) {
+		dev_err(dev, "Line period over the limit: %llu\n", line_pd);
+		return -EINVAL;
+	}
+
+	if (fmt->width * fmt_info->bitspp % 8 != 0) {
+		dev_err(dev, "Invalid TPG width\n");
+		return -EINVAL;
+	}
+
+	if (line_size % fmt_info->block_size != 0) {
+		dev_err(dev, "Invalid TPG line size\n");
+		return -EINVAL;
+	}
+
+	ret = 0;
+
+	ub953_write_ind(priv, UB953_IND_TARGET_PAT_GEN, UB953_IND_PGEN_CSI_DI,
+			(vc << 6) | (fmt_info->dt << 0), &ret);
+	ub953_write_ind16(priv, UB953_IND_TARGET_PAT_GEN,
+			  UB953_IND_PGEN_LINE_SIZE1, line_size, &ret);
+	ub953_write_ind16(priv, UB953_IND_TARGET_PAT_GEN,
+			  UB953_IND_PGEN_BAR_SIZE1, bar_size, &ret);
+	ub953_write_ind16(priv, UB953_IND_TARGET_PAT_GEN,
+			  UB953_IND_PGEN_ACT_LPF1, act_lpf, &ret);
+	ub953_write_ind16(priv, UB953_IND_TARGET_PAT_GEN,
+			  UB953_IND_PGEN_TOT_LPF1, tot_lpf, &ret);
+	ub953_write_ind16(priv, UB953_IND_TARGET_PAT_GEN,
+			  UB953_IND_PGEN_LINE_PD1, line_pd, &ret);
+	ub953_write_ind(priv, UB953_IND_TARGET_PAT_GEN, UB953_IND_PGEN_VBP,
+			vbp, &ret);
+	ub953_write_ind(priv, UB953_IND_TARGET_PAT_GEN, UB953_IND_PGEN_VFP,
+			vfp, &ret);
+
+	for (unsigned int i = 0; i < 3; ++i)
+		ub953_write_ind(priv, UB953_IND_TARGET_PAT_GEN,
+				UB953_IND_PGEN_COLOR(i), 0x0, &ret);
+
+	ub953_write_ind(priv, UB953_IND_TARGET_PAT_GEN, UB953_IND_PGEN_CFG,
+			UB953_IND_PGEN_CFG_FIXED_COLOR_MODE |
+			FIELD_PREP(UB953_IND_PGEN_CFG_NUM_CBARS_MASK, 0) |
+			FIELD_PREP(UB953_IND_PGEN_CFG_BLOCK_SIZE_MASK,
+				   fmt_info->block_size), &ret);
+
+	switch (pattern) {
+	case UB953_TPG_RED:
+		ub953_write_ind(priv, UB953_IND_TARGET_PAT_GEN,
+				UB953_IND_PGEN_COLOR(2), 0xff, &ret);
+		break;
+	case UB953_TPG_GREEN:
+		ub953_write_ind(priv, UB953_IND_TARGET_PAT_GEN,
+				UB953_IND_PGEN_COLOR(1), 0xff, &ret);
+		break;
+	case UB953_TPG_BLUE:
+		ub953_write_ind(priv, UB953_IND_TARGET_PAT_GEN,
+				UB953_IND_PGEN_COLOR(0), 0xff, &ret);
+		break;
+	default:
+		break;
+	}
+
+	ub953_write_ind(priv, UB953_IND_TARGET_PAT_GEN, UB953_IND_PGEN_CTL,
+			UB953_IND_PGEN_CTL_PGEN_ENABLE, &ret);
+
+	return ret;
+}
+
+static void ub953_disable_tpg(struct ub953_data *priv)
+{
+	ub953_write_ind(priv, UB953_IND_TARGET_PAT_GEN, UB953_IND_PGEN_CTL,
+			0x0, NULL);
+}
+
 static int ub953_enable_streams(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *state, u32 pad,
 				u64 streams_mask)
@@ -595,14 +942,24 @@ static int ub953_enable_streams(struct v4l2_subdev *sd,
 	u64 sink_streams;
 	int ret;
 
-	sink_streams = v4l2_subdev_state_xlate_streams(state, UB953_PAD_SOURCE,
-						       UB953_PAD_SINK,
-						       &streams_mask);
+	if (ub953_is_tpg_selected(state)) {
+		ret = ub953_enable_tpg(priv, priv->tpg_ctrl->val);
+		if (ret)
+			return ret;
 
-	ret = v4l2_subdev_enable_streams(priv->source_sd, priv->source_sd_pad,
-					 sink_streams);
-	if (ret)
-		return ret;
+		sink_streams = BIT_ULL(0);
+	} else {
+		sink_streams = v4l2_subdev_state_xlate_streams(state,
+							       UB953_PAD_SOURCE,
+							       UB953_PAD_SINK,
+							       &streams_mask);
+
+		ret = v4l2_subdev_enable_streams(priv->source_sd,
+						 priv->source_sd_pad,
+						 sink_streams);
+		if (ret)
+			return ret;
+	}
 
 	priv->enabled_source_streams |= streams_mask;
 
@@ -617,14 +974,22 @@ static int ub953_disable_streams(struct v4l2_subdev *sd,
 	u64 sink_streams;
 	int ret;
 
-	sink_streams = v4l2_subdev_state_xlate_streams(state, UB953_PAD_SOURCE,
-						       UB953_PAD_SINK,
-						       &streams_mask);
+	if (ub953_is_tpg_selected(state)) {
+		ub953_disable_tpg(priv);
 
-	ret = v4l2_subdev_disable_streams(priv->source_sd, priv->source_sd_pad,
-					  sink_streams);
-	if (ret)
-		return ret;
+		sink_streams = BIT_ULL(0);
+	} else {
+		sink_streams = v4l2_subdev_state_xlate_streams(state,
+							       UB953_PAD_SOURCE,
+							       UB953_PAD_SINK,
+							       &streams_mask);
+
+		ret = v4l2_subdev_disable_streams(priv->source_sd,
+						  priv->source_sd_pad,
+						  sink_streams);
+		if (ret)
+			return ret;
+	}
 
 	priv->enabled_source_streams &= ~streams_mask;
 
@@ -635,9 +1000,11 @@ static const struct v4l2_subdev_pad_ops ub953_pad_ops = {
 	.enable_streams = ub953_enable_streams,
 	.disable_streams = ub953_disable_streams,
 	.set_routing = ub953_set_routing,
-	.get_frame_desc = v4l2_subdev_get_frame_desc_passthrough,
+	.get_frame_desc = ub953_get_frame_desc,
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = ub953_set_fmt,
+	.get_frame_interval = ub953_get_frame_interval,
+	.set_frame_interval = ub953_set_frame_interval,
 };
 
 static const struct v4l2_subdev_core_ops ub953_subdev_core_ops = {
@@ -1183,6 +1550,29 @@ static int ub953_hw_init(struct ub953_data *priv)
 	return ret;
 }
 
+static const char * const ub953_test_pattern_menu[] = {
+	[UB953_TPG_RED] = "Red",
+	[UB953_TPG_GREEN] = "Green",
+	[UB953_TPG_BLUE] = "Blue",
+};
+
+static int ub953_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct ub953_data *priv = container_of(ctrl->handler,
+					struct ub953_data, hdl);
+
+	switch (ctrl->id) {
+	case V4L2_CID_TEST_PATTERN:
+		return ub953_enable_tpg(priv, ctrl->val);
+	}
+
+	return -EINVAL;
+}
+
+static const struct v4l2_ctrl_ops ub953_ctrl_ops = {
+	.s_ctrl = ub953_s_ctrl,
+};
+
 static int ub953_subdev_init(struct ub953_data *priv)
 {
 	struct device *dev = &priv->client->dev;
@@ -1191,17 +1581,38 @@ static int ub953_subdev_init(struct ub953_data *priv)
 	v4l2_i2c_subdev_init(&priv->sd, priv->client, &ub953_subdev_ops);
 	priv->sd.internal_ops = &ub953_internal_ops;
 
+	v4l2_ctrl_handler_init(&priv->hdl, 1);
+	v4l2_ctrl_new_std_menu_items(&priv->hdl, &ub953_ctrl_ops,
+				     V4L2_CID_TEST_PATTERN,
+				     ARRAY_SIZE(ub953_test_pattern_menu) - 1,
+				     0, 0, ub953_test_pattern_menu);
+
+	if (priv->hdl.error) {
+		ret = priv->hdl.error;
+		dev_err_probe(dev, ret, "Failed to init controls\n");
+		goto err_ctrl_handler_free;
+	}
+
+	priv->sd.ctrl_handler = &priv->hdl;
+	priv->tpg_ctrl = v4l2_ctrl_find(&priv->hdl, V4L2_CID_TEST_PATTERN);
+
 	priv->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE |
 			  V4L2_SUBDEV_FL_STREAMS;
 	priv->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
 	priv->sd.entity.ops = &ub953_entity_ops;
 
-	priv->pads[0].flags = MEDIA_PAD_FL_SINK;
-	priv->pads[1].flags = MEDIA_PAD_FL_SOURCE;
+	priv->pads[UB953_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
+	priv->pads[UB953_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
+	priv->pads[UB953_PAD_TPG].flags = MEDIA_PAD_FL_INTERNAL |
+					  MEDIA_PAD_FL_SINK;
 
-	ret = media_entity_pads_init(&priv->sd.entity, 2, priv->pads);
-	if (ret)
-		return dev_err_probe(dev, ret, "Failed to init pads\n");
+	ret = media_entity_pads_init(&priv->sd.entity, UB953_NUM_PADS, priv->pads);
+	if (ret) {
+		dev_err_probe(dev, ret, "Failed to init pads\n");
+		goto err_ctrl_handler_free;
+	}
+
+	priv->sd.state_lock = priv->sd.ctrl_handler->lock;
 
 	ret = v4l2_subdev_init_finalize(&priv->sd);
 	if (ret)
@@ -1228,12 +1639,15 @@ err_free_state:
 	v4l2_subdev_cleanup(&priv->sd);
 err_entity_cleanup:
 	media_entity_cleanup(&priv->sd.entity);
+err_ctrl_handler_free:
+	v4l2_ctrl_handler_free(&priv->hdl);
 
 	return ret;
 }
 
 static void ub953_subdev_uninit(struct ub953_data *priv)
 {
+	v4l2_ctrl_handler_free(&priv->hdl);
 	v4l2_async_unregister_subdev(&priv->sd);
 	ub953_v4l2_notifier_unregister(priv);
 	v4l2_subdev_cleanup(&priv->sd);

@@ -235,6 +235,9 @@ struct cal_ctx {
 	/* Used to store current pixel format */
 	struct v4l2_format	v_fmt;
 
+	const struct cal_format_info	*meta_fmtinfo;
+	struct v4l2_format	v_meta_fmt;
+
 	/* Current subdev enumerated format (legacy) */
 	const struct cal_format_info	**active_fmt;
 	unsigned int		num_active_fmt;

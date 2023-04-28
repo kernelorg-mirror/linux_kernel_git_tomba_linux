@@ -127,6 +127,21 @@ const struct cal_format_info cal_formats[] = {
 		.fourcc		= V4L2_PIX_FMT_SRGGB12,
 		.code		= MEDIA_BUS_FMT_SRGGB12_1X12,
 		.bpp		= 12,
+	}, {
+		.fourcc		= V4L2_META_FMT_GENERIC_8,
+		.code		= MEDIA_BUS_FMT_META_8,
+		.bpp		= 8,
+		.meta		= true,
+	}, {
+		.fourcc		= V4L2_META_FMT_GENERIC_CSI2_10,
+		.code		= MEDIA_BUS_FMT_META_10,
+		.bpp		= 10,
+		.meta		= true,
+	}, {
+		.fourcc		= V4L2_META_FMT_GENERIC_CSI2_12,
+		.code		= MEDIA_BUS_FMT_META_12,
+		.bpp		= 12,
+		.meta		= true,
 	},
 };
 

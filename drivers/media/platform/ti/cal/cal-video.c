@@ -551,6 +551,94 @@ static int cal_mc_s_fmt_vid_cap(struct file *file, void *priv,
 	return 0;
 }
 
+static int cal_mc_enum_fmt_meta_cap(struct file *file, void  *priv,
+				   struct v4l2_fmtdesc *f)
+{
+	unsigned int i;
+	unsigned int idx;
+
+	if (f->index >= cal_num_formats)
+		return -EINVAL;
+
+	idx = 0;
+
+	for (i = 0; i < cal_num_formats; ++i) {
+		if (!cal_formats[i].meta)
+			continue;
+
+		if (f->mbus_code && cal_formats[i].code != f->mbus_code)
+			continue;
+
+		if (idx == f->index) {
+			f->pixelformat = cal_formats[i].fourcc;
+			f->type = V4L2_BUF_TYPE_META_CAPTURE;
+			return 0;
+		}
+
+		idx++;
+	}
+
+	return -EINVAL;
+}
+
+static int cal_g_fmt_meta_cap(struct file *file, void *priv,
+			     struct v4l2_format *f)
+{
+	struct cal_ctx *ctx = video_drvdata(file);
+
+	*f = ctx->v_meta_fmt;
+
+	return 0;
+}
+
+static void cal_mc_try_fmt_meta(struct cal_ctx *ctx, struct v4l2_format *f,
+			   const struct cal_format_info **info)
+{
+	const struct cal_format_info *fmtinfo;
+
+	fmtinfo = cal_format_by_fourcc(f->fmt.meta.dataformat);
+	if (!fmtinfo || !fmtinfo->meta)
+		fmtinfo = cal_format_by_fourcc(V4L2_META_FMT_GENERIC_8);
+
+	f->fmt.meta.dataformat = fmtinfo->fourcc;
+
+	if (info)
+		*info = fmtinfo;
+
+	ctx_dbg(3, ctx, "%s: %s (buffersize %u)\n",
+		__func__, fourcc_to_str(f->fmt.meta.dataformat),
+		f->fmt.meta.buffersize);
+}
+
+static int cal_mc_try_fmt_meta_cap(struct file *file, void *priv,
+				  struct v4l2_format *f)
+{
+	struct cal_ctx *ctx = video_drvdata(file);
+
+	cal_mc_try_fmt_meta(ctx, f, NULL);
+
+	return 0;
+}
+
+static int cal_mc_s_fmt_meta_cap(struct file *file, void *priv,
+				struct v4l2_format *f)
+{
+	struct cal_ctx *ctx = video_drvdata(file);
+	const struct cal_format_info *fmtinfo;
+
+	if (vb2_is_busy(&ctx->vb_vidq)) {
+		ctx_dbg(3, ctx, "%s device busy\n", __func__);
+		return -EBUSY;
+	}
+
+	cal_mc_try_fmt_meta(ctx, f, &fmtinfo);
+
+	ctx->v_meta_fmt = *f;
+	ctx->meta_fmtinfo = fmtinfo;
+
+	return 0;
+}
+
 static int cal_mc_enum_framesizes(struct file *file, void *fh,
 				  struct v4l2_frmsizeenum *fsize)
 {
@@ -581,15 +669,57 @@ static int cal_mc_enum_framesizes(struct file *file, void *fh,
 	return 0;
 }
 
+static int cal_vb2_ioctl_reqbufs(struct file *file, void *priv,
+				 struct v4l2_requestbuffers *p)
+{
+	struct video_device *vdev = video_devdata(file);
+	int ret;
+
+	if (p->type != V4L2_BUF_TYPE_VIDEO_CAPTURE &&
+	    p->type != V4L2_BUF_TYPE_META_CAPTURE)
+		return -EINVAL;
+
+	ret = vb2_queue_change_type(vdev->queue, p->type);
+	if (ret)
+		return ret;
+
+	return vb2_ioctl_reqbufs(file, priv, p);
+}
+
+static int cal_vb2_ioctl_create_bufs(struct file *file, void *priv,
+				     struct v4l2_create_buffers *p)
+{
+	struct video_device *vdev = video_devdata(file);
+	int ret;
+
+	if (p->format.type != V4L2_BUF_TYPE_VIDEO_CAPTURE &&
+	    p->format.type != V4L2_BUF_TYPE_META_CAPTURE)
+		return -EINVAL;
+
+	ret = vb2_queue_change_type(vdev->queue, p->format.type);
+	if (ret)
+		return ret;
+
+	return vb2_ioctl_create_bufs(file, priv, p);
+}
+
 static const struct v4l2_ioctl_ops cal_ioctl_mc_ops = {
 	.vidioc_querycap      = cal_querycap,
+
 	.vidioc_enum_fmt_vid_cap  = cal_mc_enum_fmt_vid_cap,
 	.vidioc_g_fmt_vid_cap     = cal_g_fmt_vid_cap,
 	.vidioc_try_fmt_vid_cap   = cal_mc_try_fmt_vid_cap,
 	.vidioc_s_fmt_vid_cap     = cal_mc_s_fmt_vid_cap,
+
+	.vidioc_enum_fmt_meta_cap  = cal_mc_enum_fmt_meta_cap,
+	.vidioc_g_fmt_meta_cap     = cal_g_fmt_meta_cap,
+	.vidioc_try_fmt_meta_cap   = cal_mc_try_fmt_meta_cap,
+	.vidioc_s_fmt_meta_cap     = cal_mc_s_fmt_meta_cap,
+
 	.vidioc_enum_framesizes   = cal_mc_enum_framesizes,
-	.vidioc_reqbufs       = vb2_ioctl_reqbufs,
-	.vidioc_create_bufs   = vb2_ioctl_create_bufs,
+
+	.vidioc_reqbufs       = cal_vb2_ioctl_reqbufs,
+	.vidioc_create_bufs   = cal_vb2_ioctl_create_bufs,
 	.vidioc_prepare_buf   = vb2_ioctl_prepare_buf,
 	.vidioc_querybuf      = vb2_ioctl_querybuf,
 	.vidioc_qbuf          = vb2_ioctl_qbuf,
@@ -610,8 +740,13 @@ static int cal_queue_setup(struct vb2_queue *vq,
 			   unsigned int sizes[], struct device *alloc_devs[])
 {
 	struct cal_ctx *ctx = vb2_get_drv_priv(vq);
-	unsigned int size = ctx->v_fmt.fmt.pix.sizeimage;
 	unsigned int q_num_bufs = vb2_get_num_buffers(vq);
+	unsigned int size;
+
+	if (ctx->vb_vidq.type == V4L2_BUF_TYPE_META_CAPTURE)
+		size = ctx->v_meta_fmt.fmt.meta.buffersize;
+	else
+		size = ctx->v_fmt.fmt.pix.sizeimage;
 
 	if (q_num_bufs + *nbuffers < 3)
 		*nbuffers = 3 - q_num_bufs;
@@ -637,7 +772,11 @@ static int cal_buffer_prepare(struct vb2_buffer *vb)
 					      vb.vb2_buf);
 	unsigned long size;
 
-	size = ctx->v_fmt.fmt.pix.sizeimage;
+	if (ctx->vb_vidq.type == V4L2_BUF_TYPE_META_CAPTURE)
+		size = ctx->v_meta_fmt.fmt.meta.buffersize;
+	else
+		size = ctx->v_fmt.fmt.pix.sizeimage;
+
 	if (vb2_plane_size(vb, 0) < size) {
 		ctx_err(ctx,
 			"data will not fit into plane (%lu < %lu)\n",
@@ -712,12 +851,27 @@ static int cal_video_check_format(struct cal_ctx *ctx)
 		goto out;
 	}
 
-	if (ctx->fmtinfo->code != format->code ||
-	    ctx->v_fmt.fmt.pix.height != format->height ||
-	    ctx->v_fmt.fmt.pix.width != format->width ||
-	    ctx->v_fmt.fmt.pix.field != format->field) {
-		ret = -EPIPE;
-		goto out;
+	if (ctx->vb_vidq.type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
+		if (ctx->fmtinfo->code != format->code ||
+		    ctx->v_fmt.fmt.pix.height != format->height ||
+		    ctx->v_fmt.fmt.pix.width != format->width ||
+		    ctx->v_fmt.fmt.pix.field != format->field) {
+			ret = -EPIPE;
+			goto out;
+		}
+	} else {
+		const struct cal_format_info *fmtinfo;
+
+		if (ctx->meta_fmtinfo->code != format->code)
+			return -EPIPE;
+
+		fmtinfo = cal_format_by_code(format->code);
+		if (!fmtinfo)
+			return -EPIPE;
+
+		if (ctx->v_meta_fmt.fmt.meta.buffersize !=
+		    format->width * format->height * fmtinfo->bpp / 8)
+			return -EPIPE;
 	}
 
 out:
@@ -936,6 +1090,7 @@ static int cal_ctx_v4l2_init_mc_format(struct cal_ctx *ctx)
 {
 	const struct cal_format_info *fmtinfo;
 	struct v4l2_pix_format *pix_fmt = &ctx->v_fmt.fmt.pix;
+	struct v4l2_meta_format *meta_fmt = &ctx->v_meta_fmt.fmt.meta;
 
 	fmtinfo = cal_format_by_code(MEDIA_BUS_FMT_UYVY8_1X16);
 	if (!fmtinfo)
@@ -955,6 +1110,16 @@ static int cal_ctx_v4l2_init_mc_format(struct cal_ctx *ctx)
 	/* Save current format */
 	cal_calc_format_size(ctx, fmtinfo, &ctx->v_fmt);
 	ctx->fmtinfo = fmtinfo;
+
+	ctx->v_meta_fmt.type = V4L2_BUF_TYPE_META_CAPTURE;
+	meta_fmt->dataformat = V4L2_META_FMT_GENERIC_8;
+	meta_fmt->buffersize = 64;
+
+	fmtinfo = cal_format_by_fourcc(meta_fmt->dataformat);
+	if (!fmtinfo)
+		return -EINVAL;
+
+	ctx->meta_fmtinfo = fmtinfo;
 
 	return 0;
 }
@@ -1084,7 +1249,7 @@ int cal_ctx_v4l2_init(struct cal_ctx *ctx)
 
 	/* Initialize the video device and media entity. */
 	vfd->fops = &cal_fops;
-	vfd->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING
+	vfd->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_META_CAPTURE | V4L2_CAP_STREAMING
 			 | (cal_mc_api ? V4L2_CAP_IO_MC : 0);
 	vfd->v4l2_dev = &ctx->cal->v4l2_dev;
 	vfd->queue = q;

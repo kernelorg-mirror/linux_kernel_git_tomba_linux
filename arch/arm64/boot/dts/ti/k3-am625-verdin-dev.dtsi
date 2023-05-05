@@ -231,5 +231,5 @@
 /* Verdin UART_2 */
 /* TODO: enable it, currently reserved by DM firmware */
 &wkup_uart0 {
-	status = "okay";
+	status = "disabled";
 };

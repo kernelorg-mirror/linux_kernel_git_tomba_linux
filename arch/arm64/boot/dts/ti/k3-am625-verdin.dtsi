@@ -353,7 +353,7 @@
 	/* Verdin ETH_2_RGMII_INT# */
 	pinctrl_eth2_rgmii_int: main-gpio0-38-pins-default {
 		pinctrl-single,pins = <
-			AM62X_IOPAD(0x009c, PIN_INPUT, 7) /* (V25) GPMC0_WAIT1.GPIO0_38 */ /* SODIMM_189 */
+			AM62X_IOPAD(0x009c, PIN_INPUT, 7) /* (V25) GPMC0_WAIT1.GPIO0_38 */ /* SODIMM 189 */
 		>;
 	};
 

@@ -92,8 +92,10 @@ dtb-$(CONFIG_ARCH_K3) += k3-am62x-lp-sk-nand.dtbo
 
 dtb-$(CONFIG_ARCH_K3) += k3-am625-verdin-nonwifi-dahlia.dtb
 dtb-$(CONFIG_ARCH_K3) += k3-am625-verdin-nonwifi-dev.dtb
+dtb-$(CONFIG_ARCH_K3) += k3-am625-verdin-nonwifi-yavia.dtb
 dtb-$(CONFIG_ARCH_K3) += k3-am625-verdin-wifi-dahlia.dtb
 dtb-$(CONFIG_ARCH_K3) += k3-am625-verdin-wifi-dev.dtb
+dtb-$(CONFIG_ARCH_K3) += k3-am625-verdin-wifi-yavia.dtb
 
 dtb-$(CONFIG_ARCH_K3) += k3-j721e-fpdlink-cpb-fusion.dtbo
 dtb-$(CONFIG_ARCH_K3) += k3-j721e-fpdlink-sk-fusion.dtbo

@@ -399,8 +399,8 @@
 		>;
 	};
 
-	/* Verdin QSPI_1_DQS */
-	pinctrl_qspi1_dqs: main-gpio1-18-pins-default {
+	/* Verdin QSPI_1_DQS as GPIO */
+	pinctrl_qspi1_dqs_gpio: main-gpio1-18-pins-default {
 		pinctrl-single,pins = <
 			AM62X_IOPAD(0x01c0, PIN_INPUT, 7) /* (B13) SPI0_D0.GPIO1_18 */ /* SODIMM 66 */
 		>;

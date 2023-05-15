@@ -169,8 +169,6 @@
 
 /* Verdin SD_1 */
 &sdhci1 {
-	/* limit to 100MHz to prevent signal integrity issues */
-	max-frequency = <100000000>;
 	status = "okay";
 };
 

@@ -1277,6 +1277,25 @@ int dispc_vp_set_clk_rate(struct dispc_device *dispc, u32 hw_videoport,
 
 	new_rate = clk_get_rate(dispc->vp_clk[hw_videoport]);
 
+	/*
+	 * XXX: There seems to be a bug somewhere, causing the clock to be 0
+	 * in some cases (when changing the video mode). Retrying the
+	 * clk_set_rate "fixes" it.
+	 */
+	if (new_rate == 0) {
+		dev_warn(dispc->dev, "vp%d: applying clk_set_rate workaround\n",
+			 hw_videoport);
+
+		r = clk_set_rate(dispc->vp_clk[hw_videoport], rate);
+		if (r) {
+			dev_err(dispc->dev, "vp%d: failed to set clk rate to %lu\n",
+				hw_videoport, rate);
+			return r;
+		}
+
+		new_rate = clk_get_rate(dispc->vp_clk[hw_videoport]);
+	}
+
 	if (dispc_pclk_diff(rate, new_rate) > 5)
 		dev_warn(dispc->dev,
 			 "vp%d: Clock rate %lu differs over 5%% from requested %lu\n",

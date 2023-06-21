@@ -842,6 +842,43 @@ static void genpd_queue_power_off_work(struct generic_pm_domain *genpd)
 }
 
 /**
+ * genpd_keep_on - Tells if the domain should skip the power 'off' request
+ * @genpd: PM domain to be checked.
+ *
+ * If the domain's current state meets the following conditions:
+ *  - marked for being kept as enabled
+ *  - has a provider with a sync state callback registered
+ *  - the provider hasn't state synced yet
+ * then the power 'off' request should be skipped.
+ *
+ * This function should only be called from genpd_power_off and with
+ * the lock held.
+ */
+static inline bool genpd_keep_on(struct generic_pm_domain *genpd)
+{
+	bool ret = false;
+
+	if (!(genpd->boot_keep_on))
+		return false;
+
+	if (!genpd->has_provider)
+		goto out;
+
+	if (!dev_has_sync_state(genpd->provider->dev))
+		goto out;
+
+	if (dev_is_drv_state_synced(genpd->provider->dev))
+		goto out;
+
+	return true;
+
+out:
+	genpd->boot_keep_on = false;
+
+	return ret;
+}
+
+/**
  * genpd_power_off - Remove power from a given PM domain.
  * @genpd: PM domain to power down.
  * @one_dev_on: If invoked from genpd's ->runtime_suspend|resume() callback, the
@@ -868,6 +905,13 @@ static int genpd_power_off(struct generic_pm_domain *genpd, bool one_dev_on,
 	 */
 	if (!genpd_status_on(genpd) || genpd->prepared_count > 0)
 		return 0;
+
+	/*
+	 * If the domain is enabled and unused, bail out and ignore
+	 * the 'off' request until the provider has state synced.
+	 */
+	if (genpd_keep_on(genpd))
+		return -EBUSY;
 
 	/*
 	 * Abort power off for the PM domain in the following situations:
@@ -2290,6 +2334,7 @@ int pm_genpd_init(struct generic_pm_domain *genpd,
 	atomic_set(&genpd->sd_count, 0);
 	genpd->status = is_off ? GENPD_STATE_OFF : GENPD_STATE_ON;
 	genpd->device_count = 0;
+	genpd->boot_keep_on = !is_off;
 	genpd->provider = NULL;
 	genpd->device_id = -ENXIO;
 	genpd->has_provider = false;
@@ -2944,6 +2989,10 @@ static void genpd_dev_pm_sync(struct device *dev)
 	pd = dev_to_genpd(dev);
 	if (IS_ERR(pd))
 		return;
+
+	genpd_lock(pd);
+	pd->boot_keep_on = false;
+	genpd_unlock(pd);
 
 	genpd_queue_power_off_work(pd);
 }

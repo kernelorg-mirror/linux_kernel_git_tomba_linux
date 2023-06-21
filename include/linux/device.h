@@ -967,6 +967,20 @@ static inline int dev_set_drv_sync_state(struct device *dev,
 	return 0;
 }
 
+static inline bool dev_is_drv_state_synced(struct device *dev)
+{
+	bool ret = false;
+
+	if (!dev)
+		return ret;
+
+	device_lock(dev);
+	ret = dev->state_synced;
+	device_unlock(dev);
+
+	return ret;
+}
+
 static inline void dev_set_removable(struct device *dev,
 				     enum device_removable removable)
 {

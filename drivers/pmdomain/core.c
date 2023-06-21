@@ -842,6 +842,27 @@ static void genpd_queue_power_off_work(struct generic_pm_domain *genpd)
 }
 
 /**
+ * pm_genpd_power_off_unused_sync_state - Power off all domains for provider.
+ * @dev: Provider's device.
+ *
+ * Request power off for all unused domains of the provider.
+ * This should be used exclusively as sync state callback for genpd providers.
+ */
+void pm_genpd_power_off_unused_sync_state(struct device *dev)
+{
+	struct generic_pm_domain *genpd;
+
+	mutex_lock(&gpd_list_lock);
+
+	list_for_each_entry(genpd, &gpd_list, gpd_list_node)
+		if (genpd->provider && genpd->provider->dev == dev)
+			genpd_queue_power_off_work(genpd);
+
+	mutex_unlock(&gpd_list_lock);
+}
+EXPORT_SYMBOL_GPL(pm_genpd_power_off_unused_sync_state);
+
+/**
  * genpd_keep_on - Tells if the domain should skip the power 'off' request
  * @genpd: PM domain to be checked.
  *
@@ -2552,6 +2573,8 @@ static int genpd_add_provider(struct device_node *np, genpd_xlate_t xlate,
 	cp->data = data;
 	cp->xlate = xlate;
 	fwnode_dev_initialized(&np->fwnode, true);
+
+	dev_set_drv_sync_state(np->fwnode.dev, pm_genpd_power_off_unused_sync_state);
 
 	mutex_lock(&of_genpd_mutex);
 	list_add(&cp->link, &of_genpd_providers);

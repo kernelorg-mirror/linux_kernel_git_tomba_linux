@@ -337,6 +337,9 @@ static inline int pm_genpd_remove(struct generic_pm_domain *genpd)
 	return -EOPNOTSUPP;
 }
 
+static inline void pm_genpd_power_off_unused_sync_state(struct device *dev)
+{ }
+
 static inline struct device *dev_to_genpd_dev(struct device *dev)
 {
 	return ERR_PTR(-EOPNOTSUPP);

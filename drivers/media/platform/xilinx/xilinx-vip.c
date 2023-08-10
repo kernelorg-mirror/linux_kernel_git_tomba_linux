@@ -929,9 +929,11 @@ int xvip_device_init(struct xvip_device *xvip,
 			return PTR_ERR(xvip->iomem);
 	}
 
-	xvip->clk = devm_clk_get(xvip->dev, NULL);
-	if (IS_ERR(xvip->clk))
-		return PTR_ERR(xvip->clk);
+	if (!info->has_no_clock) {
+		xvip->clk = devm_clk_get(xvip->dev, NULL);
+		if (IS_ERR(xvip->clk))
+			return PTR_ERR(xvip->clk);
+	}
 
 	return clk_prepare_enable(xvip->clk);
 }

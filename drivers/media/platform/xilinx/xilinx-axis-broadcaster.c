@@ -174,7 +174,9 @@ static int xvbr_parse_of(struct xvbroadcaster_device *xvbr,
 
 static int xvbr_probe(struct platform_device *pdev)
 {
-	struct xvip_device_info xvbr_info = { };
+	struct xvip_device_info xvbr_info = {
+		.has_no_clock = true,
+	};
 	struct xvbroadcaster_device *xvbr;
 	struct v4l2_subdev *subdev;
 	unsigned int num_pads;

@@ -122,6 +122,7 @@ struct xvip_video_format {
  * struct xvip_device_info - Information about a video IP core
  * @has_axi_lite: The IP has an AXI Lite (register) interface
  * @has_port_formats: The device tree specifies per-port formats
+ * @has_no_clock: The IP does not have a clock
  * @num_sinks: Number of sink pads
  * @num_sources: Number of source pads
  *
@@ -135,6 +136,7 @@ struct xvip_video_format {
 struct xvip_device_info {
 	bool has_axi_lite;
 	bool has_port_formats;
+	bool has_no_clock;
 	unsigned int num_sinks;
 	unsigned int num_sources;
 };

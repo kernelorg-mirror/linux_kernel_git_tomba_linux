@@ -52,7 +52,7 @@ enum {
 	XVIP_DMA_MULTI_OUT_MODE_ASYNC = 1,
 };
 
-static int xvip_dma_multi_out_mode = 0;
+static int xvip_dma_multi_out_mode = 1;
 module_param_named(multi_out_mode, xvip_dma_multi_out_mode, int, 0444);
 MODULE_PARM_DESC(multi_out_mode, "Multi-output DMA mode (0: sync, 1: async)");
 

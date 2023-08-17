@@ -1257,8 +1257,8 @@ static void xv_hscaler_set_coeff(struct xscaler_device *xscaler)
 			       XSCALER_BITSHIFT_16) |
 			       (xscaler->hscaler_coeff[i][rd_indx] &
 			       XHSC_MASK_LOW_16BITS);
-			 xvip_write(&xscaler->xvip, base_addr +
-				    ((i * ntaps / 2 + j) * 4), val);
+			xvip_write(&xscaler->xvip, base_addr +
+				   ((i * ntaps / 2 + j) * 4), val);
 		}
 	}
 }

@@ -479,13 +479,22 @@ struct dispc_device {
 	struct dispc_errata errata;
 };
 
+static void CH(struct dispc_device *dispc)
+{
+	WARN_ON((dispc->dev->power.runtime_status != RPM_ACTIVE) &&
+		(dispc->dev->power.runtime_status != RPM_RESUMING) &&
+		(dispc->dev->power.runtime_status != RPM_SUSPENDING));
+}
+
 static void dispc_write(struct dispc_device *dispc, u16 reg, u32 val)
 {
+	CH(dispc);
 	iowrite32(val, dispc->base_common + reg);
 }
 
 static u32 dispc_read(struct dispc_device *dispc, u16 reg)
 {
+	CH(dispc);
 	return ioread32(dispc->base_common + reg);
 }
 
@@ -494,6 +503,7 @@ void dispc_vid_write(struct dispc_device *dispc, u32 hw_plane, u16 reg, u32 val)
 {
 	void __iomem *base = dispc->base_vid[hw_plane];
 
+	CH(dispc);
 	iowrite32(val, base + reg);
 }
 
@@ -501,6 +511,7 @@ static u32 dispc_vid_read(struct dispc_device *dispc, u32 hw_plane, u16 reg)
 {
 	void __iomem *base = dispc->base_vid[hw_plane];
 
+	CH(dispc);
 	return ioread32(base + reg);
 }
 
@@ -509,6 +520,7 @@ static void dispc_ovr_write(struct dispc_device *dispc, u32 hw_videoport,
 {
 	void __iomem *base = dispc->base_ovr[hw_videoport];
 
+	CH(dispc);
 	iowrite32(val, base + reg);
 }
 
@@ -516,6 +528,7 @@ static u32 dispc_ovr_read(struct dispc_device *dispc, u32 hw_videoport, u16 reg)
 {
 	void __iomem *base = dispc->base_ovr[hw_videoport];
 
+	CH(dispc);
 	return ioread32(base + reg);
 }
 
@@ -524,6 +537,7 @@ static void dispc_vp_write(struct dispc_device *dispc, u32 hw_videoport,
 {
 	void __iomem *base = dispc->base_vp[hw_videoport];
 
+	CH(dispc);
 	iowrite32(val, base + reg);
 }
 
@@ -531,6 +545,7 @@ static u32 dispc_vp_read(struct dispc_device *dispc, u32 hw_videoport, u16 reg)
 {
 	void __iomem *base = dispc->base_vp[hw_videoport];
 
+	CH(dispc);
 	return ioread32(base + reg);
 }
 

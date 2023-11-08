@@ -9,6 +9,7 @@
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
 
+#include <drm/drm_aperture.h>
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc.h>
@@ -204,6 +205,11 @@ static int tidss_probe(struct platform_device *pdev)
 	drm_kms_helper_poll_init(ddev);
 
 	drm_mode_config_reset(ddev);
+
+	/* Remove possible early fb before registering the device */
+	ret = drm_aperture_remove_framebuffers(&tidss_driver);
+	if (ret)
+		goto err_irq_disable;
 
 	ret = drm_dev_register(ddev, 0);
 	if (ret) {

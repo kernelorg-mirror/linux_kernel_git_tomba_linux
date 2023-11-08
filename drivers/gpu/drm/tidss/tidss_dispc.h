@@ -138,4 +138,6 @@ int dispc_init(struct tidss_device *tidss);
 void dispc_remove(struct tidss_device *tidss);
 int dispc_init_hw(struct dispc_device *dispc);
 
+void dispc_splash_fini(struct dispc_device *dispc);
+
 #endif

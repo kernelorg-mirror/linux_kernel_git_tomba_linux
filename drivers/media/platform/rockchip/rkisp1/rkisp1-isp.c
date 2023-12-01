@@ -93,6 +93,33 @@ static int rkisp1_gasket_enable(struct rkisp1_device *rkisp1,
 	u32 val;
 	int ret;
 
+	regmap_read(rkisp1->gasket, ISP_DEWARP_CONTROL, &val);
+
+	if (rkisp1->gasket_id == 0)
+		mask = ISP_DEWARP_CONTROL_MIPI_CSI1_HS_POLARITY
+		     | ISP_DEWARP_CONTROL_MIPI_CSI1_VS_SEL_MASK
+		     | ISP_DEWARP_CONTROL_MIPI_ISP1_LEFT_JUST_MODE
+		     | ISP_DEWARP_CONTROL_MIPI_ISP1_DATA_TYPE_MASK
+		     | ISP_DEWARP_CONTROL_GPR_ISP_0_DISABLE;
+	else
+		mask = ISP_DEWARP_CONTROL_MIPI_CSI2_HS_POLARITY
+		     | ISP_DEWARP_CONTROL_MIPI_CSI2_VS_SEL_MASK
+		     | ISP_DEWARP_CONTROL_MIPI_ISP2_LEFT_JUST_MODE
+		     | ISP_DEWARP_CONTROL_MIPI_ISP2_DATA_TYPE_MASK
+		     | ISP_DEWARP_CONTROL_GPR_ISP_1_DISABLE;
+
+	/*
+	 * The TPG seems to require the gasket to be enabled (i.e. the
+	 * respective disable bit to be unset), so probably the DISABLE bit
+	 * controls a clock related to the TPG.
+	 */
+
+	if (rkisp1->source == &rkisp1->tpg.sd) {
+		regmap_update_bits(rkisp1->gasket, ISP_DEWARP_CONTROL, mask, 0);
+
+		return 0;
+	}
+
 	/*
 	 * Configure and enable the gasket with the CSI-2 data type. Set the
 	 * vsync polarity as active high, as that is what the ISP is configured
@@ -118,25 +145,14 @@ static int rkisp1_gasket_enable(struct rkisp1_device *rkisp1,
 
 	dt = fd.entry[0].bus.csi2.dt;
 
-	if (rkisp1->gasket_id == 0) {
-		mask = ISP_DEWARP_CONTROL_MIPI_CSI1_HS_POLARITY
-		     | ISP_DEWARP_CONTROL_MIPI_CSI1_VS_SEL_MASK
-		     | ISP_DEWARP_CONTROL_MIPI_ISP1_LEFT_JUST_MODE
-		     | ISP_DEWARP_CONTROL_MIPI_ISP1_DATA_TYPE_MASK
-		     | ISP_DEWARP_CONTROL_GPR_ISP_0_DISABLE;
+	if (rkisp1->gasket_id == 0)
 		val = ISP_DEWARP_CONTROL_MIPI_CSI1_VS_SEL_POSITIVE
 		    | ISP_DEWARP_CONTROL_MIPI_ISP1_LEFT_JUST_MODE
 		    | ISP_DEWARP_CONTROL_MIPI_ISP1_DATA_TYPE(dt);
-	} else {
-		mask = ISP_DEWARP_CONTROL_MIPI_CSI2_HS_POLARITY
-		     | ISP_DEWARP_CONTROL_MIPI_CSI2_VS_SEL_MASK
-		     | ISP_DEWARP_CONTROL_MIPI_ISP2_LEFT_JUST_MODE
-		     | ISP_DEWARP_CONTROL_MIPI_ISP2_DATA_TYPE_MASK
-		     | ISP_DEWARP_CONTROL_GPR_ISP_1_DISABLE;
+	else
 		val = ISP_DEWARP_CONTROL_MIPI_CSI2_VS_SEL_POSITIVE
 		    | ISP_DEWARP_CONTROL_MIPI_ISP2_LEFT_JUST_MODE
 		    | ISP_DEWARP_CONTROL_MIPI_ISP2_DATA_TYPE(dt);
-	}
 
 	regmap_update_bits(rkisp1->gasket, ISP_DEWARP_CONTROL, mask, val);
 

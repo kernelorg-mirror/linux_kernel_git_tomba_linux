@@ -31,6 +31,8 @@ subdir-y	+= bcmbca
 subdir-y	+= northstar2
 subdir-y	+= stingray
 
+dtbo-$(CONFIG_ARCH_BCM2835) += v3link.dtbo
+
 # Enable fixups to support overlays on BCM2835 platforms
 ifeq ($(CONFIG_ARCH_BCM2835),y)
 	DTC_FLAGS += -@

@@ -1521,6 +1521,16 @@ static void v4l_fill_fmtdesc(struct v4l2_fmtdesc *fmt)
 		case V4L2_PIX_FMT_MT2110T:	descr = "Mediatek 10bit Tile Mode"; break;
 		case V4L2_PIX_FMT_MT2110R:	descr = "Mediatek 10bit Raster Mode"; break;
 		case V4L2_PIX_FMT_HEXTILE:	descr = "Hextile Compressed Format"; break;
+		case V4L2_PIX_FMT_PISP_COMP1_RGGB: descr = "PiSP 8-bit RGRG/GBGB mode1 compressed format"; break;
+		case V4L2_PIX_FMT_PISP_COMP1_GRBG: descr = "PiSP 8-bit GRGR/BGBG mode1 compressed format"; break;
+		case V4L2_PIX_FMT_PISP_COMP1_GBRG: descr = "PiSP 8-bit GBGB/RGRG mode1 compressed format"; break;
+		case V4L2_PIX_FMT_PISP_COMP1_BGGR: descr = "PiSP 8-bit BGBG/GRGR mode1 compressed format"; break;
+		case V4L2_PIX_FMT_PISP_COMP1_MONO: descr = "PiSP 8-bit monochrome mode1 compressed format"; break;
+		case V4L2_PIX_FMT_PISP_COMP2_RGGB: descr = "PiSP 8-bit RGRG/GBGB mode2 compressed format"; break;
+		case V4L2_PIX_FMT_PISP_COMP2_GRBG: descr = "PiSP 8-bit GRGR/BGBG mode2 compressed format"; break;
+		case V4L2_PIX_FMT_PISP_COMP2_GBRG: descr = "PiSP 8-bit GBGB/RGRG mode2 compressed format"; break;
+		case V4L2_PIX_FMT_PISP_COMP2_BGGR: descr = "PiSP 8-bit BGBG/GRGR mode2 compressed format"; break;
+		case V4L2_PIX_FMT_PISP_COMP2_MONO: descr = "PiSP 8-bit monochrome mode2 compressed format"; break;
 		default:
 			if (fmt->description[0])
 				return;

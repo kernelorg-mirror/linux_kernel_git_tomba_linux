@@ -616,7 +616,7 @@ static int imx219_set_ctrl(struct v4l2_ctrl *ctrl)
 		return 0;
 
 	state = v4l2_subdev_get_locked_active_state(&imx219->sd);
-	format = v4l2_subdev_get_pad_format(&imx219->sd, state, 0);
+	format = v4l2_subdev_state_get_format(state, 0);
 	rate_factor = imx219_get_rate_factor(imx219, format);
 
 	switch (ctrl->id) {
@@ -696,27 +696,27 @@ static void imx219_update_pad_format(struct imx219 *imx219,
 	fmt->xfer_func = V4L2_XFER_FUNC_NONE;
 }
 
-static int imx219_init_cfg(struct v4l2_subdev *sd,
-			   struct v4l2_subdev_state *state)
+static int imx219_init_state(struct v4l2_subdev *sd,
+			     struct v4l2_subdev_state *state)
 {
 	struct imx219 *imx219 = to_imx219(sd);
 	struct v4l2_mbus_framefmt *format;
 	struct v4l2_rect *crop;
 
 	/* Initialize the format. */
-	format = v4l2_subdev_get_pad_format(sd, state, 0);
+	format = v4l2_subdev_state_get_format(state, 0);
 	imx219_update_pad_format(imx219, &supported_modes[0], format,
 				 MEDIA_BUS_FMT_SRGGB10_1X10);
 
 	/* Initialize the crop rectangle. */
-	crop = v4l2_subdev_get_pad_crop(sd, state, 0);
+	crop = v4l2_subdev_state_get_crop(state, 0);
 	crop->top = IMX219_PIXEL_ARRAY_TOP;
 	crop->left = IMX219_PIXEL_ARRAY_LEFT;
 	crop->width = IMX219_PIXEL_ARRAY_WIDTH;
 	crop->height = IMX219_PIXEL_ARRAY_HEIGHT;
 
 	/* Initialize try_fmt for the embedded metadata pad */
-	format = v4l2_subdev_get_pad_format(sd, state, 1);
+	format = v4l2_subdev_state_get_format(state, 1);
 	format->code = MEDIA_BUS_FMT_SENSOR_DATA;
 	format->width = IMX219_EMBEDDED_LINE_WIDTH;
 	format->height = IMX219_NUM_EMBEDDED_LINES;
@@ -812,9 +812,9 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 
 		imx219_update_pad_format(imx219, mode, &fmt->format, fmt->format.code);
 
-		format = v4l2_subdev_get_pad_format(sd, sd_state, 0);
-		crop = v4l2_subdev_get_pad_crop(sd, sd_state, 0);
-		
+		format = v4l2_subdev_state_get_format(sd_state, 0);
+		crop = v4l2_subdev_state_get_crop(sd_state, 0);
+
 		*format = fmt->format;
 		*crop = mode->crop;
 
@@ -856,7 +856,7 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 						 pixel_rate, 1, pixel_rate);
 		}
 	} else {
-		format = v4l2_subdev_get_pad_format(sd, sd_state, 1);
+		format = v4l2_subdev_state_get_format(sd_state, 1);
 		/* Don't allow the embedded data format to be changed */
 		fmt->format = *format;
 	}
@@ -914,7 +914,7 @@ static int imx219_get_selection(struct v4l2_subdev *sd,
 {
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP: {
-		sel->r = *v4l2_subdev_get_pad_crop(sd, sd_state, 0);
+		sel->r = *v4l2_subdev_state_get_crop(sd_state, 0);
 		return 0;
 	}
 
@@ -982,7 +982,7 @@ static int imx219_start_streaming(struct imx219 *imx219,
 		goto err_rpm_put;
 	}
 
-	format = v4l2_subdev_get_pad_format(&imx219->sd, state, 0);
+	format = v4l2_subdev_state_get_format(state, 0);
 	ret = imx219_set_framefmt(imx219, format);
 	if (ret) {
 		dev_err(&client->dev, "%s failed to set frame format: %d\n",
@@ -1193,7 +1193,6 @@ static const struct v4l2_subdev_video_ops imx219_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops imx219_pad_ops = {
-	.init_cfg = imx219_init_cfg,
 	.enum_mbus_code = imx219_enum_mbus_code,
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = imx219_set_pad_format,
@@ -1207,6 +1206,9 @@ static const struct v4l2_subdev_ops imx219_subdev_ops = {
 	.pad = &imx219_pad_ops,
 };
 
+static const struct v4l2_subdev_internal_ops imx219_internal_ops = {
+	.init_state = imx219_init_state,
+};
 
 /* Initialize control handlers */
 static int imx219_init_controls(struct imx219 *imx219)
@@ -1388,6 +1390,7 @@ static int imx219_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	v4l2_i2c_subdev_init(&imx219->sd, client, &imx219_subdev_ops);
+	imx219->sd.internal_ops = &imx219_internal_ops;
 
 	/* Check the hardware configuration in device tree */
 	if (imx219_check_hwcfg(dev, imx219))

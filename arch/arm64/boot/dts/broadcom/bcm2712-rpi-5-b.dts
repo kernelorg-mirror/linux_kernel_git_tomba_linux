@@ -751,3 +751,5 @@ spi10_cs_pins: &spi10_cs_gpio1 {};
 		sd_cqe = <&sdio1>, "supports-cqe?";
 	};
 };
+
+#include "rpi5-csi0-imx219.dtsi"

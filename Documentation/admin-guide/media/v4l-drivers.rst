@@ -21,6 +21,7 @@ Video4Linux (V4L) driver-specific documentation
 	omap3isp
 	omap4_camera
 	philips
+	pisp-be
 	qcom_camss
 	rcar-fdp1
 	rkisp1

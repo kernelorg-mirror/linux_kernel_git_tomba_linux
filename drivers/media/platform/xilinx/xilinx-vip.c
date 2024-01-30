@@ -216,13 +216,20 @@ int xvip_init_resources(struct xvip_device *xvip)
 	if (IS_ERR(xvip->clk))
 		return PTR_ERR(xvip->clk);
 
+	xvip->axi_clk = devm_clk_get_optional(xvip->dev, "axi_clk");
+	if (IS_ERR(xvip->axi_clk))
+		return PTR_ERR(xvip->axi_clk);
+
 	clk_prepare_enable(xvip->clk);
+	clk_prepare_enable(xvip->axi_clk);
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(xvip_init_resources);
 
 void xvip_cleanup_resources(struct xvip_device *xvip)
 {
+	clk_disable_unprepare(xvip->axi_clk);
 	clk_disable_unprepare(xvip->clk);
 }
 EXPORT_SYMBOL_GPL(xvip_cleanup_resources);

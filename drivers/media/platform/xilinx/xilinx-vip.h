@@ -91,6 +91,7 @@ struct clk;
  * @dev: (OF) device
  * @iomem: device I/O register space remapped to kernel virtual memory
  * @clk: video core clock
+ * @axi_clk: AXI4-Lite clock
  * @saved_ctrl: saved control register for resume / suspend
  */
 struct xvip_device {
@@ -98,6 +99,7 @@ struct xvip_device {
 	struct device *dev;
 	void __iomem *iomem;
 	struct clk *clk;
+	struct clk *axi_clk;
 	u32 saved_ctrl;
 };
 

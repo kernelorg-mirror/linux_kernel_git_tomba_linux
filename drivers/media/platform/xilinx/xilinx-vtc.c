@@ -175,9 +175,28 @@ int xvtc_generator_start(struct xvtc_device *xvtc,
 			 const struct xvtc_config *config)
 {
 	int ret;
+	unsigned long rate;
 
 	if (!xvtc->has_generator)
 		return -ENXIO;
+
+	unsigned long s_rate = (unsigned long)60 * config->hsize * config->vsize;
+
+	ret = clk_set_rate(xvtc->xvip.clk, s_rate);
+	if (ret)
+		printk("Failed to set video clock: %d\n", ret);
+	else
+		printk("Video clock set\n");
+
+	rate = clk_get_rate(xvtc->xvip.clk);
+
+	dev_dbg(xvtc->xvip.dev,
+		"pclk: %lu, htimings: %u, %u, %u, %u vtimings: %u, %u, %u, %u, fps: %u\n",
+		rate,
+		config->hblank_start, config->hsync_start, config->hsync_end,
+		config->hsize, config->vblank_start, config->vsync_start,
+		config->vsync_end, config->vsize,
+		(u32)(rate / (config->hsize * config->vsize)));
 
 	ret = clk_prepare_enable(xvtc->xvip.clk);
 	if (ret < 0)

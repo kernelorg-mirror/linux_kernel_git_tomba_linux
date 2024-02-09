@@ -432,9 +432,9 @@ static int format_show(struct seq_file *s, void *data)
 			   node_desc[i].name, state);
 
 		if (node_supports_image(node))
-			seq_printf(s, "format: %p4cc 0x%x\n"
+			seq_printf(s, "format: " V4L2_FOURCC_CONV " 0x%x\n"
 				      "resolution: %ux%u\nbpl: %u\nsize: %u\n",
-				   &node->vid_fmt.fmt.pix.pixelformat,
+				   V4L2_FOURCC_CONV_ARGS(node->vid_fmt.fmt.pix.pixelformat),
 				   node->vid_fmt.fmt.pix.pixelformat,
 				   node->vid_fmt.fmt.pix.width,
 				   node->vid_fmt.fmt.pix.height,
@@ -442,8 +442,8 @@ static int format_show(struct seq_file *s, void *data)
 				   node->vid_fmt.fmt.pix.sizeimage);
 
 		if (node_supports_meta(node))
-			seq_printf(s, "format: %p4cc 0x%x\nsize: %u\n",
-				   &node->meta_fmt.fmt.meta.dataformat,
+			seq_printf(s, "format: " V4L2_FOURCC_CONV " 0x%x\nsize: %u\n",
+				   V4L2_FOURCC_CONV_ARGS(node->meta_fmt.fmt.meta.dataformat),
 				   node->meta_fmt.fmt.meta.dataformat,
 				   node->meta_fmt.fmt.meta.buffersize);
 	}
@@ -540,8 +540,8 @@ static int cfe_calc_format_size_bpl(struct cfe_device *cfe,
 
 	f->fmt.pix.sizeimage = f->fmt.pix.height * f->fmt.pix.bytesperline;
 
-	cfe_dbg("%s: %p4cc size: %ux%u bpl:%u img_size:%u\n",
-		__func__, &f->fmt.pix.pixelformat,
+	cfe_dbg("%s: " V4L2_FOURCC_CONV " size: %ux%u bpl:%u img_size:%u\n",
+		__func__, V4L2_FOURCC_CONV_ARGS(f->fmt.pix.pixelformat),
 		f->fmt.pix.width, f->fmt.pix.height,
 		f->fmt.pix.bytesperline, f->fmt.pix.sizeimage);
 
@@ -844,7 +844,7 @@ static void cfe_start_channel(struct cfe_node *node)
 			__func__, node_desc[FE_OUT0].name,
 			cfe->fe_csi2_channel);
 
-		source_fmt = v4l2_subdev_state_get_format(state,
+		source_fmt = v4l2_subdev_get_pad_format(&cfe->csi2.sd, state,
 							cfe->fe_csi2_channel);
 		fmt = find_format_by_code(source_fmt->code);
 
@@ -873,7 +873,7 @@ static void cfe_start_channel(struct cfe_node *node)
 
 		u32 mode = CSI2_MODE_NORMAL;
 
-		source_fmt = v4l2_subdev_state_get_format(state,
+		source_fmt = v4l2_subdev_get_pad_format(&cfe->csi2.sd, state,
 			node_desc[node->id].link_pad - CSI2_NUM_CHANNELS);
 		fmt = find_format_by_code(source_fmt->code);
 
@@ -1058,7 +1058,7 @@ static u64 sensor_link_rate(struct cfe_device *cfe)
 	s64 link_freq;
 
 	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
-	source_fmt = v4l2_subdev_state_get_format(state, 0);
+	source_fmt = v4l2_subdev_get_pad_format(&cfe->csi2.sd, state, 0);
 	fmt = find_format_by_code(source_fmt->code);
 	v4l2_subdev_unlock_state(state);
 
@@ -1324,10 +1324,10 @@ static int try_fmt_vid_cap(struct cfe_node *node, struct v4l2_format *f)
 	struct cfe_device *cfe = node->cfe;
 	const struct cfe_fmt *fmt;
 
-	cfe_dbg("%s: [%s] %ux%u, V4L2 pix %p4cc\n",
+	cfe_dbg("%s: [%s] %ux%u, V4L2 pix " V4L2_FOURCC_CONV "\n",
 		__func__, node_desc[node->id].name,
 		f->fmt.pix.width, f->fmt.pix.height,
-		&f->fmt.pix.pixelformat);
+		V4L2_FOURCC_CONV_ARGS(f->fmt.pix.pixelformat));
 
 	if (!node_supports_image_output(node))
 		return -EINVAL;
@@ -1372,9 +1372,9 @@ static int cfe_s_fmt_vid_cap(struct file *file, void *priv,
 
 	node->vid_fmt = *f;
 
-	cfe_dbg("%s: Set %ux%u, V4L2 pix %p4cc\n", __func__,
+	cfe_dbg("%s: Set %ux%u, V4L2 pix " V4L2_FOURCC_CONV "\n", __func__,
 		node->vid_fmt.fmt.pix.width, node->vid_fmt.fmt.pix.height,
-		&node->vid_fmt.fmt.pix.pixelformat);
+		V4L2_FOURCC_CONV_ARGS(node->vid_fmt.fmt.pix.pixelformat));
 
 	return 0;
 }
@@ -1480,8 +1480,8 @@ static int cfe_s_fmt_meta(struct file *file, void *priv, struct v4l2_format *f)
 
 	node->meta_fmt = *f;
 
-	cfe_dbg("%s: Set %p4cc\n", __func__,
-		&node->meta_fmt.fmt.meta.dataformat);
+	cfe_dbg("%s: Set " V4L2_FOURCC_CONV "\n", __func__,
+		V4L2_FOURCC_CONV_ARGS(node->meta_fmt.fmt.meta.dataformat));
 
 	return 0;
 }
@@ -1686,7 +1686,7 @@ static int cfe_video_link_validate(struct media_link *link)
 
 	state = v4l2_subdev_lock_and_get_active_state(source_sd);
 
-	source_fmt = v4l2_subdev_state_get_format(state,
+	source_fmt = v4l2_subdev_get_pad_format(source_sd, state,
 						link->source->index);
 	if (!source_fmt) {
 		ret = -EINVAL;
@@ -1905,7 +1905,7 @@ static int cfe_register_node(struct cfe_device *cfe, int id)
 					     : sizeof(struct cfe_buffer);
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	q->lock = &node->lock;
-	q->min_queued_buffers = 1;
+	q->min_buffers_needed = 1;
 	q->dev = &cfe->pdev->dev;
 
 	ret = vb2_queue_init(q);

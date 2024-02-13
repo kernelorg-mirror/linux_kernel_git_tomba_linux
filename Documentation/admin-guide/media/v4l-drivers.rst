@@ -25,6 +25,7 @@ Video4Linux (V4L) driver-specific documentation
 	qcom_camss
 	rcar-fdp1
 	rkisp1
+	rp1-cfe
 	saa7134
 	si470x
 	si4713

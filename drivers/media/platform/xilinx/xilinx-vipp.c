@@ -11,10 +11,9 @@
 
 #include <linux/list.h>
 #include <linux/module.h>
-#include <linux/of.h>
-#include <linux/of_graph.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/property.h>
 
 #include <media/v4l2-async.h>
 #include <media/v4l2-common.h>
@@ -94,11 +93,11 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 		if (ep == NULL)
 			break;
 
-		dev_dbg(xdev->dev, "processing endpoint %p\n", ep);
+		dev_dbg(xdev->dev, "processing endpoint %pfw\n", ep);
 
 		ret = v4l2_fwnode_parse_link(ep, &link);
 		if (ret < 0) {
-			dev_err(xdev->dev, "failed to parse link for %p\n",
+			dev_err(xdev->dev, "failed to parse link for %pfw\n",
 				ep);
 			continue;
 		}
@@ -107,7 +106,7 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 		 * the link.
 		 */
 		if (link.local_port >= local->num_pads) {
-			dev_err(xdev->dev, "invalid port number %u for %p\n",
+			dev_err(xdev->dev, "invalid port number %u for %pfw\n",
 				link.local_port, link.local_node);
 			v4l2_fwnode_put_link(&link);
 			ret = -EINVAL;
@@ -117,15 +116,15 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 		local_pad = &local->pads[link.local_port];
 
 		if (local_pad->flags & MEDIA_PAD_FL_SINK) {
-			dev_dbg(xdev->dev, "skipping sink port %p:%u\n",
+			dev_dbg(xdev->dev, "skipping sink port %pfw:%u\n",
 				link.local_node, link.local_port);
 			v4l2_fwnode_put_link(&link);
 			continue;
 		}
 
 		/* Skip DMA engines, they will be processed separately. */
-		if (link.remote_node == of_fwnode_handle(xdev->dev->of_node)) {
-			dev_dbg(xdev->dev, "skipping DMA port %p:%u\n",
+		if (link.remote_node == dev_fwnode(xdev->dev)) {
+			dev_dbg(xdev->dev, "skipping DMA port %pfw:%u\n",
 				link.local_node, link.local_port);
 			v4l2_fwnode_put_link(&link);
 			continue;
@@ -134,7 +133,7 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 		/* Find the remote entity. */
 		ent = xvip_graph_find_entity(xdev, link.remote_node);
 		if (ent == NULL) {
-			dev_err(xdev->dev, "no entity found for %p\n",
+			dev_err(xdev->dev, "no entity found for %pfw\n",
 				link.remote_node);
 			v4l2_fwnode_put_link(&link);
 			ret = -ENODEV;
@@ -144,7 +143,7 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 		remote = ent->entity;
 
 		if (link.remote_port >= remote->num_pads) {
-			dev_err(xdev->dev, "invalid port number %u on %p\n",
+			dev_err(xdev->dev, "invalid port number %u on %pfw\n",
 				link.remote_port, link.remote_node);
 			v4l2_fwnode_put_link(&link);
 			ret = -EINVAL;
@@ -192,25 +191,25 @@ xvip_graph_find_dma(struct xvip_composite_device *xdev, unsigned int port)
 static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
 {
 	u32 link_flags = MEDIA_LNK_FL_ENABLED;
-	struct device_node *node = xdev->dev->of_node;
+	struct fwnode_handle *node = dev_fwnode(xdev->dev);
 	struct media_entity *source;
 	struct media_entity *sink;
 	struct media_pad *source_pad;
 	struct media_pad *sink_pad;
 	struct xvip_graph_entity *ent;
 	struct v4l2_fwnode_link link;
-	struct device_node *ep;
+	struct fwnode_handle *ep = NULL;
 	struct xvip_dma *dma;
 	int ret = 0;
 
 	dev_dbg(xdev->dev, "creating links for DMA engines\n");
 
-	for_each_endpoint_of_node(node, ep) {
-		dev_dbg(xdev->dev, "processing endpoint %pOF\n", ep);
+	fwnode_graph_for_each_endpoint(node, ep) {
+		dev_dbg(xdev->dev, "processing endpoint %pfw\n", ep);
 
-		ret = v4l2_fwnode_parse_link(of_fwnode_handle(ep), &link);
+		ret = v4l2_fwnode_parse_link(ep, &link);
 		if (ret < 0) {
-			dev_err(xdev->dev, "failed to parse link for %pOF\n",
+			dev_err(xdev->dev, "failed to parse link for %pfw\n",
 				ep);
 			continue;
 		}
@@ -231,17 +230,16 @@ static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
 		/* Find the remote entity. */
 		ent = xvip_graph_find_entity(xdev, link.remote_node);
 		if (ent == NULL) {
-			dev_err(xdev->dev, "no entity found for %pOF\n",
-				to_of_node(link.remote_node));
+			dev_err(xdev->dev, "no entity found for %pfw\n",
+				link.remote_node);
 			v4l2_fwnode_put_link(&link);
 			ret = -ENODEV;
 			break;
 		}
 
 		if (link.remote_port >= ent->entity->num_pads) {
-			dev_err(xdev->dev, "invalid port number %u on %pOF\n",
-				link.remote_port,
-				to_of_node(link.remote_node));
+			dev_err(xdev->dev, "invalid port number %u on %pfw\n",
+				link.remote_port, link.remote_node);
 			v4l2_fwnode_put_link(&link);
 			ret = -EINVAL;
 			break;
@@ -278,7 +276,7 @@ static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
 		}
 	}
 
-	of_node_put(ep);
+	fwnode_handle_put(ep);
 	return ret;
 }
 
@@ -336,7 +334,7 @@ static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
 	struct fwnode_handle *ep = NULL;
 	int ret = 0;
 
-	dev_dbg(xdev->dev, "parsing node %p\n", fwnode);
+	dev_dbg(xdev->dev, "parsing node %pfw\n", fwnode);
 
 	while (1) {
 		struct xvip_graph_entity *xge;
@@ -345,7 +343,7 @@ static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
 		if (ep == NULL)
 			break;
 
-		dev_dbg(xdev->dev, "handling endpoint %p\n", ep);
+		dev_dbg(xdev->dev, "handling endpoint %pfw\n", ep);
 
 		remote = fwnode_graph_get_remote_port_parent(ep);
 		if (remote == NULL) {
@@ -356,7 +354,7 @@ static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
 		fwnode_handle_put(ep);
 
 		/* Skip entities that we have already processed. */
-		if (remote == of_fwnode_handle(xdev->dev->of_node) ||
+		if (remote == dev_fwnode(xdev->dev) ||
 		    xvip_graph_find_entity(xdev, remote)) {
 			fwnode_handle_put(remote);
 			continue;
@@ -391,7 +389,7 @@ static int xvip_graph_parse(struct xvip_composite_device *xdev)
 	 * loop will handle entities added at the end of the list while walking
 	 * the links.
 	 */
-	ret = xvip_graph_parse_one(xdev, of_fwnode_handle(xdev->dev->of_node));
+	ret = xvip_graph_parse_one(xdev, dev_fwnode(xdev->dev));
 	if (ret < 0)
 		return 0;
 
@@ -408,7 +406,7 @@ static int xvip_graph_parse(struct xvip_composite_device *xdev)
 }
 
 static int xvip_graph_dma_init_one(struct xvip_composite_device *xdev,
-				   struct device_node *node)
+				   const struct fwnode_handle *node)
 {
 	struct xvip_dma *dma;
 	enum v4l2_buf_type type;
@@ -416,7 +414,7 @@ static int xvip_graph_dma_init_one(struct xvip_composite_device *xdev,
 	unsigned int index;
 	int ret;
 
-	ret = of_property_read_string(node, "direction", &direction);
+	ret = fwnode_property_read_string(node, "direction", &direction);
 	if (ret < 0)
 		return ret;
 
@@ -427,7 +425,7 @@ static int xvip_graph_dma_init_one(struct xvip_composite_device *xdev,
 	else
 		return -EINVAL;
 
-	of_property_read_u32(node, "reg", &index);
+	fwnode_property_read_u32(node, "reg", &index);
 
 	dma = devm_kzalloc(xdev->dev, sizeof(*dma), GFP_KERNEL);
 	if (dma == NULL)
@@ -435,7 +433,7 @@ static int xvip_graph_dma_init_one(struct xvip_composite_device *xdev,
 
 	ret = xvip_dma_init(xdev, dma, type, index);
 	if (ret < 0) {
-		dev_err(xdev->dev, "%pOF initialization failed\n", node);
+		dev_err(xdev->dev, "%pfw initialization failed\n", node);
 		return ret;
 	}
 
@@ -449,22 +447,26 @@ static int xvip_graph_dma_init_one(struct xvip_composite_device *xdev,
 
 static int xvip_graph_dma_init(struct xvip_composite_device *xdev)
 {
-	struct device_node *ports;
+	struct fwnode_handle *ports;
+	struct fwnode_handle *port;
 	int ret = 0;
 
-	ports = of_get_child_by_name(xdev->dev->of_node, "ports");
+	ports = device_get_named_child_node(xdev->dev, "ports");
 	if (ports == NULL) {
 		dev_err(xdev->dev, "ports node not present\n");
 		return -EINVAL;
 	}
 
-	for_each_child_of_node_scoped(ports, port) {
+	fwnode_for_each_child_node(ports, port) {
 		ret = xvip_graph_dma_init_one(xdev, port);
-		if (ret)
+		if (ret) {
+			fwnode_handle_put(port);
 			break;
+		}
 	}
 
-	of_node_put(ports);
+	fwnode_handle_put(ports);
+
 	return ret;
 }
 

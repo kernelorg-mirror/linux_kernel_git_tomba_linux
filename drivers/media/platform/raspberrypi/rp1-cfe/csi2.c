@@ -17,16 +17,12 @@
 
 #include "csi2.h"
 #include "cfe.h"
+#include "cfe-trace.h"
 
 static bool csi2_track_errors;
 module_param_named(track_csi2_errors, csi2_track_errors, bool, 0);
 MODULE_PARM_DESC(track_csi2_errors, "track csi-2 errors");
 
-#define csi2_dbg_verbose(fmt, arg...)                             \
-	do {                                                      \
-		if (cfe_debug_verbose)                            \
-			dev_dbg(csi2->v4l2_dev->dev, fmt, ##arg); \
-	} while (0)
 #define csi2_dbg(fmt, arg...) dev_dbg(csi2->v4l2_dev->dev, fmt, ##arg)
 #define csi2_err(fmt, arg...) dev_err(csi2->v4l2_dev->dev, fmt, ##arg)
 
@@ -119,7 +115,6 @@ static inline u32 csi2_reg_read(struct csi2_device *csi2, u32 offset)
 static inline void csi2_reg_write(struct csi2_device *csi2, u32 offset, u32 val)
 {
 	writel(val, csi2->base + offset);
-	csi2_dbg_verbose("csi2: write 0x%04x -> 0x%03x\n", val, offset);
 }
 
 static inline void set_field(u32 *valp, u32 field, u32 mask)
@@ -268,7 +263,6 @@ void csi2_isr(struct csi2_device *csi2, bool *sof, bool *eof)
 	u32 status;
 
 	status = csi2_reg_read(csi2, CSI2_STATUS);
-	csi2_dbg_verbose("ISR: STA: 0x%x\n", status);
 
 	/* Write value back to clear the interrupts */
 	csi2_reg_write(csi2, CSI2_STATUS, status);
@@ -281,13 +275,7 @@ void csi2_isr(struct csi2_device *csi2, bool *sof, bool *eof)
 
 		dbg = csi2_reg_read(csi2, CSI2_CH_DEBUG(i));
 
-		csi2_dbg_verbose("ISR: [%u], %s%s%s%s%s frame: %u line: %u\n",
-				 i, (status & CSI2_STATUS_IRQ_FS(i)) ? "FS " : "",
-				 (status & CSI2_STATUS_IRQ_FE(i)) ? "FE " : "",
-				 (status & CSI2_STATUS_IRQ_FE_ACK(i)) ? "FE_ACK " : "",
-				 (status & CSI2_STATUS_IRQ_LE(i)) ? "LE " : "",
-				 (status & CSI2_STATUS_IRQ_LE_ACK(i)) ? "LE_ACK " : "",
-				 dbg >> 16, dbg & 0xffff);
+		trace_csi2_irq(i, status, dbg);
 
 		sof[i] = !!(status & CSI2_STATUS_IRQ_FS(i));
 		eof[i] = !!(status & CSI2_STATUS_IRQ_FE_ACK(i));
@@ -357,8 +345,7 @@ static int csi2_get_vc_dt_fallback(struct csi2_device *csi2, u8 *vc, u8 *dt)
 	return 0;
 }
 
-static int csi2_get_vc_dt(struct csi2_device *csi2, unsigned int channel,
-			  u8 *vc, u8 *dt)
+int csi2_get_vc_dt(struct csi2_device *csi2, unsigned int channel, u8 *vc, u8 *dt, u32 *stream)
 {
 	struct v4l2_mbus_frame_desc remote_desc;
 	struct v4l2_subdev *sd = &csi2->sd;
@@ -407,24 +394,16 @@ static int csi2_get_vc_dt(struct csi2_device *csi2, unsigned int channel,
 
 	*vc = remote_desc.entry[i].bus.csi2.vc;
 	*dt = remote_desc.entry[i].bus.csi2.dt;
+	*stream = sink_stream;
 
 	return 0;
 }
 
-static void csi2_start_channel(struct csi2_device *csi2, unsigned int channel,
-			       enum csi2_mode mode, bool auto_arm,
-			       bool pack_bytes, unsigned int width,
-			       unsigned int height)
+static void csi2_start_channel(struct csi2_device *csi2, unsigned int channel)
 {
 	u32 ctrl;
-	int ret;
-	u8 vc, dt;
 
 	csi2_dbg("%s [%u]\n", __func__, channel);
-
-	ret = csi2_get_vc_dt(csi2, channel, &vc, &dt);
-	if (ret)
-		return;
 
 	csi2_reg_write(csi2, CSI2_CH_CTRL(channel), 0);
 	csi2_reg_write(csi2, CSI2_CH_DEBUG(channel), 0);
@@ -435,21 +414,24 @@ static void csi2_start_channel(struct csi2_device *csi2, unsigned int channel,
 	       CSI2_CH_CTRL_IRQ_EN_FE_ACK | CSI2_CH_CTRL_PACK_LINE;
 
 	/* PACK_BYTES ensures no striding for embedded data. */
-	if (pack_bytes)
+	if (csi2->channel_configs[channel].pack_bytes)
 		ctrl |= CSI2_CH_CTRL_PACK_BYTES;
 
-	if (auto_arm)
+	if (csi2->channel_configs[channel].auto_arm)
 		ctrl |= CSI2_CH_CTRL_AUTO_ARM;
 
-	set_field(&ctrl, mode, CSI2_CH_CTRL_CH_MODE_MASK);
+	set_field(&ctrl, csi2->channel_configs[channel].mode, CSI2_CH_CTRL_CH_MODE_MASK);
 
 	csi2_reg_write(csi2, CSI2_CH_FRAME_SIZE(channel),
-		       (height << 16) | width);
+		       (csi2->channel_configs[channel].height << 16) |
+			       csi2->channel_configs[channel].width);
 
-	csi2_dbg("start ch%u vc:%u dt:%u\n", channel, vc, dt);
+	csi2_dbg("start ch%u vc:%u dt:%u\n", channel,
+		 csi2->channel_configs[channel].vc,
+		 csi2->channel_configs[channel].dt);
 
-	set_field(&ctrl, vc, CSI2_CH_CTRL_VC_MASK);
-	set_field(&ctrl, dt, CSI2_CH_CTRL_DT_MASK);
+	set_field(&ctrl, csi2->channel_configs[channel].vc, CSI2_CH_CTRL_VC_MASK);
+	set_field(&ctrl, csi2->channel_configs[channel].dt, CSI2_CH_CTRL_DT_MASK);
 	csi2_reg_write(csi2, CSI2_CH_CTRL(channel), ctrl);
 }
 
@@ -465,27 +447,14 @@ static void csi2_stop_channel(struct csi2_device *csi2, unsigned int channel)
 	csi2_reg_write(csi2, CSI2_CH_ADDR0(channel), 0);
 }
 
-static void csi2_start_dphy(struct csi2_device *csi2)
-{
-	csi2_reg_write(csi2, CSI2_IRQ_MASK,
-		       csi2_track_errors ? CSI2_IRQ_MASK_IRQ_ALL : 0);
-
-	dphy_start(&csi2->dphy);
-
-	csi2_reg_write(csi2, CSI2_CTRL,
-		       csi2->multipacket_line ? 0 : CSI2_CTRL_EOP_IS_EOL);
-}
-
-static void csi2_stop_dphy(struct csi2_device *csi2)
-{
-	dphy_stop(&csi2->dphy);
-
-	csi2_reg_write(csi2, CSI2_IRQ_MASK, 0);
-}
-
-int csi2_configure(struct csi2_device *csi2, struct v4l2_subdev_state *state)
+static int csi2_start_dphy(struct csi2_device *csi2)
 {
 	s64 freq;
+
+	if (csi2->phy_enable_count++)
+		return 0;
+
+	csi2_dbg("PHY start\n");
 
 	freq = v4l2_get_link_freq(csi2->source_sd->ctrl_handler, 0, 0);
 	if (freq < 0) {
@@ -493,39 +462,51 @@ int csi2_configure(struct csi2_device *csi2, struct v4l2_subdev_state *state)
 
 		csi2_err("Unable to get link freq from the source: %d\n", ret);
 
+		csi2->phy_enable_count--;
+
 		return ret;
 	}
 
 	csi2->dphy.dphy_rate = freq / 1000000 * 2;
 
-	csi2->source_stream_mask = 0;
+
+	csi2_reg_write(csi2, CSI2_IRQ_MASK,
+		       csi2_track_errors ? CSI2_IRQ_MASK_IRQ_ALL : 0);
+
+	dphy_start(&csi2->dphy);
+
+	csi2_reg_write(csi2, CSI2_CTRL,
+		       csi2->multipacket_line ? 0 : CSI2_CTRL_EOP_IS_EOL);
+
+	return 0;
+}
+
+static void csi2_stop_dphy(struct csi2_device *csi2)
+{
+	if (--csi2->phy_enable_count)
+		return;
+
+	csi2_dbg("PHY stop\n");
+
+	dphy_stop(&csi2->dphy);
+
+	csi2_reg_write(csi2, CSI2_IRQ_MASK, 0);
+}
+
+int csi2_setup_streaming(struct csi2_device *csi2,
+			 struct v4l2_subdev_state *state, u32 channel_mask)
+{
+	csi2_dbg("csi2 setup mask %#x\n", channel_mask);
 
 	for (unsigned int ch = 0; ch < CSI2_NUM_CHANNELS; ++ch) {
-		struct v4l2_mbus_framefmt *fmt;
-		u32 sink_stream;
-		int ret;
-		u32 pad;
-
-		if (!csi2->channel_configs[ch].enable)
+		if (!(channel_mask & BIT(ch)))
 			continue;
 
-		pad = CSI2_PAD_FIRST_SOURCE + ch;
-
-		fmt = v4l2_subdev_state_get_opposite_stream_format(state, pad,
-								   0);
-		if (!fmt) {
-			csi2_err("Failed to get opposite stream format for %u/%u\n",
-				 ch, 0);
-			return -EINVAL;
-		}
-
-		csi2_start_channel(csi2, ch, csi2->channel_configs[ch].mode,
-				   csi2->channel_configs[ch].auto_arm,
-				   csi2->channel_configs[ch].pack_bytes,
-				   fmt->width, fmt->height);
+		csi2_start_channel(csi2, ch);
 
 		if (csi2->channel_configs[ch].mode == CSI2_MODE_COMPRESSED)
-			csi2_set_compression(csi2, ch,
+			csi2_set_compression(
+				csi2, ch,
 				csi2->channel_configs[ch].compression.mode,
 				csi2->channel_configs[ch].compression.shift,
 				csi2->channel_configs[ch].compression.offset);
@@ -539,37 +520,35 @@ int csi2_configure(struct csi2_device *csi2, struct v4l2_subdev_state *state)
 
 			csi2_set_buffer(csi2, ch, 0, 0, 0xffffffff);
 		}
-
-		ret = v4l2_subdev_routing_find_opposite_end(&state->routing,
-			CSI2_PAD_FIRST_SOURCE + ch, 0, NULL, &sink_stream);
-		if (ret) {
-			csi2_err("Failed to find opposite stream\n");
-			return ret;
-		}
-
-		csi2->source_stream_mask |= BIT_ULL(sink_stream);
-	}
-
-	if (!csi2->source_stream_mask) {
-		csi2_err("no streams to stream?\n");
-		return -EINVAL;
 	}
 
 	return 0;
 }
 
 int csi2_start_streaming(struct csi2_device *csi2,
-			 struct v4l2_subdev_state *state)
+			 struct v4l2_subdev_state *state, u32 channel_mask)
 {
 	const struct media_pad *remote_pad;
+	u64 source_stream_mask = 0;
 	int ret;
 
-	csi2_start_dphy(csi2);
+	csi2_dbg("csi2 start mask %#x\n",  channel_mask);
+
+	ret = csi2_start_dphy(csi2);
+	if (ret)
+		return ret;
 
 	remote_pad = media_pad_remote_pad_first(&csi2->pad[CSI2_PAD_SINK]);
 
+	for (unsigned int ch = 0; ch < CSI2_NUM_CHANNELS; ++ch) {
+		if (!(channel_mask & BIT(ch)))
+			continue;
+
+		source_stream_mask |= BIT_ULL(csi2->channel_configs[ch].stream);
+	}
+
 	ret = v4l2_subdev_enable_streams(csi2->source_sd, remote_pad->index,
-					 csi2->source_stream_mask);
+					 source_stream_mask);
 	if (ret) {
 		csi2_err("stream on failed in subdev\n");
 		goto err_stop_dphy;
@@ -584,22 +563,27 @@ err_stop_dphy:
 }
 
 void csi2_stop_streaming(struct csi2_device *csi2,
-			 struct v4l2_subdev_state *state)
+			 struct v4l2_subdev_state *state, u32 channel_mask)
 {
 	const struct media_pad *remote_pad;
+	u64 source_stream_mask = 0;
 	int ret;
 
+	csi2_dbg("csi2 stop mask %#x\n",  channel_mask);
+
+	remote_pad = media_pad_remote_pad_first(&csi2->pad[CSI2_PAD_SINK]);
+
 	for (unsigned int ch = 0; ch < CSI2_NUM_CHANNELS; ++ch) {
-		if (!csi2->channel_configs[ch].enable)
+		if (!(channel_mask & BIT(ch)))
 			continue;
+
+		source_stream_mask |= BIT_ULL(csi2->channel_configs[ch].stream);
 
 		csi2_stop_channel(csi2, ch);
 	}
 
-	remote_pad = media_pad_remote_pad_first(&csi2->pad[CSI2_PAD_SINK]);
-
 	ret = v4l2_subdev_disable_streams(csi2->source_sd, remote_pad->index,
-					  csi2->source_stream_mask);
+					  source_stream_mask);
 	if (ret)
 		csi2_err("stream off failed in subdev\n");
 

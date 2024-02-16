@@ -60,11 +60,16 @@ struct csi2_device {
 	bool multipacket_line;
 
 	struct {
-		bool enable;
-
 		enum csi2_mode mode;
 		bool auto_arm;
 		bool pack_bytes;
+
+		u8 vc;
+		u8 dt;
+		u32 stream;
+
+		u32 width;
+		u32 height;
 
 		struct {
 			enum csi2_compression_mode mode;
@@ -78,7 +83,7 @@ struct csi2_device {
 	struct v4l2_subdev sd;
 
 	struct v4l2_subdev *source_sd;
-	u64 source_stream_mask;
+	unsigned int phy_enable_count;
 
 	/* lock for csi2 errors counters */
 	spinlock_t errors_lock;
@@ -94,10 +99,14 @@ void csi2_set_buffer(struct csi2_device *csi2, unsigned int channel,
 int csi2_init(struct csi2_device *csi2, struct dentry *debugfs);
 void csi2_uninit(struct csi2_device *csi2);
 
-int csi2_configure(struct csi2_device *csi2, struct v4l2_subdev_state *state);
+int csi2_setup_streaming(struct csi2_device *csi2,
+			 struct v4l2_subdev_state *state, u32 channel_mask);
 int csi2_start_streaming(struct csi2_device *csi2,
-			 struct v4l2_subdev_state *state);
+			 struct v4l2_subdev_state *state, u32 channel_mask);
 void csi2_stop_streaming(struct csi2_device *csi2,
-			 struct v4l2_subdev_state *state);
+			 struct v4l2_subdev_state *state, u32 channel_mask);
+
+int csi2_get_vc_dt(struct csi2_device *csi2, unsigned int channel, u8 *vc,
+		   u8 *dt, u32 *stream);
 
 #endif

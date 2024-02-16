@@ -17,6 +17,8 @@
 #include "pisp-fe.h"
 #include "cfe.h"
 
+#include "cfe-trace.h"
+
 #define FE_VERSION		0x000
 #define FE_CONTROL		0x004
 #define FE_STATUS		0x008
@@ -115,11 +117,6 @@ static const struct pisp_fe_config_param pisp_fe_config_map[] = {
 					sizeof(struct pisp_fe_output_config)         },
 };
 
-#define pisp_fe_dbg_verbose(fmt, arg...)                        \
-	do {                                                    \
-		if (cfe_debug_verbose)                          \
-			dev_dbg(fe->v4l2_dev->dev, fmt, ##arg); \
-	} while (0)
 #define pisp_fe_dbg(fmt, arg...) dev_dbg(fe->v4l2_dev->dev, fmt, ##arg)
 #define pisp_fe_err(fmt, arg...) dev_err(fe->v4l2_dev->dev, fmt, ##arg)
 
@@ -132,14 +129,12 @@ static inline void pisp_fe_reg_write(struct pisp_fe_device *fe, u32 offset,
 				     u32 val)
 {
 	writel(val, fe->base + offset);
-	pisp_fe_dbg_verbose("fe: write 0x%04x -> 0x%03x\n", val, offset);
 }
 
 static inline void pisp_fe_reg_write_relaxed(struct pisp_fe_device *fe,
 					     u32 offset, u32 val)
 {
 	writel_relaxed(val, fe->base + offset);
-	pisp_fe_dbg_verbose("fe: write 0x%04x -> 0x%03x\n", val, offset);
 }
 
 static int pisp_regs_show(struct seq_file *s, void *data)
@@ -205,9 +200,7 @@ void pisp_fe_isr(struct pisp_fe_device *fe, bool *sof, bool *eof)
 	*sof = !!(int_status & FE_INT_SOF);
 	*eof = !!(int_status & FE_INT_EOF);
 
-	pisp_fe_dbg_verbose("%s: status 0x%x out_status 0x%x frame_status 0x%x error_status 0x%x\nint_status 0x%x sof %u eof %u\n",
-			    __func__, status, out_status, frame_status, error_status,
-			    int_status, *sof, *eof);
+	trace_fe_irq(status, out_status, frame_status, error_status, int_status);
 
 	/* TODO: add statistics ready irq */
 }
@@ -336,7 +329,6 @@ void pisp_fe_submit_job(struct pisp_fe_device *fe, struct vb2_buffer **vb2_bufs,
 	 * sequence of relaxed writes which follow.
 	 */
 	status = pisp_fe_reg_read(fe, FE_STATUS);
-	pisp_fe_dbg_verbose("%s: status = 0x%x\n", __func__, status);
 	if (WARN_ON(status & FE_STATUS_QUEUED))
 		return;
 

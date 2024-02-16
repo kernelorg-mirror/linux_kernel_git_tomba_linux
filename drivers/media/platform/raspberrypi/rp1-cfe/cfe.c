@@ -41,18 +41,12 @@
 #include "csi2.h"
 #include "pisp-fe.h"
 
+#define CREATE_TRACE_POINTS
+#include "cfe-trace.h"
+
 #define CFE_MODULE_NAME	"rp1-cfe"
 #define CFE_VERSION	"1.0"
 
-bool cfe_debug_verbose;
-module_param_named(verbose_debug, cfe_debug_verbose, bool, 0644);
-MODULE_PARM_DESC(verbose_debug, "verbose debugging messages");
-
-#define cfe_dbg_verbose(fmt, arg...)                          \
-	do {                                                  \
-		if (cfe_debug_verbose)                        \
-			dev_dbg(&cfe->pdev->dev, fmt, ##arg); \
-	} while (0)
 #define cfe_dbg(fmt, arg...) dev_dbg(&cfe->pdev->dev, fmt, ##arg)
 #define cfe_err(fmt, arg...) dev_err(&cfe->pdev->dev, fmt, ##arg)
 
@@ -259,7 +253,8 @@ struct cfe_node {
 	struct video_device video_dev;
 	struct media_pad pad;
 	unsigned int fs_count;
-	u64 ts;
+	unsigned int group;
+	u64 timestamp;
 };
 
 struct cfe_device {
@@ -281,8 +276,8 @@ struct cfe_device {
 
 	/* IRQ lock for node state and DMA queues */
 	spinlock_t state_lock;
-	bool job_ready;
-	bool job_queued;
+	bool job_ready[CSI2_NUM_CHANNELS];
+	bool job_queued[CSI2_NUM_CHANNELS];
 
 	/* fwnode handle for the source's endpoint */
 	struct fwnode_handle *remote_ep_fwnode;
@@ -294,11 +289,14 @@ struct cfe_device {
 	struct pisp_fe_device fe;
 
 	int fe_csi2_channel;
+
+	unsigned int group_enable_count;
 };
 
-static inline bool is_fe_enabled(struct cfe_device *cfe)
+static inline bool is_fe_enabled(struct cfe_device *cfe, unsigned int group)
 {
-	return cfe->fe_csi2_channel != -1;
+	return cfe->fe_csi2_channel != -1 &&
+	       cfe->node[cfe->fe_csi2_channel].group == group;
 }
 
 static inline struct cfe_device *to_cfe_device(struct v4l2_device *v4l2_dev)
@@ -346,13 +344,24 @@ static void clear_state(struct cfe_device *cfe, unsigned long state,
 		clear_bit(bit + (node_id * NUM_STATES), cfe->node_flags);
 }
 
-static bool test_all_nodes(struct cfe_device *cfe, unsigned long precond,
-			   unsigned long cond)
+static bool test_any_node(struct cfe_device *cfe, unsigned long precond,
+			  unsigned long cond)
 {
-	unsigned int i;
-
-	for (i = 0; i < NUM_NODES; i++) {
+	for (unsigned int i = 0; i < NUM_NODES; i++) {
 		if (check_state(cfe, precond, i)) {
+			if (check_state(cfe, cond, i))
+				return true;
+		}
+	}
+
+	return false;
+}
+
+static bool test_all_group_nodes(struct cfe_device *cfe, unsigned int group,
+				 unsigned long precond, unsigned long cond)
+{
+	for (unsigned int i = 0; i < NUM_NODES; i++) {
+		if (group == cfe->node[i].group && check_state(cfe, precond, i)) {
 			if (!check_state(cfe, cond, i))
 				return false;
 		}
@@ -479,93 +488,47 @@ static int cfe_calc_format_size_bpl(struct cfe_device *cfe,
 	return 0;
 }
 
-/*
- * Get next buffer from dma-queue, and configure it to the DMA.
- */
-static void cfe_csi2_schedule_next_job(struct cfe_node *node)
+static void cfe_schedule_next_csi2_job(struct cfe_device *cfe, unsigned int group)
 {
-	struct cfe_device *cfe = node->cfe;
 	struct cfe_buffer *buf;
-	dma_addr_t addr;
-	unsigned int stride, size;
-
-	assert_spin_locked(&cfe->state_lock);
-
-	WARN_ON(!is_csi2_node(node));
-
-	WARN_ON(!check_state(cfe, NODE_STREAMING, node->id));
-
-	if (list_empty(&node->dma_queue)) {
-		cfe_err("%s: [%s] has no buffer, unable to schedule job\n",
-			__func__, node_desc[node->id].name);
-		return;
-	}
-
-	if (node->next_frm) {
-		cfe_err("%s: [%s] would overwrite next_frm\n",
-			__func__, node_desc[node->id].name);
-	}
-
-	buf = list_first_entry(&node->dma_queue, struct cfe_buffer, list);
-	node->next_frm = buf;
-	list_del(&buf->list);
-
-	cfe_dbg_verbose("%s: [%s] buffer:%u\n", __func__,
-			node_desc[node->id].name, buf->vb.vb2_buf.index);
-
-	if (is_meta_node(node)) {
-		size = node->meta_fmt.fmt.meta.buffersize;
-		stride = 0;
-	} else {
-		size = node->vid_fmt.fmt.pix.sizeimage;
-		stride = node->vid_fmt.fmt.pix.bytesperline;
-	}
-
-	addr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
-	csi2_set_buffer(&cfe->csi2, node->id, addr, stride, size);
-}
-
-static void cfe_csi2_schedule_next_jobs(struct cfe_device *cfe)
-{
 	unsigned int i;
+	dma_addr_t addr;
 
 	for (i = 0; i < CSI2_NUM_CHANNELS; i++) {
 		struct cfe_node *node = &cfe->node[i];
+		unsigned int stride, size;
 
-		if (!check_state(cfe, NODE_STREAMING, i))
+		if (!check_state(cfe, NODE_STREAMING, i) || node->group != group)
 			continue;
 
-		cfe_csi2_schedule_next_job(node);
+		buf = list_first_entry(&node->dma_queue, struct cfe_buffer,
+				       list);
+		node->next_frm = buf;
+		list_del(&buf->list);
+
+		trace_cfe_csi2_schedule(node->id, &buf->vb.vb2_buf);
+
+		if (is_meta_node(node)) {
+			size = node->meta_fmt.fmt.meta.buffersize;
+			stride = 0;
+		} else {
+			size = node->vid_fmt.fmt.pix.sizeimage;
+			stride = node->vid_fmt.fmt.pix.bytesperline;
+		}
+
+		addr = vb2_dma_contig_plane_dma_addr(&buf->vb.vb2_buf, 0);
+		csi2_set_buffer(&cfe->csi2, node->id, addr, stride, size);
 	}
 }
 
-static void cfe_fe_schedule_next_job(struct cfe_device *cfe)
+static void cfe_schedule_next_pisp_job(struct cfe_device *cfe)
 {
 	struct vb2_buffer *vb2_bufs[FE_NUM_PADS] = { 0 };
 	struct cfe_config_buffer *config_buf;
 	struct cfe_buffer *buf;
+	unsigned int i;
 
-	cfe_dbg_verbose("%s\n", __func__);
-
-	for (unsigned int i = FIRST_FE_NODE; i < NUM_NODES; i++) {
-		struct cfe_node *node = &cfe->node[i];
-
-		if (!check_state(cfe, NODE_STREAMING, i)) {
-			if (i == FE_CONFIG) {
-				cfe_err("FE_CONFIG required\n");
-				return;
-			}
-			continue;
-		}
-
-		if (list_empty(&node->dma_queue)) {
-			cfe_dbg("%s: [%s] has no buffer, unable to schedule job\n",
-				__func__, node_desc[i].name);
-			return;
-		}
-	}
-
-	for (unsigned int i = FIRST_FE_NODE; i < NUM_NODES; i++) {
+	for (i = CSI2_NUM_CHANNELS; i < NUM_NODES; i++) {
 		struct cfe_node *node = &cfe->node[i];
 
 		if (!check_state(cfe, NODE_STREAMING, i))
@@ -574,9 +537,7 @@ static void cfe_fe_schedule_next_job(struct cfe_device *cfe)
 		buf = list_first_entry(&node->dma_queue, struct cfe_buffer,
 				       list);
 
-		cfe_dbg_verbose("%s: [%s] buffer:%u\n", __func__,
-				node_desc[node->id].name,
-				buf->vb.vb2_buf.index);
+		trace_cfe_fe_schedule(node->id, &buf->vb.vb2_buf);
 
 		node->next_frm = buf;
 		vb2_bufs[node_desc[i].link_pad] = &buf->vb.vb2_buf;
@@ -587,159 +548,212 @@ static void cfe_fe_schedule_next_job(struct cfe_device *cfe)
 	pisp_fe_submit_job(&cfe->fe, vb2_bufs, &config_buf->config);
 }
 
+static bool cfe_check_job_ready(struct cfe_device *cfe, unsigned int group)
+{
+	for (unsigned int i = 0; i < NUM_NODES; i++) {
+		struct cfe_node *node = &cfe->node[i];
+
+		if (!check_state(cfe, NODE_ENABLED, i) || node->group != group)
+			continue;
+
+		if (list_empty(&node->dma_queue))
+			return false;
+	}
+
+	return true;
+}
+
+static void cfe_prepare_next_job(struct cfe_device *cfe, unsigned int group)
+{
+	trace_cfe_prepare_next_job(group);
+
+	cfe->job_queued[group] = true;
+	cfe_schedule_next_csi2_job(cfe, group);
+	if (is_fe_enabled(cfe, group))
+		cfe_schedule_next_pisp_job(cfe);
+
+	/* Flag if another job is ready after this. */
+	cfe->job_ready[group] = cfe_check_job_ready(cfe, group);
+}
+
 /* Mark buffer as complete */
 static void cfe_process_buffer_complete(struct cfe_node *node,
 					enum vb2_buffer_state state)
 {
-	struct cfe_device *cfe = node->cfe;
-
-	cfe_dbg_verbose("%s: [%s] buffer:%u\n", __func__,
-			node_desc[node->id].name,
-			node->cur_frm->vb.vb2_buf.index);
-
 	node->cur_frm->vb.sequence = node->fs_count - 1;
+	node->cur_frm->vb.vb2_buf.timestamp = node->timestamp;
+
+	trace_cfe_buffer_complete(node->id, &node->cur_frm->vb);
+
 	vb2_buffer_done(&node->cur_frm->vb.vb2_buf, state);
 }
 
-/*
- * Start of frame. Set next-frame to current-frame.
- */
-static void cfe_csi2_sof_isr_handler(struct cfe_node *node)
+static void cfe_queue_event_sof(struct cfe_node *node)
+{
+	struct v4l2_event event = {
+		.type = V4L2_EVENT_FRAME_SYNC,
+		.u.frame_sync.frame_sequence = node->fs_count - 1,
+	};
+
+	v4l2_event_queue(&node->video_dev, &event);
+}
+
+static void cfe_sof_isr_handler(struct cfe_node *node)
 {
 	struct cfe_device *cfe = node->cfe;
+	bool matching_fs = true;
+	unsigned int i;
 
-	assert_spin_locked(&cfe->state_lock);
+	trace_cfe_frame_start(node->id, node->fs_count);
 
-	node->fs_count++;
-
-	cfe_dbg_verbose("%s: [%s] seq %u\n", __func__, node_desc[node->id].name,
-			node->fs_count);
+	/*
+	 * If the sensor is producing unexpected frame event ordering over a
+	 * sustained period of time, guard against the possibility of coming
+	 * here and orphaning the cur_frm if it's not been dequeued already.
+	 * Unfortunately, there is not enough hardware state to tell if this
+	 * may have occurred.
+	 */
+	if (WARN(node->cur_frm, "%s: [%s] Orphanded frame at seq %u\n",
+		 __func__, node_desc[node->id].name, node->fs_count))
+		cfe_process_buffer_complete(node, VB2_BUF_STATE_ERROR);
 
 	node->cur_frm = node->next_frm;
 	node->next_frm = NULL;
+	node->fs_count++;
+
+	node->timestamp = ktime_get_ns();
+	for (i = 0; i < NUM_NODES; i++) {
+		if (!check_state(cfe, NODE_STREAMING, i) || i == node->id)
+			continue;
+
+		if (node->group != cfe->node[i].group)
+			continue;
+
+		/*
+		 * This checks if any other node has seen a FS. If yes, use the
+		 * same timestamp, eventually across all node buffers.
+		 */
+		if (cfe->node[i].fs_count >= node->fs_count)
+			node->timestamp = cfe->node[i].timestamp;
+		/*
+		 * This checks if all other node have seen a matching FS. If
+		 * yes, we can flag another job to be queued.
+		 */
+		if (matching_fs && cfe->node[i].fs_count != node->fs_count)
+			matching_fs = false;
+	}
+
+	if (matching_fs)
+		cfe->job_queued[node->group] = false;
+
+	if (node->cur_frm)
+		node->cur_frm->vb.vb2_buf.timestamp = node->timestamp;
 
 	set_state(cfe, FS_INT, node->id);
+	clear_state(cfe, FE_INT, node->id);
 
-	cfe_csi2_schedule_next_job(node);
+	if (is_image_output_node(node))
+		cfe_queue_event_sof(node);
 }
 
-/*
- * End-of-Frame. Process the completed buffer.
- */
-static void cfe_csi2_eof_isr_handler(struct cfe_node *node)
+static void cfe_eof_isr_handler(struct cfe_node *node)
 {
 	struct cfe_device *cfe = node->cfe;
 
-	assert_spin_locked(&cfe->state_lock);
-
-	cfe_dbg_verbose("%s: [%s] seq %d\n", __func__, node_desc[node->id].name,
-			node->fs_count);
+	trace_cfe_frame_end(node->id, node->fs_count - 1);
 
 	if (node->cur_frm)
 		cfe_process_buffer_complete(node, VB2_BUF_STATE_DONE);
 
 	node->cur_frm = NULL;
 	set_state(cfe, FE_INT, node->id);
-}
-
-static void cfe_csi2_handle_node_isr(struct cfe_node *node, bool sof, bool eof)
-{
-	struct cfe_device *cfe = node->cfe;
-
-	if (sof && eof)
-		cfe_dbg("warning: sof & eof at the same time\n");
-
-	if (!check_state(node->cfe, NODE_STREAMING, node->id)) {
-		cfe_dbg("Node %u not streaming, skipping SoF & EoF\n", node->id);
-		return;
-	}
-
-	if (sof)
-		cfe_csi2_sof_isr_handler(node);
-
-	if (eof)
-		cfe_csi2_eof_isr_handler(node);
-}
-
-static void cfe_fe_handle_isr(struct cfe_device *cfe, bool sof, bool eof)
-{
-	cfe_dbg_verbose("%s sof %u eof %u\n", __func__, sof, eof);
-
-	if (sof) {
-		for (unsigned int i = FIRST_FE_NODE; i < NUM_NODES; i++) {
-			struct cfe_node *node = &cfe->node[i];
-
-			if (!check_state(cfe, NODE_STREAMING, i))
-				continue;
-
-			node->cur_frm = node->next_frm;
-			node->next_frm = NULL;
-
-			set_state(cfe, FS_INT, node->id);
-		}
-
-		cfe_fe_schedule_next_job(cfe);
-	}
-
-	if (eof) {
-		for (unsigned int i = FIRST_FE_NODE; i < NUM_NODES; i++) {
-			struct cfe_node *node = &cfe->node[i];
-
-			if (!check_state(cfe, NODE_STREAMING, i))
-				continue;
-
-			if (node->cur_frm)
-				cfe_process_buffer_complete(node, VB2_BUF_STATE_DONE);
-
-			node->cur_frm = NULL;
-			set_state(cfe, FE_INT, node->id);
-		}
-	}
+	clear_state(cfe, FS_INT, node->id);
 }
 
 static irqreturn_t cfe_isr(int irq, void *dev)
 {
 	struct cfe_device *cfe = dev;
-	bool sof[CSI2_NUM_CHANNELS] = { 0 }, eof[CSI2_NUM_CHANNELS] = { 0 };
-	bool fe_sof = false, fe_eof = false;
+	unsigned int i;
+	bool sof[NUM_NODES] = {0}, eof[NUM_NODES] = {0};
 	u32 sts;
-	bool channel_has_event[CSI2_NUM_CHANNELS] = { 0 };
 
 	sts = cfg_reg_read(cfe, MIPICFG_INTS);
 
-	cfe_dbg_verbose("INTS %#x\n", sts);
-
-	if (sts & MIPICFG_INT_CSI_DMA) {
+	if (sts & MIPICFG_INT_CSI_DMA)
 		csi2_isr(&cfe->csi2, sof, eof);
 
-		for (unsigned int ch = 0; ch < CSI2_NUM_CHANNELS; ch++)
-			channel_has_event[ch] |= sof[ch] || eof[ch];
-	}
-
 	if (sts & MIPICFG_INT_PISP_FE) {
+		bool fe_sof, fe_eof;
+
 		pisp_fe_isr(&cfe->fe, &fe_sof, &fe_eof);
 
-		if (cfe->fe_csi2_channel != -1)
-			channel_has_event[cfe->fe_csi2_channel] |= fe_sof || fe_eof;
+		for (unsigned int i = FIRST_FE_NODE; i < NUM_NODES; ++i) {
+			sof[i] = fe_sof;
+			eof[i] = fe_eof;
+		}
 	}
 
 	spin_lock(&cfe->state_lock);
 
-	for (unsigned int ch = 0; ch < CSI2_NUM_CHANNELS; ch++) {
-		struct cfe_node *node = &cfe->node[ch];
+	for (i = 0; i < NUM_NODES; i++) {
+		struct cfe_node *node = &cfe->node[i];
+		unsigned int group = node->group;
 
-		if (!channel_has_event[ch])
+		/*
+		 * The check_state(NODE_STREAMING) is to ensure we do not loop
+		 * over the CSI2_CHx nodes when the FE is active since they
+		 * generate interrupts even though the node is not streaming.
+		 */
+		if (!check_state(cfe, NODE_STREAMING, i) ||
+		    !(sof[i] || eof[i]))
 			continue;
 
-		if (!cfe->csi2.channel_configs[ch].enable) {
-			cfe_err("SOF/EOF for a disabled channel %u\n", ch);
-			continue;
+		/*
+		 * There are 3 cases where we could get FS + FE_ACK at
+		 * the same time:
+		 * 1) FE of the current frame, and FS of the next frame.
+		 * 2) FS + FE of the same frame.
+		 * 3) FE of the current frame, and FS + FE of the next
+		 *    frame. To handle this, see the sof handler below.
+		 *
+		 * (1) is handled implicitly by the ordering of the FE and FS
+		 * handlers below.
+		 */
+		if (eof[i]) {
+			/*
+			 * The condition below tests for (2). Run the FS handler
+			 * first before the FE handler, both for the current
+			 * frame.
+			 */
+			if (sof[i] && !check_state(cfe, FS_INT, i)) {
+				cfe_sof_isr_handler(node);
+				sof[i] = false;
+			}
+
+			cfe_eof_isr_handler(node);
 		}
 
-		if (cfe->fe_csi2_channel == ch)
-			cfe_fe_handle_isr(cfe, fe_sof, fe_eof);
-		else
-			cfe_csi2_handle_node_isr(node, sof[ch], eof[ch]);
+		if (sof[i]) {
+			/*
+			 * The condition below tests for (3). In such cases, we
+			 * come in here with FS flag set in the node state from
+			 * the previous frame since it only gets cleared in
+			 * eof_isr_handler(). Handle the FE for the previous
+			 * frame first before the FS handler for the current
+			 * frame.
+			 */
+			if (check_state(cfe, FS_INT, node->id) &&
+			    !check_state(cfe, FE_INT, node->id)) {
+				cfe_dbg("%s: [%s] Handling missing previous FE interrupt\n",
+					__func__, node_desc[node->id].name);
+				cfe_eof_isr_handler(node);
+			}
+
+			cfe_sof_isr_handler(node);
+		}
+
+		if (!cfe->job_queued[group] && cfe->job_ready[group])
+			cfe_prepare_next_job(cfe, node->group);
 	}
 
 	spin_unlock(&cfe->state_lock);
@@ -763,14 +777,19 @@ static void cfe_return_buffers(struct cfe_node *node,
 	spin_lock_irqsave(&cfe->state_lock, flags);
 	list_for_each_entry_safe(buf, tmp, &node->dma_queue, list) {
 		list_del(&buf->list);
+		trace_cfe_return_buffer(node->id, buf->vb.vb2_buf.index, 2);
 		vb2_buffer_done(&buf->vb.vb2_buf, state);
 	}
 
-	if (node->cur_frm)
+	if (node->cur_frm) {
+		trace_cfe_return_buffer(node->id, node->cur_frm->vb.vb2_buf.index, 0);
 		vb2_buffer_done(&node->cur_frm->vb.vb2_buf, state);
+	}
 
-	if (node->next_frm && node->cur_frm != node->next_frm)
+	if (node->next_frm && node->cur_frm != node->next_frm) {
+		trace_cfe_return_buffer(node->id, node->next_frm->vb.vb2_buf.index, 1);
 		vb2_buffer_done(&node->next_frm->vb.vb2_buf, state);
+	}
 
 	node->cur_frm = NULL;
 	node->next_frm = NULL;
@@ -784,11 +803,19 @@ static int cfe_csi2_gather_config(struct cfe_device *cfe)
 
 	for (unsigned int ch = 0; ch < CSI2_NUM_CHANNELS; ++ch) {
 		struct cfe_node *node = &cfe->node[ch];
+		struct v4l2_subdev_state *state;
+		struct v4l2_mbus_framefmt *fmt;
 		struct media_pad *remote_pad;
 		bool is_meta;
 		bool is_fe;
+		u8 vc, dt;
+		u32 stream;
+		int ret;
+		u32 pad;
 
-		remote_pad = media_pad_remote_pad_unique(&cfe->csi2.pad[CSI2_PAD_FIRST_SOURCE + ch]);
+		pad = CSI2_PAD_FIRST_SOURCE + ch;
+
+		remote_pad = media_pad_remote_pad_unique(&cfe->csi2.pad[pad]);
 
 		if (PTR_ERR_OR_ZERO(remote_pad) == -ENOLINK) {
 			cfe_dbg("No media link on channel %u, channel disabled\n", ch);
@@ -799,6 +826,14 @@ static int cfe_csi2_gather_config(struct cfe_device *cfe)
 			cfe_err("Multiple links on pad %u\n", CSI2_PAD_FIRST_SOURCE + ch);
 			return PTR_ERR(remote_pad);
 		}
+
+		ret = csi2_get_vc_dt(&cfe->csi2, ch, &vc, &dt, &stream);
+		if (ret)
+			return ret;
+
+		cfe->csi2.channel_configs[ch].vc = vc;
+		cfe->csi2.channel_configs[ch].dt = dt;
+		cfe->csi2.channel_configs[ch].stream = stream;
 
 		is_fe = remote_pad->entity == &cfe->fe.sd.entity;
 
@@ -826,23 +861,37 @@ static int cfe_csi2_gather_config(struct cfe_device *cfe)
 			cfe->csi2.channel_configs[ch].pack_bytes = is_meta;
 		}
 
-		cfe->csi2.channel_configs[ch].enable = true;
+		state = v4l2_subdev_get_locked_active_state(&cfe->csi2.sd);
+
+		fmt = v4l2_subdev_state_get_opposite_stream_format(state, pad,
+								   0);
+		if (!fmt) {
+			cfe_err("Failed to get opposite stream format for %u/%u\n",
+				 ch, 0);
+			return -EINVAL;
+		}
+
+		cfe->csi2.channel_configs[ch].width = fmt->width;
+		cfe->csi2.channel_configs[ch].height = fmt->height;
+
+		node->group = vc;
+
+		if (is_fe) {
+			cfe->node[FE_OUT0].group = vc;
+			cfe->node[FE_OUT1].group = vc;
+			cfe->node[FE_STATS].group = vc;
+			cfe->node[FE_CONFIG].group = vc;
+		}
 	}
 
 	return 0;
 }
 
-static int cfe_start_streaming_all(struct cfe_device *cfe)
+static int cfe_init_hw(struct cfe_device *cfe)
 {
-	struct v4l2_subdev_state *state;
-	unsigned long flags;
 	int ret;
 
-	ret = cfe_csi2_gather_config(cfe);
-	if (ret)
-		return ret;
-
-	cfe_dbg("Starting all streams\n");
+	cfe_dbg("Starting hw\n");
 
 	ret = pm_runtime_resume_and_get(&cfe->pdev->dev);
 	if (ret < 0) {
@@ -850,72 +899,119 @@ static int cfe_start_streaming_all(struct cfe_device *cfe)
 		return ret;
 	}
 
-	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
-
-	/*
-	 * 1. Configure CSI2 & FE
-	 * 2. Queue initial buffers
-	 * 3. Start CSI2 PHY
-	 * 4. Enable source
-	 */
-
 	cfg_reg_write(cfe, MIPICFG_CFG, MIPICFG_CFG_SEL_CSI);
 	cfg_reg_write(cfe, MIPICFG_INTE, MIPICFG_INT_CSI_DMA | MIPICFG_INT_PISP_FE);
 
-	ret = csi2_configure(&cfe->csi2, state);
-	if (ret)
-		goto err_unlock;
+	return 0;
+}
 
-	if (is_fe_enabled(cfe))
+static void cfe_uninit_hw(struct cfe_device *cfe)
+{
+	cfe_dbg("Stopping hw\n");
+
+	cfg_reg_write(cfe, MIPICFG_CFG, 0);
+	cfg_reg_write(cfe, MIPICFG_INTE, 0);
+
+	pm_runtime_put(&cfe->pdev->dev);
+}
+
+static int cfe_start_group(struct cfe_device *cfe, unsigned int group)
+{
+	struct v4l2_subdev_state *state;
+	unsigned long flags;
+	int ret;
+	u32 channel_mask = 0;
+
+	cfe_dbg("Starting group %u\n", group);
+
+	if (cfe->group_enable_count == 0) {
+		ret = cfe_init_hw(cfe);
+		if (ret)
+			return ret;
+	}
+
+	cfe->group_enable_count++;
+
+	state = v4l2_subdev_get_locked_active_state(&cfe->csi2.sd);
+
+	if (is_fe_enabled(cfe, group))
 		pisp_fe_start(&cfe->fe);
+
+	for (unsigned int i = 0; i < CSI2_NUM_CHANNELS; ++i) {
+		if (!check_state(cfe, NODE_STREAMING, i))
+			continue;
+
+		if (cfe->node[i].group != group)
+			continue;
+
+		channel_mask |= BIT(i);
+	}
+
+	if (is_fe_enabled(cfe, group))
+		channel_mask |= BIT(cfe->fe_csi2_channel);
+
+	/* Note: need to setup CSI2 channels before preparing the job */
+	csi2_setup_streaming(&cfe->csi2, state, channel_mask);
 
 	spin_lock_irqsave(&cfe->state_lock, flags);
 
-	cfe_csi2_schedule_next_jobs(cfe);
-
-	if (is_fe_enabled(cfe))
-		cfe_fe_schedule_next_job(cfe);
+	cfe_prepare_next_job(cfe, group);
 
 	spin_unlock_irqrestore(&cfe->state_lock, flags);
 
-	ret = csi2_start_streaming(&cfe->csi2, state);
+	ret = csi2_start_streaming(&cfe->csi2, state, channel_mask);
 	if (ret)
 		goto err_unschedule_job;
-
-	v4l2_subdev_unlock_state(state);
 
 	return 0;
 
 err_unschedule_job:
 	/* XXX TODO: unschedule jobs */
-err_unlock:
-	v4l2_subdev_unlock_state(state);
-	pm_runtime_put(&cfe->pdev->dev);
+
+	if (is_fe_enabled(cfe, group)) {
+		pisp_fe_stop(&cfe->fe);
+		cfe->fe_csi2_channel = -1;
+	}
+
+	if (--cfe->group_enable_count == 0)
+		cfe_uninit_hw(cfe);
 
 	return ret;
 }
 
-static void cfe_stop_streaming_all(struct cfe_device *cfe)
+static void cfe_stop_group(struct cfe_device *cfe, unsigned int group)
 {
 	struct v4l2_subdev_state *state;
+	u32 channel_mask = 0;
 
-	cfe_dbg("Stopping all streams\n");
+	cfe_dbg("Stopping group %u\n", group);
 
 	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
 
-	csi2_stop_streaming(&cfe->csi2, state);
+	for (unsigned int i = 0; i < CSI2_NUM_CHANNELS; ++i) {
+		if (!check_state(cfe, NODE_STREAMING, i))
+			continue;
 
-	if (is_fe_enabled(cfe)) {
+		if (cfe->node[i].group != group)
+			continue;
+
+		channel_mask |= BIT(i);
+	}
+
+	if (is_fe_enabled(cfe, group))
+		channel_mask |= BIT(cfe->fe_csi2_channel);
+
+	csi2_stop_streaming(&cfe->csi2, state, channel_mask);
+
+	if (is_fe_enabled(cfe, group)) {
 		pisp_fe_stop(&cfe->fe);
 		cfe->fe_csi2_channel = -1;
 	}
 
 	v4l2_subdev_unlock_state(state);
 
-	cfg_reg_write(cfe, MIPICFG_CFG, 0);
-	cfg_reg_write(cfe, MIPICFG_INTE, 0);
-
-	pm_runtime_put(&cfe->pdev->dev);
+	if (--cfe->group_enable_count == 0)
+		cfe_uninit_hw(cfe);
 }
 
 /*
@@ -958,8 +1054,7 @@ static int cfe_buffer_prepare(struct vb2_buffer *vb)
 	struct cfe_buffer *buf = to_cfe_buffer(vb);
 	unsigned long size;
 
-	cfe_dbg_verbose("%s: [%s] buffer:%u\n", __func__,
-			node_desc[node->id].name, vb->index);
+	trace_cfe_buffer_prepare(node->id, vb);
 
 	size = is_image_node(node) ? node->vid_fmt.fmt.pix.sizeimage :
 				     node->meta_fmt.fmt.meta.buffersize;
@@ -989,26 +1084,26 @@ static void cfe_buffer_queue(struct vb2_buffer *vb)
 	struct cfe_node *node = vb2_get_drv_priv(vb->vb2_queue);
 	struct cfe_device *cfe = node->cfe;
 	struct cfe_buffer *buf = to_cfe_buffer(vb);
+	unsigned int group = node->group;
 	unsigned long flags;
-	bool was_empty;
-
-	cfe_dbg_verbose("%s: [%s] buffer:%u\n", __func__,
-			node_desc[node->id].name, vb->index);
+	bool schedule_now;
 
 	spin_lock_irqsave(&cfe->state_lock, flags);
 
-	was_empty = list_empty(&node->dma_queue);
-
 	list_add_tail(&buf->list, &node->dma_queue);
 
-	if (was_empty && !node->next_frm && test_all_nodes(cfe, NODE_ENABLED, NODE_STREAMING)) {
-		cfe_dbg_verbose("Preparing job immediately for channel %d\n",
-				node->id);
+	if (!cfe->job_ready[group])
+		cfe->job_ready[group] = cfe_check_job_ready(cfe, group);
 
-		if (is_csi2_node(node))
-			cfe_csi2_schedule_next_job(node);
-		else
-			cfe_fe_schedule_next_job(cfe);
+	schedule_now = !cfe->job_queued[group] && cfe->job_ready[group] &&
+		       test_all_group_nodes(cfe, group, NODE_ENABLED, NODE_STREAMING);
+
+	trace_cfe_buffer_queue(node->id, vb, schedule_now);
+
+	if (schedule_now) {
+		cfe_dbg("Preparing job immediately for channel %u\n",
+			node->id);
+		cfe_prepare_next_job(cfe, group);
 	}
 
 	spin_unlock_irqrestore(&cfe->state_lock, flags);
@@ -1018,6 +1113,8 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct cfe_node *node = vb2_get_drv_priv(vq);
 	struct cfe_device *cfe = node->cfe;
+	struct v4l2_subdev_state *state;
+	bool first_enable;
 	int ret;
 
 	cfe_dbg("%s: [%s] begin.\n", __func__, node_desc[node->id].name);
@@ -1044,17 +1141,36 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 		goto err_streaming;
 	}
 
-	clear_state(cfe, FS_INT + FE_INT, node->id);
+	first_enable = !test_any_node(cfe, NODE_ENABLED, NODE_STREAMING);
+
+	if (first_enable) {
+		state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
+
+		ret = cfe_csi2_gather_config(cfe);
+
+		v4l2_subdev_unlock_state(state);
+
+		if (ret)
+			return ret;
+	}
+
+	clear_state(cfe, FS_INT | FE_INT, node->id);
 	set_state(cfe, NODE_STREAMING, node->id);
 
-	if (!test_all_nodes(cfe, NODE_ENABLED, NODE_STREAMING)) {
+	node->fs_count = 0;
+
+	if (!test_all_group_nodes(cfe, node->group, NODE_ENABLED, NODE_STREAMING)) {
 		cfe_dbg("Not all enabled nodes are set to streaming yet\n");
 		return 0;
 	}
 
-	ret = cfe_start_streaming_all(cfe);
+	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
+
+	ret = cfe_start_group(cfe, node->group);
 	if (ret)
 		goto err_stop_pipe;
+
+	v4l2_subdev_unlock_state(state);
 
 	cfe_dbg("%s: [%s] end.\n", __func__, node_desc[node->id].name);
 
@@ -1073,23 +1189,28 @@ static void cfe_stop_streaming(struct vb2_queue *vq)
 {
 	struct cfe_node *node = vb2_get_drv_priv(vq);
 	struct cfe_device *cfe = node->cfe;
+	unsigned int group = node->group;
 	unsigned long flags;
-	bool fe_stop;
-	bool all_streaming;
+	bool group_stop;
 
 	cfe_dbg("%s: [%s] begin.\n", __func__, node_desc[node->id].name);
 
-	all_streaming = test_all_nodes(cfe, NODE_ENABLED, NODE_STREAMING);
-
 	spin_lock_irqsave(&cfe->state_lock, flags);
-	fe_stop = is_fe_enabled(cfe) && all_streaming;
 
-	cfe->job_ready = false;
-	clear_state(cfe, NODE_STREAMING, node->id);
+	group_stop = test_all_group_nodes(cfe, group, NODE_ENABLED, NODE_STREAMING);
+
 	spin_unlock_irqrestore(&cfe->state_lock, flags);
 
-	if (all_streaming)
-		cfe_stop_streaming_all(cfe);
+	if (group_stop)
+		cfe_stop_group(cfe, group);
+
+	spin_lock_irqsave(&cfe->state_lock, flags);
+
+	if (group_stop)
+		cfe->job_ready[group] = false;
+
+	clear_state(cfe, NODE_STREAMING, node->id);
+	spin_unlock_irqrestore(&cfe->state_lock, flags);
 
 	media_pipeline_stop(&node->pad);
 
@@ -1763,7 +1884,8 @@ static int cfe_register_node(struct cfe_device *cfe, int id)
 	q->mem_ops = &vb2_dma_contig_memops;
 	q->buf_struct_size = id == FE_CONFIG ? sizeof(struct cfe_config_buffer)
 					     : sizeof(struct cfe_buffer);
-	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
+	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC |
+			     V4L2_BUF_FLAG_TSTAMP_SRC_EOF;
 	q->lock = &node->lock;
 	q->min_queued_buffers = 1;
 	q->dev = &cfe->pdev->dev;

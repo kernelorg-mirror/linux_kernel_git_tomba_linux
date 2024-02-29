@@ -138,7 +138,7 @@ struct node_description {
 /* Must match the ordering of enum ids */
 static const struct node_description node_desc[NUM_NODES] = {
 	[CSI2_CH0] = {
-		.name = "csi2_ch0",
+		.name = "csi2-ch0",
 		.caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_META_CAPTURE,
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
 		.link_pad = CSI2_NUM_CHANNELS + 0
@@ -156,37 +156,37 @@ static const struct node_description node_desc[NUM_NODES] = {
 		.link_pad = CSI2_NUM_CHANNELS + 1
 	},
 	[CSI2_CH2] = {
-		.name = "csi2_ch2",
+		.name = "csi2-ch2",
 		.caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_META_CAPTURE,
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
 		.link_pad = CSI2_NUM_CHANNELS + 2
 	},
 	[CSI2_CH3] = {
-		.name = "csi2_ch3",
+		.name = "csi2-ch3",
 		.caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_META_CAPTURE,
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
 		.link_pad = CSI2_NUM_CHANNELS + 3
 	},
 	[FE_OUT0] = {
-		.name = "fe_image0",
+		.name = "fe-image0",
 		.caps = V4L2_CAP_VIDEO_CAPTURE,
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
 		.link_pad = FE_OUTPUT0_PAD
 	},
 	[FE_OUT1] = {
-		.name = "fe_image1",
+		.name = "fe-image1",
 		.caps = V4L2_CAP_VIDEO_CAPTURE,
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
 		.link_pad = FE_OUTPUT1_PAD
 	},
 	[FE_STATS] = {
-		.name = "fe_stats",
+		.name = "fe-stats",
 		.caps = V4L2_CAP_META_CAPTURE,
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
 		.link_pad = FE_STATS_PAD
 	},
 	[FE_CONFIG] = {
-		.name = "fe_config",
+		.name = "fe-config",
 		.caps = V4L2_CAP_META_OUTPUT,
 		.pad_flags = MEDIA_PAD_FL_SOURCE | MEDIA_PAD_FL_MUST_CONNECT,
 		.link_pad = FE_CONFIG_PAD

@@ -109,7 +109,7 @@ const struct v4l2_mbus_framefmt cfe_default_format = {
 const struct v4l2_mbus_framefmt cfe_default_meta_format = {
 	.width = DEFAULT_EMBEDDED_SIZE,
 	.height = 1,
-	.code = MEDIA_BUS_FMT_SENSOR_DATA,
+	.code = MEDIA_BUS_FMT_META_10,
 	.field = V4L2_FIELD_NONE,
 };
 
@@ -1395,32 +1395,56 @@ static int cfe_enum_fmt_meta(struct file *file, void *priv,
 
 	cfe_dbg("%s: [%s]\n", __func__, node_desc[node->id].name);
 
-	if (!node_supports_meta(node) || f->index != 0)
+	if (!node_supports_meta(node))
 		return -EINVAL;
 
 	switch (node->id) {
 	case CSI2_CH0...CSI2_CH3:
-		f->pixelformat = V4L2_META_FMT_SENSOR_DATA;
-		return 0;
+		switch (f->index) {
+		case 0:
+			f->pixelformat = V4L2_META_FMT_GENERIC_8;
+			return 0;
+		case 1:
+			f->pixelformat = V4L2_META_FMT_GENERIC_CSI2_10;
+			return 0;
+		case 2:
+			f->pixelformat = V4L2_META_FMT_GENERIC_CSI2_12;
+			return 0;
+		default:
+			return -EINVAL;
+		}
+	default:
+		break;
+	}
+
+	if (f->index != 0)
+		return -EINVAL;
+
+	switch (node->id) {
 	case FE_STATS:
 		f->pixelformat = V4L2_META_FMT_RPI_FE_STATS;
 		return 0;
 	case FE_CONFIG:
 		f->pixelformat = V4L2_META_FMT_RPI_FE_CFG;
 		return 0;
+	default:
+		return -EINVAL;
 	}
-
-	return -EINVAL;
 }
 
 static int try_fmt_meta(struct cfe_node *node, struct v4l2_format *f)
 {
+	const struct cfe_fmt *fmt;
+
 	if (!node_supports_meta(node))
 		return -EINVAL;
 
 	switch (node->id) {
 	case CSI2_CH0...CSI2_CH3:
-		f->fmt.meta.dataformat = V4L2_META_FMT_SENSOR_DATA;
+		fmt = find_format_by_pix(f->fmt.meta.dataformat);
+		if (!fmt || !(fmt->flags & CFE_FORMAT_FLAG_META_CAP))
+			f->fmt.meta.dataformat = V4L2_META_FMT_GENERIC_CSI2_10;
+
 		if (!f->fmt.meta.buffersize)
 			f->fmt.meta.buffersize = DEFAULT_EMBEDDED_SIZE;
 		f->fmt.meta.buffersize =
@@ -1730,12 +1754,6 @@ static int cfe_video_link_validate(struct media_link *link)
 		}
 
 		source_size = DIV_ROUND_UP(source_fmt->width * source_fmt->height * fmt->depth, 8);
-
-		if (source_fmt->code != MEDIA_BUS_FMT_SENSOR_DATA) {
-			cfe_err("Bad metadata mbus format\n");
-			ret = -EINVAL;
-			goto out;
-		}
 
 		if (source_size > meta_fmt->buffersize) {
 			cfe_err("Metadata buffer too small: %u < %u\n",

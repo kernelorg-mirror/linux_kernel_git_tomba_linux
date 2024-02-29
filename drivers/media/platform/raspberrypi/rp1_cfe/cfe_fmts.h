@@ -291,11 +291,26 @@ static const struct cfe_fmt formats[] = {
 		.depth = 8,
 		.flags = CFE_FORMAT_FLAG_FE_OUT,
 	},
-	/* Embedded data format */
+
+	/* Embedded data formats */
 	{
-		.fourcc = V4L2_META_FMT_SENSOR_DATA,
-		.code = MEDIA_BUS_FMT_SENSOR_DATA,
+		.fourcc = V4L2_META_FMT_GENERIC_8,
+		.code = MEDIA_BUS_FMT_META_8,
 		.depth = 8,
+		.csi_dt = MIPI_CSI2_DT_EMBEDDED_8B,
+		.flags = CFE_FORMAT_FLAG_META_CAP,
+	},
+	{
+		.fourcc = V4L2_META_FMT_GENERIC_CSI2_10,
+		.code = MEDIA_BUS_FMT_META_10,
+		.depth = 10,
+		.csi_dt = MIPI_CSI2_DT_EMBEDDED_8B,
+		.flags = CFE_FORMAT_FLAG_META_CAP,
+	},
+	{
+		.fourcc = V4L2_META_FMT_GENERIC_CSI2_12,
+		.code = MEDIA_BUS_FMT_META_12,
+		.depth = 12,
 		.csi_dt = MIPI_CSI2_DT_EMBEDDED_8B,
 		.flags = CFE_FORMAT_FLAG_META_CAP,
 	},

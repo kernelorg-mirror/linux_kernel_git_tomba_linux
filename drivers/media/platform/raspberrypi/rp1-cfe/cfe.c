@@ -43,8 +43,8 @@
 #include "cfe-fmts.h"
 #include "csi2.h"
 #include "pisp-fe.h"
-#include "pisp_fe_config.h"
-#include "pisp_statistics.h"
+#include <linux/media/raspberrypi/pisp_fe_config.h>
+#include <linux/media/raspberrypi/pisp_fe_statistics.h>
 
 #define CFE_MODULE_NAME	"rp1-cfe"
 #define CFE_VERSION	"1.0"

@@ -16,7 +16,7 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-subdev.h>
 
-#include "pisp_fe_config.h"
+#include <linux/media/raspberrypi/pisp_fe_config.h>
 
 enum pisp_fe_pads {
 	FE_STREAM_PAD,

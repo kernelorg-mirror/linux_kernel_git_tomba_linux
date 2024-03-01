@@ -13,7 +13,7 @@
 
 #include <media/videobuf2-dma-contig.h>
 
-#include "pisp_fe.h"
+#include "pisp-fe.h"
 #include "cfe.h"
 
 #define FE_VERSION		0x000

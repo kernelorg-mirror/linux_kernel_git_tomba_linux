@@ -40,9 +40,9 @@
 #include <media/videobuf2-dma-contig.h>
 
 #include "cfe.h"
-#include "cfe_fmts.h"
+#include "cfe-fmts.h"
 #include "csi2.h"
-#include "pisp_fe.h"
+#include "pisp-fe.h"
 #include "pisp_fe_config.h"
 #include "pisp_statistics.h"
 

@@ -141,25 +141,25 @@ static const struct node_description node_desc[NUM_NODES] = {
 		.name = "csi2-ch0",
 		.caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_META_CAPTURE,
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
-		.link_pad = CSI2_NUM_CHANNELS + 0
+		.link_pad = CSI2_PAD_FIRST_SOURCE + 0
 	},
 	[CSI2_CH1] = {
 		.name = "csi2-ch1",
 		.caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_META_CAPTURE,
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
-		.link_pad = CSI2_NUM_CHANNELS + 1
+		.link_pad = CSI2_PAD_FIRST_SOURCE + 1
 	},
 	[CSI2_CH2] = {
 		.name = "csi2-ch2",
 		.caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_META_CAPTURE,
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
-		.link_pad = CSI2_NUM_CHANNELS + 2
+		.link_pad = CSI2_PAD_FIRST_SOURCE + 2
 	},
 	[CSI2_CH3] = {
 		.name = "csi2-ch3",
 		.caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_META_CAPTURE,
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
-		.link_pad = CSI2_NUM_CHANNELS + 3
+		.link_pad = CSI2_PAD_FIRST_SOURCE + 3
 	},
 	[FE_OUT0] = {
 		.name = "fe-image0",
@@ -839,7 +839,7 @@ static void cfe_start_channel(struct cfe_node *node)
 			cfe->fe_csi2_channel);
 
 		source_fmt = v4l2_subdev_state_get_format(state,
-							cfe->fe_csi2_channel);
+							node_desc[cfe->fe_csi2_channel].link_pad);
 		fmt = find_format_by_code(source_fmt->code);
 
 		width = source_fmt->width;
@@ -868,7 +868,7 @@ static void cfe_start_channel(struct cfe_node *node)
 		u32 mode = CSI2_MODE_NORMAL;
 
 		source_fmt = v4l2_subdev_state_get_format(state,
-			node_desc[node->id].link_pad - CSI2_NUM_CHANNELS);
+			node_desc[node->id].link_pad);
 		fmt = find_format_by_code(source_fmt->code);
 
 		/* Must have a valid CSI2 datatype. */
@@ -1994,33 +1994,23 @@ static void cfe_unregister_nodes(struct cfe_device *cfe)
 
 static int cfe_link_node_pads(struct cfe_device *cfe)
 {
-	unsigned int i, source_pad = 0;
+	unsigned int i;
 	int ret;
+
+	/* Source -> CSI2 */
+
+	ret = media_create_pad_link(&cfe->sensor->entity, 0,
+				    &cfe->csi2.sd.entity, 0,
+				    MEDIA_LNK_FL_IMMUTABLE |
+				    MEDIA_LNK_FL_ENABLED);
+	if (ret)
+		return ret;
 
 	for (i = 0; i < CSI2_NUM_CHANNELS; i++) {
 		struct cfe_node *node = &cfe->node[i];
 
 		if (!check_state(cfe, NODE_REGISTERED, i))
 			continue;
-
-		/* Find next source pad */
-		while (source_pad < cfe->sensor->entity.num_pads &&
-		       !(cfe->sensor->entity.pads[source_pad].flags &
-							MEDIA_PAD_FL_SOURCE))
-			source_pad++;
-
-		if (source_pad < cfe->sensor->entity.num_pads) {
-			/* Sensor -> CSI2 */
-			ret = media_create_pad_link(&cfe->sensor->entity, source_pad,
-						    &cfe->csi2.sd.entity, i,
-						    MEDIA_LNK_FL_IMMUTABLE |
-						    MEDIA_LNK_FL_ENABLED);
-			if (ret)
-				return ret;
-
-			/* Dealt with that source_pad, look at the next one next time */
-			source_pad++;
-		}
 
 		/* CSI2 channel # -> /dev/video# */
 		ret = media_create_pad_link(&cfe->csi2.sd.entity,

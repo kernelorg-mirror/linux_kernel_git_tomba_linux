@@ -19,6 +19,11 @@
 
 #define CSI2_NUM_CHANNELS 4
 
+#define CSI2_PAD_SINK 0
+#define CSI2_PAD_FIRST_SOURCE 1
+#define CSI2_PAD_NUM_SOURCES 4
+#define CSI2_NUM_PADS 5
+
 #define DISCARDS_TABLE_NUM_VCS 4
 
 enum csi2_mode {
@@ -62,7 +67,7 @@ struct csi2_device {
 	bool multipacket_line;
 	unsigned int num_lines[CSI2_NUM_CHANNELS];
 
-	struct media_pad pad[CSI2_NUM_CHANNELS * 2];
+	struct media_pad pad[CSI2_NUM_PADS];
 	struct v4l2_subdev sd;
 
 	/* lock for csi2 errors counters */

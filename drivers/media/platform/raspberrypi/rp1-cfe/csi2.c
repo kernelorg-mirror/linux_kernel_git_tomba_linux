@@ -323,8 +323,7 @@ void csi2_set_compression(struct csi2_device *csi2, unsigned int channel,
 	csi2_reg_write(csi2, CSI2_CH_COMP_CTRL(channel), compression);
 }
 
-static int csi2_get_vc_dt_fallback(struct csi2_device *csi2,
-				   unsigned int channel, u8 *vc, u8 *dt)
+static int csi2_get_vc_dt_fallback(struct csi2_device *csi2, u8 *vc, u8 *dt)
 {
 	struct v4l2_subdev *sd = &csi2->sd;
 	struct v4l2_subdev_state *state;
@@ -333,8 +332,7 @@ static int csi2_get_vc_dt_fallback(struct csi2_device *csi2,
 
 	state = v4l2_subdev_get_locked_active_state(sd);
 
-	/* Without Streams API, the channel number matches the sink pad */
-	fmt = v4l2_subdev_state_get_format(state, channel);
+	fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_SINK, 0);
 	if (!fmt)
 		return -EINVAL;
 
@@ -352,12 +350,22 @@ static int csi2_get_vc_dt(struct csi2_device *csi2, unsigned int channel,
 			  u8 *vc, u8 *dt)
 {
 	struct v4l2_mbus_frame_desc remote_desc;
+	struct v4l2_subdev *sd = &csi2->sd;
 	const struct media_pad *remote_pad;
 	struct v4l2_subdev *source_sd;
+	struct v4l2_subdev_state *state;
+	u32 sink_stream;
+	unsigned int i;
 	int ret;
 
-	/* Without Streams API, the channel number matches the sink pad */
-	remote_pad = media_pad_remote_pad_first(&csi2->pad[channel]);
+	state = v4l2_subdev_get_locked_active_state(sd);
+
+	ret = v4l2_subdev_routing_find_opposite_end(&state->routing,
+		CSI2_PAD_FIRST_SOURCE + channel, 0, NULL, &sink_stream);
+	if (ret)
+		return ret;
+
+	remote_pad = media_pad_remote_pad_first(&csi2->pad[CSI2_PAD_SINK]);
 	if (!remote_pad)
 		return -EPIPE;
 
@@ -367,7 +375,7 @@ static int csi2_get_vc_dt(struct csi2_device *csi2, unsigned int channel,
 			       remote_pad->index, &remote_desc);
 	if (ret == -ENOIOCTLCMD) {
 		csi2_dbg("source does not support get_frame_desc, use fallback\n");
-		return csi2_get_vc_dt_fallback(csi2, channel, vc, dt);
+		return csi2_get_vc_dt_fallback(csi2, vc, dt);
 	} else if (ret) {
 		csi2_err("Failed to get frame descriptor\n");
 		return ret;
@@ -378,13 +386,19 @@ static int csi2_get_vc_dt(struct csi2_device *csi2, unsigned int channel,
 		return -EINVAL;
 	}
 
-	if (remote_desc.num_entries != 1) {
-		csi2_err("Frame descriptor does not have a single entry");
+	for (i = 0; i < remote_desc.num_entries; i++) {
+		if (remote_desc.entry[i].stream == sink_stream)
+			break;
+	}
+
+	if (i == remote_desc.num_entries) {
+		csi2_err("Stream %u not found in remote frame desc\n",
+			 sink_stream);
 		return -EINVAL;
 	}
 
-	*vc = remote_desc.entry[0].bus.csi2.vc;
-	*dt = remote_desc.entry[0].bus.csi2.dt;
+	*vc = remote_desc.entry[i].bus.csi2.vc;
+	*dt = remote_desc.entry[i].bus.csi2.dt;
 
 	return 0;
 }
@@ -466,22 +480,30 @@ static int csi2_init_state(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_state *state)
 {
 	struct v4l2_mbus_framefmt *fmt;
+	int ret;
 
-	for (unsigned int i = 0; i < CSI2_NUM_CHANNELS; ++i) {
-		const struct v4l2_mbus_framefmt *def_fmt;
+	struct v4l2_subdev_route routes[] = { {
+		.sink_pad = CSI2_PAD_SINK,
+		.sink_stream = 0,
+		.source_pad = CSI2_PAD_FIRST_SOURCE,
+		.source_stream = 0,
+		.flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE,
+	} };
 
-		/* CSI2_CH1_EMBEDDED */
-		if (i == 1)
-			def_fmt = &cfe_default_meta_format;
-		else
-			def_fmt = &cfe_default_format;
+	struct v4l2_subdev_krouting routing = {
+		.num_routes = ARRAY_SIZE(routes),
+		.routes = routes,
+	};
 
-		fmt = v4l2_subdev_state_get_format(state, i);
-		*fmt = *def_fmt;
+	ret = v4l2_subdev_set_routing(sd, state, &routing);
+	if (ret)
+		return ret;
 
-		fmt = v4l2_subdev_state_get_format(state, i + CSI2_NUM_CHANNELS);
-		*fmt = *def_fmt;
-	}
+	fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_SINK, 0);
+	*fmt = cfe_default_format;
+
+	fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_FIRST_SOURCE, 0);
+	*fmt = cfe_default_format;
 
 	return 0;
 }
@@ -490,21 +512,22 @@ static int csi2_pad_set_fmt(struct v4l2_subdev *sd,
 			    struct v4l2_subdev_state *state,
 			    struct v4l2_subdev_format *format)
 {
-	if (format->pad < CSI2_NUM_CHANNELS) {
+	if (format->pad == CSI2_PAD_SINK) {
 		/*
 		 * Store the sink pad format and propagate it to the source pad.
 		 */
 
 		struct v4l2_mbus_framefmt *fmt;
 
-		fmt = v4l2_subdev_state_get_format(state, format->pad);
+		fmt = v4l2_subdev_state_get_format(state, format->pad,
+						   format->stream);
 		if (!fmt)
 			return -EINVAL;
 
 		*fmt = format->format;
 
-		fmt = v4l2_subdev_state_get_format(state,
-			format->pad + CSI2_NUM_CHANNELS);
+		fmt = v4l2_subdev_state_get_opposite_stream_format(state, format->pad,
+								   format->stream);
 		if (!fmt)
 			return -EINVAL;
 
@@ -520,12 +543,13 @@ static int csi2_pad_set_fmt(struct v4l2_subdev *sd,
 		u32 sink_code;
 		u32 code;
 
-		sink_fmt = v4l2_subdev_state_get_format(state,
-			format->pad - CSI2_NUM_CHANNELS);
+		sink_fmt = v4l2_subdev_state_get_opposite_stream_format(state, format->pad,
+									format->stream);
 		if (!sink_fmt)
 			return -EINVAL;
 
-		source_fmt = v4l2_subdev_state_get_format(state, format->pad);
+		source_fmt = v4l2_subdev_state_get_format(state, format->pad,
+							  format->stream);
 		if (!source_fmt)
 			return -EINVAL;
 
@@ -549,14 +573,84 @@ static int csi2_pad_set_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int csi2_validate_routing(struct v4l2_subdev_krouting *routing)
+{
+	struct v4l2_subdev_route *route;
+
+	if (routing->num_routes != 1 && routing->num_routes != 2)
+		return -EINVAL;
+
+	route = &routing->routes[0];
+
+	if (route->sink_stream != 0 ||
+	    route->source_pad != CSI2_PAD_FIRST_SOURCE ||
+	    route->source_stream != 0 ||
+	    route->flags != V4L2_SUBDEV_ROUTE_FL_ACTIVE)
+		return -EINVAL;
+
+	if (routing->num_routes == 1)
+		return 0;
+
+	route = &routing->routes[1];
+
+	if (route->sink_stream != 1 ||
+	    route->source_pad != CSI2_PAD_FIRST_SOURCE + 1 ||
+	    route->source_stream != 0 ||
+	    route->flags != V4L2_SUBDEV_ROUTE_FL_ACTIVE)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int csi2_set_routing(struct v4l2_subdev *sd,
+			    struct v4l2_subdev_state *state,
+			    enum v4l2_subdev_format_whence which,
+			    struct v4l2_subdev_krouting *routing)
+{
+	struct v4l2_mbus_framefmt *fmt;
+	int ret;
+
+	ret = v4l2_subdev_routing_validate(sd, routing,
+					   V4L2_SUBDEV_ROUTING_ONLY_1_TO_1 |
+					   V4L2_SUBDEV_ROUTING_NO_SOURCE_MULTIPLEXING);
+	if (ret)
+		return ret;
+
+	ret = csi2_validate_routing(routing);
+	if (ret)
+		return ret;
+
+	ret = v4l2_subdev_set_routing(sd, state, routing);
+	if (ret)
+		return ret;
+
+	fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_SINK, 0);
+	*fmt = cfe_default_format;
+
+	fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_FIRST_SOURCE, 0);
+	*fmt = cfe_default_format;
+
+	if (routing->num_routes == 2) {
+		fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_SINK, 1);
+		*fmt = cfe_default_meta_format;
+
+		fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_FIRST_SOURCE + 1, 0);
+		*fmt = cfe_default_meta_format;
+	}
+
+	return 0;
+}
+
 static const struct v4l2_subdev_pad_ops csi2_subdev_pad_ops = {
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = csi2_pad_set_fmt,
+	.set_routing = csi2_set_routing,
 	.link_validate = v4l2_subdev_link_validate_default,
 };
 
 static const struct media_entity_operations csi2_entity_ops = {
 	.link_validate = v4l2_subdev_link_validate,
+	.has_pad_interdep = v4l2_subdev_has_pad_interdep,
 };
 
 static const struct v4l2_subdev_ops csi2_subdev_ops = {
@@ -582,9 +676,10 @@ int csi2_init(struct csi2_device *csi2, struct dentry *debugfs)
 		debugfs_create_file("csi2_errors", 0444, debugfs, csi2,
 				    &csi2_errors_fops);
 
-	for (i = 0; i < CSI2_NUM_CHANNELS * 2; i++)
-		csi2->pad[i].flags = i < CSI2_NUM_CHANNELS ?
-				     MEDIA_PAD_FL_SINK : MEDIA_PAD_FL_SOURCE;
+	csi2->pad[CSI2_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
+
+	for (i = CSI2_PAD_FIRST_SOURCE; i < CSI2_PAD_FIRST_SOURCE + CSI2_PAD_NUM_SOURCES; i++)
+		csi2->pad[i].flags = MEDIA_PAD_FL_SOURCE;
 
 	ret = media_entity_pads_init(&csi2->sd.entity, ARRAY_SIZE(csi2->pad),
 				     csi2->pad);
@@ -596,7 +691,7 @@ int csi2_init(struct csi2_device *csi2, struct dentry *debugfs)
 	csi2->sd.internal_ops = &csi2_internal_ops;
 	csi2->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
 	csi2->sd.entity.ops = &csi2_entity_ops;
-	csi2->sd.flags = V4L2_SUBDEV_FL_HAS_DEVNODE;
+	csi2->sd.flags = V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_STREAMS;
 	csi2->sd.owner = THIS_MODULE;
 	snprintf(csi2->sd.name, sizeof(csi2->sd.name), "csi2");
 

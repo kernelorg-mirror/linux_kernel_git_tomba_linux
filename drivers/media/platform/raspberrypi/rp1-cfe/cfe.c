@@ -150,7 +150,7 @@ static const struct node_description node_desc[NUM_NODES] = {
 	 * only meta capture.
 	 */
 	[CSI2_CH1] = {
-		.name = "embedded",
+		.name = "csi2-ch1",
 		.caps = V4L2_CAP_META_CAPTURE,
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
 		.link_pad = CSI2_NUM_CHANNELS + 1

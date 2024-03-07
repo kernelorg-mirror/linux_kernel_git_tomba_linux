@@ -23,7 +23,7 @@ description: |
 
 properties:
   compatible:
-    const: raspberrypi,rp1-cfe
+    const: raspberrypi,rpi5-rp1-cfe
 
   reg:
     items:

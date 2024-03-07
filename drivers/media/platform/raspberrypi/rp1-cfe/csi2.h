@@ -99,12 +99,9 @@ void csi2_set_buffer(struct csi2_device *csi2, unsigned int channel,
 int csi2_init(struct csi2_device *csi2, struct dentry *debugfs);
 void csi2_uninit(struct csi2_device *csi2);
 
-int csi2_setup_streaming(struct csi2_device *csi2,
-			 struct v4l2_subdev_state *state, u32 channel_mask);
-int csi2_start_streaming(struct csi2_device *csi2,
-			 struct v4l2_subdev_state *state, u32 channel_mask);
-void csi2_stop_streaming(struct csi2_device *csi2,
-			 struct v4l2_subdev_state *state, u32 channel_mask);
+int csi2_configure_channels(struct csi2_device *csi2, u32 channel_mask);
+int csi2_start_channels(struct csi2_device *csi2, u32 channel_mask);
+void csi2_stop_channels(struct csi2_device *csi2, u32 channel_mask);
 
 int csi2_get_vc_dt(struct csi2_device *csi2, unsigned int channel, u8 *vc,
 		   u8 *dt, u32 *stream);

@@ -789,6 +789,7 @@ static void cfe_return_buffers(struct cfe_node *node,
 	cfe_dbg("%s: [%s]\n", __func__, node_desc[node->id].name);
 
 	spin_lock_irqsave(&cfe->state_lock, flags);
+
 	list_for_each_entry_safe(buf, tmp, &node->dma_queue, list) {
 		list_del(&buf->list);
 		trace_cfe_return_buffer(node->id, buf->vb.vb2_buf.index, 2);
@@ -807,6 +808,7 @@ static void cfe_return_buffers(struct cfe_node *node,
 
 	node->cur_frm = NULL;
 	node->next_frm = NULL;
+
 	spin_unlock_irqrestore(&cfe->state_lock, flags);
 }
 
@@ -935,7 +937,6 @@ static void cfe_uninit_hw(struct cfe_device *cfe)
 
 static int cfe_start_group(struct cfe_device *cfe, unsigned int group)
 {
-	struct v4l2_subdev_state *state;
 	unsigned long flags;
 	int ret;
 	u32 channel_mask = 0;
@@ -949,8 +950,6 @@ static int cfe_start_group(struct cfe_device *cfe, unsigned int group)
 	}
 
 	cfe->group_enable_count++;
-
-	state = v4l2_subdev_get_locked_active_state(&cfe->csi2.sd);
 
 	if (is_fe_enabled(cfe, group))
 		pisp_fe_start(&cfe->fe);
@@ -968,8 +967,7 @@ static int cfe_start_group(struct cfe_device *cfe, unsigned int group)
 	if (is_fe_enabled(cfe, group))
 		channel_mask |= BIT(cfe->fe_csi2_channel);
 
-	/* Note: need to setup CSI2 channels before preparing the job */
-	csi2_setup_streaming(&cfe->csi2, state, channel_mask);
+	csi2_configure_channels(&cfe->csi2, channel_mask);
 
 	spin_lock_irqsave(&cfe->state_lock, flags);
 
@@ -977,7 +975,7 @@ static int cfe_start_group(struct cfe_device *cfe, unsigned int group)
 
 	spin_unlock_irqrestore(&cfe->state_lock, flags);
 
-	ret = csi2_start_streaming(&cfe->csi2, state, channel_mask);
+	ret = csi2_start_channels(&cfe->csi2, channel_mask);
 	if (ret)
 		goto err_unschedule_job;
 
@@ -999,12 +997,9 @@ err_unschedule_job:
 
 static void cfe_stop_group(struct cfe_device *cfe, unsigned int group)
 {
-	struct v4l2_subdev_state *state;
 	u32 channel_mask = 0;
 
 	cfe_dbg("Stopping group %u\n", group);
-
-	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
 
 	for (unsigned int i = 0; i < CSI2_NUM_CHANNELS; ++i) {
 		if (!check_state(cfe, NODE_STREAMING, i))
@@ -1019,14 +1014,12 @@ static void cfe_stop_group(struct cfe_device *cfe, unsigned int group)
 	if (is_fe_enabled(cfe, group))
 		channel_mask |= BIT(cfe->fe_csi2_channel);
 
-	csi2_stop_streaming(&cfe->csi2, state, channel_mask);
+	csi2_stop_channels(&cfe->csi2, channel_mask);
 
 	if (is_fe_enabled(cfe, group)) {
 		pisp_fe_stop(&cfe->fe);
 		cfe->fe_csi2_channel = -1;
 	}
-
-	v4l2_subdev_unlock_state(state);
 
 	if (--cfe->group_enable_count == 0)
 		cfe_uninit_hw(cfe);
@@ -1208,10 +1201,13 @@ static void cfe_stop_streaming(struct vb2_queue *vq)
 	struct cfe_node *node = vb2_get_drv_priv(vq);
 	struct cfe_device *cfe = node->cfe;
 	unsigned int group = node->group;
+	struct v4l2_subdev_state *state;
 	unsigned long flags;
 	bool group_stop;
 
 	cfe_dbg("%s: [%s] begin.\n", __func__, node_desc[node->id].name);
+
+	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
 
 	spin_lock_irqsave(&cfe->state_lock, flags);
 
@@ -1229,6 +1225,8 @@ static void cfe_stop_streaming(struct vb2_queue *vq)
 
 	clear_state(cfe, NODE_STREAMING, node->id);
 	spin_unlock_irqrestore(&cfe->state_lock, flags);
+
+	v4l2_subdev_unlock_state(state);
 
 	media_pipeline_stop(&node->pad);
 

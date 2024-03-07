@@ -469,14 +469,13 @@ static int csi2_start_dphy(struct csi2_device *csi2)
 
 	csi2->dphy.dphy_rate = freq / 1000000 * 2;
 
-
 	csi2_reg_write(csi2, CSI2_IRQ_MASK,
 		       csi2_track_errors ? CSI2_IRQ_MASK_IRQ_ALL : 0);
 
-	dphy_start(&csi2->dphy);
-
 	csi2_reg_write(csi2, CSI2_CTRL,
 		       csi2->multipacket_line ? 0 : CSI2_CTRL_EOP_IS_EOL);
+
+	dphy_start(&csi2->dphy);
 
 	return 0;
 }
@@ -493,10 +492,9 @@ static void csi2_stop_dphy(struct csi2_device *csi2)
 	csi2_reg_write(csi2, CSI2_IRQ_MASK, 0);
 }
 
-int csi2_setup_streaming(struct csi2_device *csi2,
-			 struct v4l2_subdev_state *state, u32 channel_mask)
+int csi2_configure_channels(struct csi2_device *csi2, u32 channel_mask)
 {
-	csi2_dbg("csi2 setup mask %#x\n", channel_mask);
+	csi2_dbg("csi2 configure channels %#x\n", channel_mask);
 
 	for (unsigned int ch = 0; ch < CSI2_NUM_CHANNELS; ++ch) {
 		if (!(channel_mask & BIT(ch)))
@@ -525,14 +523,13 @@ int csi2_setup_streaming(struct csi2_device *csi2,
 	return 0;
 }
 
-int csi2_start_streaming(struct csi2_device *csi2,
-			 struct v4l2_subdev_state *state, u32 channel_mask)
+int csi2_start_channels(struct csi2_device *csi2, u32 channel_mask)
 {
 	const struct media_pad *remote_pad;
 	u64 source_stream_mask = 0;
 	int ret;
 
-	csi2_dbg("csi2 start mask %#x\n",  channel_mask);
+	csi2_dbg("csi2 start channels %#x\n", channel_mask);
 
 	ret = csi2_start_dphy(csi2);
 	if (ret)
@@ -562,14 +559,13 @@ err_stop_dphy:
 	return ret;
 }
 
-void csi2_stop_streaming(struct csi2_device *csi2,
-			 struct v4l2_subdev_state *state, u32 channel_mask)
+void csi2_stop_channels(struct csi2_device *csi2, u32 channel_mask)
 {
 	const struct media_pad *remote_pad;
 	u64 source_stream_mask = 0;
 	int ret;
 
-	csi2_dbg("csi2 stop mask %#x\n",  channel_mask);
+	csi2_dbg("csi2 stop channels %#x\n", channel_mask);
 
 	remote_pad = media_pad_remote_pad_first(&csi2->pad[CSI2_PAD_SINK]);
 

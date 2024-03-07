@@ -493,8 +493,26 @@ static const struct v4l2_subdev_pad_ops pisp_fe_subdev_pad_ops = {
 	.link_validate = v4l2_subdev_link_validate_default,
 };
 
+static int pisp_fe_link_validate(struct media_link *link)
+{
+	struct v4l2_subdev *sd = media_entity_to_v4l2_subdev(link->sink->entity);
+	struct pisp_fe_device *fe = container_of(sd, struct pisp_fe_device, sd);
+
+	pisp_fe_dbg("%s: link \"%s\":%u -> \"%s\":%u\n", __func__,
+		    link->source->entity->name, link->source->index,
+		    link->sink->entity->name, link->sink->index);
+
+	if (link->sink->index == FE_STREAM_PAD)
+		return v4l2_subdev_link_validate(link);
+
+	if (link->sink->index == FE_CONFIG_PAD)
+		return 0;
+
+	return -EINVAL;
+}
+
 static const struct media_entity_operations pisp_fe_entity_ops = {
-	.link_validate = v4l2_subdev_link_validate,
+	.link_validate = pisp_fe_link_validate,
 };
 
 static const struct v4l2_subdev_ops pisp_fe_subdev_ops = {

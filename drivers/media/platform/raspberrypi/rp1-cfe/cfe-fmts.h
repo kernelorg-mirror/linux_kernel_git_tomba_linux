@@ -291,7 +291,7 @@ static const struct cfe_fmt formats[] = {
 		.flags = CFE_FORMAT_FLAG_FE_OUT,
 	},
 
-	/* Embedded data format */
+	/* Embedded data formats */
 	{
 		.fourcc = V4L2_META_FMT_GENERIC_8,
 		.code = MEDIA_BUS_FMT_META_8,

@@ -1160,17 +1160,14 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 		goto err_streaming;
 	}
 
+	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
+
 	first_enable = !test_any_node(cfe, NODE_ENABLED, NODE_STREAMING);
 
 	if (first_enable) {
-		state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
-
 		ret = cfe_csi2_gather_config(cfe);
-
-		v4l2_subdev_unlock_state(state);
-
 		if (ret)
-			return ret;
+			goto err_unlock_state;
 	}
 
 	clear_state(cfe, FS_INT | FE_INT, node->id);
@@ -1180,14 +1177,13 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	if (!test_all_group_nodes(cfe, node->group, NODE_ENABLED, NODE_STREAMING)) {
 		cfe_dbg("Not all enabled nodes are set to streaming yet\n");
+		v4l2_subdev_unlock_state(state);
 		return 0;
 	}
 
-	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
-
 	ret = cfe_start_group(cfe, node->group);
 	if (ret)
-		goto err_stop_pipe;
+		goto err_unset_streaming;
 
 	v4l2_subdev_unlock_state(state);
 
@@ -1195,7 +1191,10 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	return 0;
 
-err_stop_pipe:
+err_unset_streaming:
+	clear_state(cfe, NODE_STREAMING, node->id);
+err_unlock_state:
+	v4l2_subdev_unlock_state(state);
 	media_pipeline_stop(&node->pad);
 err_streaming:
 	cfe_return_buffers(node, VB2_BUF_STATE_QUEUED);

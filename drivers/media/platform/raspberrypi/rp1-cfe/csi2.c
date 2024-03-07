@@ -503,8 +503,7 @@ int csi2_configure_channels(struct csi2_device *csi2, u32 channel_mask)
 		csi2_start_channel(csi2, ch);
 
 		if (csi2->channel_configs[ch].mode == CSI2_MODE_COMPRESSED)
-			csi2_set_compression(
-				csi2, ch,
+			csi2_set_compression(csi2, ch,
 				csi2->channel_configs[ch].compression.mode,
 				csi2->channel_configs[ch].compression.shift,
 				csi2->channel_configs[ch].compression.offset);

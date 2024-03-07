@@ -883,7 +883,7 @@ static int cfe_csi2_gather_config(struct cfe_device *cfe)
 								   0);
 		if (!fmt) {
 			cfe_err("Failed to get opposite stream format for %u/%u\n",
-				 ch, 0);
+				ch, 0);
 			return -EINVAL;
 		}
 

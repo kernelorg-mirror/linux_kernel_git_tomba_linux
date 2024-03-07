@@ -101,6 +101,12 @@ const struct v4l2_mbus_framefmt cfe_default_meta_format = {
 	.field = V4L2_FIELD_NONE,
 };
 
+/*
+ * We use the CSI-2 virtual channel as capture groups, so the max number of
+ * groups is CSI2_NUM_CHANNELS.
+ */
+#define CFE_NUM_GROUPS CSI2_NUM_CHANNELS
+
 enum node_ids {
 	/* CSI2 HW output nodes first. */
 	CSI2_CH0,
@@ -276,8 +282,12 @@ struct cfe_device {
 
 	/* IRQ lock for node state and DMA queues */
 	spinlock_t state_lock;
-	bool job_ready[CSI2_NUM_CHANNELS];
-	bool job_queued[CSI2_NUM_CHANNELS];
+
+	/* Capture group state */
+	struct {
+		bool job_ready;
+		bool job_queued;
+	} groups[CFE_NUM_GROUPS];
 
 	/* fwnode handle for the source's endpoint */
 	struct fwnode_handle *remote_ep_fwnode;
@@ -567,13 +577,13 @@ static void cfe_prepare_next_job(struct cfe_device *cfe, unsigned int group)
 {
 	trace_cfe_prepare_next_job(group);
 
-	cfe->job_queued[group] = true;
+	cfe->groups[group].job_queued = true;
 	cfe_schedule_next_csi2_job(cfe, group);
 	if (is_fe_enabled(cfe, group))
 		cfe_schedule_next_pisp_job(cfe);
 
 	/* Flag if another job is ready after this. */
-	cfe->job_ready[group] = cfe_check_job_ready(cfe, group);
+	cfe->groups[group].job_ready = cfe_check_job_ready(cfe, group);
 }
 
 /* Mark buffer as complete */
@@ -644,7 +654,7 @@ static void cfe_sof_isr_handler(struct cfe_node *node)
 	}
 
 	if (matching_fs)
-		cfe->job_queued[node->group] = false;
+		cfe->groups[node->group].job_queued = false;
 
 	if (node->cur_frm)
 		node->cur_frm->vb.vb2_buf.timestamp = node->timestamp;
@@ -752,7 +762,7 @@ static irqreturn_t cfe_isr(int irq, void *dev)
 			cfe_sof_isr_handler(node);
 		}
 
-		if (!cfe->job_queued[group] && cfe->job_ready[group])
+		if (!cfe->groups[group].job_queued && cfe->groups[group].job_ready)
 			cfe_prepare_next_job(cfe, node->group);
 	}
 
@@ -1092,11 +1102,12 @@ static void cfe_buffer_queue(struct vb2_buffer *vb)
 
 	list_add_tail(&buf->list, &node->dma_queue);
 
-	if (!cfe->job_ready[group])
-		cfe->job_ready[group] = cfe_check_job_ready(cfe, group);
+	if (!cfe->groups[group].job_ready)
+		cfe->groups[group].job_ready = cfe_check_job_ready(cfe, group);
 
-	schedule_now = !cfe->job_queued[group] && cfe->job_ready[group] &&
-		       test_all_group_nodes(cfe, group, NODE_ENABLED, NODE_STREAMING);
+	schedule_now = !cfe->groups[group].job_queued &&
+		cfe->groups[group].job_ready &&
+		test_all_group_nodes(cfe, group, NODE_ENABLED, NODE_STREAMING);
 
 	trace_cfe_buffer_queue(node->id, vb, schedule_now);
 
@@ -1207,7 +1218,7 @@ static void cfe_stop_streaming(struct vb2_queue *vq)
 	spin_lock_irqsave(&cfe->state_lock, flags);
 
 	if (group_stop)
-		cfe->job_ready[group] = false;
+		cfe->groups[group].job_ready = false;
 
 	clear_state(cfe, NODE_STREAMING, node->id);
 	spin_unlock_irqrestore(&cfe->state_lock, flags);

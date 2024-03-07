@@ -2,8 +2,7 @@
 /*
  * RP1 Camera Front End formats definition
  *
- * Copyright (C) 2021 - Raspberry Pi Ltd.
- *
+ * Copyright (C) 2021-2024 - Raspberry Pi Ltd.
  */
 #ifndef _CFE_FMTS_H_
 #define _CFE_FMTS_H_

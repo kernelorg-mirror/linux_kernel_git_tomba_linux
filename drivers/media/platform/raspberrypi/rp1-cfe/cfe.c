@@ -2,8 +2,8 @@
 /*
  * RP1 Camera Front End Driver
  *
- * Copyright (C) 2021-2022 - Raspberry Pi Ltd.
- *
+ * Copyright (c) 2021-2024 Raspberry Pi Ltd.
+ * Copyright (c) 2023-2024 Ideas on Board Oy
  */
 
 #include <linux/atomic.h>

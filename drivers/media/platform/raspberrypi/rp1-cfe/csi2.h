@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * RP1 CSI-2 driver.
- * Copyright (c) 2021 Raspberry Pi Ltd.
+ * RP1 CSI-2 Driver
  *
+ * Copyright (c) 2021-2024 Raspberry Pi Ltd.
+ * Copyright (c) 2023-2024 Ideas on Board Oy
  */
+
 #ifndef _RP1_CSI2_
 #define _RP1_CSI2_
 

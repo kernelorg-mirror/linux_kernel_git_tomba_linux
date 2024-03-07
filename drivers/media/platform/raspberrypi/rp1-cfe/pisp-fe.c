@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * PiSP Front End driver.
- * Copyright (c) 2021 Raspberry Pi Ltd.
+ * PiSP Front End Driver
  *
+ * Copyright (c) 2021-2024 Raspberry Pi Ltd.
  */
 
 #include <linux/bitops.h>

@@ -251,16 +251,20 @@ struct cfe_node {
 	struct v4l2_format meta_fmt;
 	/* Buffer queue used in video-buf */
 	struct vb2_queue buffer_queue;
-	/* Queue of filled frames */
+	/* List of queued buffers */
 	struct list_head dma_queue;
-	/* lock used to access this structure */
+	/* Lock used to access this structure */
 	struct mutex lock;
-	/* Identifies video device for this channel */
+	/* Identifies video device for this node */
 	struct video_device video_dev;
+	/* Media pad for this node */
 	struct media_pad pad;
+	/* Frame-start counter */
 	unsigned int fs_count;
-	unsigned int group;
+	/* Timestamp of the current buffer */
 	u64 timestamp;
+	/* Capture group of this node */
+	unsigned int group;
 };
 
 struct cfe_device {
@@ -884,6 +888,10 @@ static int cfe_csi2_gather_config(struct cfe_device *cfe)
 		cfe->csi2.channel_configs[ch].width = fmt->width;
 		cfe->csi2.channel_configs[ch].height = fmt->height;
 
+		/*
+		 * We use the VC for capture group: buffers for all streams with
+		 * the same VC are synchronized.
+		 */
 		node->group = vc;
 
 		if (is_fe) {

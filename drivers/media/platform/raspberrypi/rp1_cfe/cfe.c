@@ -2372,6 +2372,8 @@ static int cfe_remove(struct platform_device *pdev)
 	debugfs_remove(cfe->debugfs);
 
 	v4l2_async_nf_unregister(&cfe->notifier);
+	v4l2_async_nf_cleanup(&cfe->notifier);
+
 	media_device_unregister(&cfe->mdev);
 	cfe_unregister_nodes(cfe);
 

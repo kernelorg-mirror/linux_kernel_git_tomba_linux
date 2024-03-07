@@ -456,6 +456,12 @@ static int pisp_fe_pad_set_fmt(struct v4l2_subdev *sd,
 		u32 sink_code;
 		u32 code;
 
+		cfe_fmt = find_format_by_code(format->format.code);
+		if (!cfe_fmt || !(cfe_fmt->flags & CFE_FORMAT_FLAG_FE_OUT))
+			cfe_fmt = find_format_by_code(MEDIA_BUS_FMT_SRGGB16_1X16);
+
+		format->format.code = cfe_fmt->code;
+
 		sink_fmt = v4l2_subdev_state_get_format(state, FE_STREAM_PAD);
 		if (!sink_fmt)
 			return -EINVAL;

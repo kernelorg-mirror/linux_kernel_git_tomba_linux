@@ -479,9 +479,6 @@ void csi2_close_rx(struct csi2_device *csi2)
 static int csi2_init_state(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_state *state)
 {
-	struct v4l2_mbus_framefmt *fmt;
-	int ret;
-
 	struct v4l2_subdev_route routes[] = { {
 		.sink_pad = CSI2_PAD_SINK,
 		.sink_stream = 0,
@@ -495,15 +492,12 @@ static int csi2_init_state(struct v4l2_subdev *sd,
 		.routes = routes,
 	};
 
-	ret = v4l2_subdev_set_routing(sd, state, &routing);
+	int ret;
+
+	ret = v4l2_subdev_set_routing_with_fmt(sd, state, &routing,
+					       &cfe_default_format);
 	if (ret)
 		return ret;
-
-	fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_SINK, 0);
-	*fmt = cfe_default_format;
-
-	fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_FIRST_SOURCE, 0);
-	*fmt = cfe_default_format;
 
 	return 0;
 }
@@ -573,41 +567,11 @@ static int csi2_pad_set_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int csi2_validate_routing(struct v4l2_subdev_krouting *routing)
-{
-	struct v4l2_subdev_route *route;
-
-	if (routing->num_routes != 1 && routing->num_routes != 2)
-		return -EINVAL;
-
-	route = &routing->routes[0];
-
-	if (route->sink_stream != 0 ||
-	    route->source_pad != CSI2_PAD_FIRST_SOURCE ||
-	    route->source_stream != 0 ||
-	    route->flags != V4L2_SUBDEV_ROUTE_FL_ACTIVE)
-		return -EINVAL;
-
-	if (routing->num_routes == 1)
-		return 0;
-
-	route = &routing->routes[1];
-
-	if (route->sink_stream != 1 ||
-	    route->source_pad != CSI2_PAD_FIRST_SOURCE + 1 ||
-	    route->source_stream != 0 ||
-	    route->flags != V4L2_SUBDEV_ROUTE_FL_ACTIVE)
-		return -EINVAL;
-
-	return 0;
-}
-
 static int csi2_set_routing(struct v4l2_subdev *sd,
 			    struct v4l2_subdev_state *state,
 			    enum v4l2_subdev_format_whence which,
 			    struct v4l2_subdev_krouting *routing)
 {
-	struct v4l2_mbus_framefmt *fmt;
 	int ret;
 
 	ret = v4l2_subdev_routing_validate(sd, routing,
@@ -616,27 +580,18 @@ static int csi2_set_routing(struct v4l2_subdev *sd,
 	if (ret)
 		return ret;
 
-	ret = csi2_validate_routing(routing);
-	if (ret)
-		return ret;
+	/* Only stream ID 0 allowed on source pads */
+	for (unsigned int i = 0; i < routing->num_routes; ++i) {
+		const struct v4l2_subdev_route *route = &routing->routes[i];
 
-	ret = v4l2_subdev_set_routing(sd, state, routing);
-	if (ret)
-		return ret;
-
-	fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_SINK, 0);
-	*fmt = cfe_default_format;
-
-	fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_FIRST_SOURCE, 0);
-	*fmt = cfe_default_format;
-
-	if (routing->num_routes == 2) {
-		fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_SINK, 1);
-		*fmt = cfe_default_meta_format;
-
-		fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_FIRST_SOURCE + 1, 0);
-		*fmt = cfe_default_meta_format;
+		if (route->source_stream != 0)
+			return -EINVAL;
 	}
+
+	ret = v4l2_subdev_set_routing_with_fmt(sd, state, routing,
+					       &cfe_default_format);
+	if (ret)
+		return ret;
 
 	return 0;
 }

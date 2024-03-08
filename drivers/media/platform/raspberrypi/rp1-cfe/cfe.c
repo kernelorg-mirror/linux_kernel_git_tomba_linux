@@ -1167,10 +1167,30 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 	csi2_open_rx(&cfe->csi2);
 
 	cfe_dbg("Starting sensor streaming\n");
-	ret = v4l2_subdev_call(cfe->sensor, video, s_stream, 1);
-	if (ret < 0) {
-		cfe_err("stream on failed in subdev\n");
-		goto err_disable_cfe;
+
+	{
+		struct v4l2_subdev_state *state;
+		u64 streams_mask = 0;
+		struct media_pad *sensor_pad;
+
+		state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
+
+		for (unsigned int i = 0; i < state->routing.num_routes; ++i) {
+			struct v4l2_subdev_route *route = &state->routing.routes[i];
+
+			streams_mask |= BIT_ULL(route->sink_stream);
+		}
+
+		sensor_pad = media_pad_remote_pad_first(&cfe->csi2.pad[CSI2_PAD_SINK]);
+
+		ret = v4l2_subdev_enable_streams(cfe->sensor, sensor_pad->index, streams_mask);
+
+		v4l2_subdev_unlock_state(state);
+
+		if (ret) {
+			cfe_err("stream on failed in subdev\n");
+			goto err_disable_cfe;
+		}
 	}
 
 	cfe_dbg("%s: [%s] end.\n", __func__, node_desc[node->id].name);
@@ -1211,9 +1231,31 @@ static void cfe_stop_streaming(struct vb2_queue *vq)
 	cfe_stop_channel(node, fe_stop);
 
 	if (!test_any_node(cfe, NODE_STREAMING)) {
-		/* Stop streaming the sensor and disable the peripheral. */
-		if (v4l2_subdev_call(cfe->sensor, video, s_stream, 0) < 0)
-			cfe_err("stream off failed in subdev\n");
+		{
+			struct v4l2_subdev_state *state;
+			u64 streams_mask = 0;
+			struct media_pad *sensor_pad;
+			int ret;
+
+			state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
+
+			for (unsigned int i = 0; i < state->routing.num_routes; ++i) {
+				struct v4l2_subdev_route *route = &state->routing.routes[i];
+
+				streams_mask |= BIT_ULL(route->sink_stream);
+			}
+
+
+			sensor_pad = media_pad_remote_pad_first(&cfe->csi2.pad[CSI2_PAD_SINK]);
+
+			ret = v4l2_subdev_disable_streams(cfe->sensor, sensor_pad->index, streams_mask);
+
+			v4l2_subdev_unlock_state(state);
+
+			if (ret) {
+				cfe_err("stream disable failed in subdev\n");
+			}
+		}
 
 		csi2_close_rx(&cfe->csi2);
 

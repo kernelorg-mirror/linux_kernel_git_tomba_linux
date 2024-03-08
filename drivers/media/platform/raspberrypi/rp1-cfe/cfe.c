@@ -143,15 +143,9 @@ static const struct node_description node_desc[NUM_NODES] = {
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
 		.link_pad = CSI2_NUM_CHANNELS + 0
 	},
-	/*
-	 * TODO: This node should be named "csi2_ch1" and the caps should be set
-	 * to both video and meta capture. However, to keep compatibility with
-	 * the current libcamera, keep the name as "embedded" and support
-	 * only meta capture.
-	 */
 	[CSI2_CH1] = {
 		.name = "csi2-ch1",
-		.caps = V4L2_CAP_META_CAPTURE,
+		.caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_META_CAPTURE,
 		.pad_flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_MUST_CONNECT,
 		.link_pad = CSI2_NUM_CHANNELS + 1
 	},

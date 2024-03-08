@@ -1183,7 +1183,8 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 err_disable_cfe:
 	csi2_close_rx(&cfe->csi2);
-	cfe_stop_channel(node, true);
+	cfe_stop_channel(node, is_fe_enabled(cfe) &&
+			       test_all_nodes(cfe, NODE_ENABLED, NODE_STREAMING));
 	media_pipeline_stop(&node->pad);
 err_pm_put:
 	pm_runtime_put(&cfe->pdev->dev);

@@ -299,6 +299,8 @@ struct cfe_device {
 
 	/* ptr to sub device */
 	struct v4l2_subdev *sensor;
+	/* fwnode handle for the source's endpoint */
+	struct fwnode_handle *remote_ep_fwnode;
 
 	struct cfe_node node[NUM_NODES];
 	DECLARE_BITMAP(node_flags, NUM_STATES * NUM_NODES);
@@ -1996,11 +1998,21 @@ static int cfe_link_node_pads(struct cfe_device *cfe)
 {
 	unsigned int i;
 	int ret;
+	int pad;
 
 	/* Source -> CSI2 */
 
-	ret = media_create_pad_link(&cfe->sensor->entity, 0,
-				    &cfe->csi2.sd.entity, 0,
+	pad = media_entity_get_fwnode_pad(&cfe->sensor->entity,
+					  cfe->remote_ep_fwnode,
+					  MEDIA_PAD_FL_SOURCE);
+	if (pad < 0) {
+		cfe_err("Source %s has no connected source pad\n",
+			cfe->sensor->name);
+		return pad;
+	}
+
+	ret = media_create_pad_link(&cfe->sensor->entity, pad,
+				    &cfe->csi2.sd.entity, CSI2_PAD_SINK,
 				    MEDIA_LNK_FL_IMMUTABLE |
 				    MEDIA_LNK_FL_ENABLED);
 	if (ret)
@@ -2126,7 +2138,8 @@ static int of_cfe_connect_subdevs(struct cfe_device *cfe)
 	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2_DPHY };
 	struct device_node *node = pdev->dev.of_node;
 	struct device_node *ep_node;
-	struct device_node *sensor_node;
+	struct device_node *sensor_node = NULL;
+	struct device_node *remote_ep_node = NULL;
 	unsigned int lane;
 	int ret = -EINVAL;
 
@@ -2138,6 +2151,12 @@ static int of_cfe_connect_subdevs(struct cfe_device *cfe)
 	}
 
 	cfe_dbg("ep_node is %pOF\n", ep_node);
+
+	remote_ep_node = of_graph_get_remote_endpoint(ep_node);
+	if (!remote_ep_node) {
+		cfe_err("can't get remote endpoint\n");
+		goto cleanup_exit;
+	}
 
 	sensor_node = of_graph_get_remote_port_parent(ep_node);
 	if (!sensor_node) {
@@ -2169,6 +2188,7 @@ static int of_cfe_connect_subdevs(struct cfe_device *cfe)
 
 	cfe->csi2.dphy.max_lanes = ep.bus.mipi_csi2.num_data_lanes;
 	cfe->csi2.bus_flags = ep.bus.mipi_csi2.flags;
+	cfe->remote_ep_fwnode = fwnode_handle_get(of_fwnode_handle(remote_ep_node));
 
 	cfe_dbg("subdevice %pOF: %u data lanes, flags=0x%08x, multipacket_line=%u\n",
 		sensor_node, cfe->csi2.dphy.max_lanes, cfe->csi2.bus_flags,
@@ -2193,6 +2213,7 @@ static int of_cfe_connect_subdevs(struct cfe_device *cfe)
 	}
 
 cleanup_exit:
+	of_node_put(remote_ep_node);
 	of_node_put(sensor_node);
 	of_node_put(ep_node);
 
@@ -2364,6 +2385,8 @@ static int cfe_remove(struct platform_device *pdev)
 
 	pisp_fe_uninit(&cfe->fe);
 	csi2_uninit(&cfe->csi2);
+
+	fwnode_handle_put(cfe->remote_ep_fwnode);
 
 	pm_runtime_disable(&pdev->dev);
 

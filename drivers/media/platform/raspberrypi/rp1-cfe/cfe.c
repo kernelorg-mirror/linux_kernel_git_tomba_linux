@@ -53,7 +53,6 @@
 #define CFE_VERSION	"1.0"
 
 #define cfe_dbg(fmt, arg...) dev_dbg(&cfe->pdev->dev, fmt, ##arg)
-#define cfe_info(fmt, arg...) dev_info(&cfe->pdev->dev, fmt, ##arg)
 #define cfe_err(fmt, arg...) dev_err(&cfe->pdev->dev, fmt, ##arg)
 
 /* MIPICFG registers */
@@ -1077,7 +1076,7 @@ static u64 sensor_link_rate(struct cfe_device *cfe)
 
 	/* x2 for DDR. */
 	link_freq *= 2;
-	cfe_info("Using a link rate of %lld Mbps\n", link_freq / (1000 * 1000));
+	cfe_dbg("Using a link rate of %lld Mbps\n", link_freq / (1000 * 1000));
 	return link_freq;
 
 err:
@@ -1994,8 +1993,8 @@ static int cfe_register_node(struct cfe_device *cfe, int id)
 		return ret;
 	}
 
-	cfe_info("Registered [%s] node id %d successfully as /dev/video%u\n",
-		 vdev->name, id, vdev->num);
+	cfe_dbg("Registered [%s] node id %d successfully as /dev/video%u\n",
+		vdev->name, id, vdev->num);
 
 	/*
 	 * Acquire a reference to cfe, which will be released when the video
@@ -2138,12 +2137,12 @@ static int cfe_async_bound(struct v4l2_async_notifier *notifier,
 	struct cfe_device *cfe = to_cfe_device(notifier->v4l2_dev);
 
 	if (cfe->sensor) {
-		cfe_info("Rejecting subdev %s (Already set!!)", subdev->name);
+		cfe_err("Rejecting subdev %s (Already set!!)", subdev->name);
 		return 0;
 	}
 
 	cfe->sensor = subdev;
-	cfe_info("Using sensor %s for capture\n", subdev->name);
+	cfe_dbg("Using sensor %s for capture\n", subdev->name);
 
 	return 0;
 }
@@ -2192,7 +2191,7 @@ static int of_cfe_connect_subdevs(struct cfe_device *cfe)
 		goto cleanup_exit;
 	}
 
-	cfe_info("found subdevice %pOF\n", sensor_node);
+	cfe_dbg("found subdevice %pOF\n", sensor_node);
 
 	/* Parse the local endpoint and validate its configuration. */
 	v4l2_fwnode_endpoint_parse(of_fwnode_handle(ep_node), &ep);

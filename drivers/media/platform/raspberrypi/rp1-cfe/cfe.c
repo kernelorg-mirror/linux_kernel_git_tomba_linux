@@ -240,6 +240,7 @@ struct cfe_config_buffer *to_cfe_config_buffer(struct cfe_buffer *buf)
 }
 
 struct cfe_node {
+	/* Node id */
 	unsigned int id;
 	/* Pointer pointing to current v4l2_buffer */
 	struct cfe_buffer *cur_frm;
@@ -259,8 +260,11 @@ struct cfe_node {
 	struct video_device video_dev;
 	/* Pointer to the parent handle */
 	struct cfe_device *cfe;
+	/* Media pad for this node */
 	struct media_pad pad;
+	/* Frame-start counter */
 	unsigned int fs_count;
+	/* Timestamp of the current buffer */
 	u64 ts;
 };
 

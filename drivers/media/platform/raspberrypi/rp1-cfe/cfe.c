@@ -750,6 +750,76 @@ static irqreturn_t cfe_isr(int irq, void *dev)
  * Stream helpers
  */
 
+static int cfe_get_vc_dt_fallback(struct cfe_device *cfe, u8 *vc, u8 *dt)
+{
+	struct v4l2_subdev_state *state;
+	struct v4l2_mbus_framefmt *fmt;
+	const struct cfe_fmt *cfe_fmt;
+
+	state = v4l2_subdev_get_locked_active_state(&cfe->csi2.sd);
+
+	fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_SINK, 0);
+	if (!fmt)
+		return -EINVAL;
+
+	cfe_fmt = find_format_by_code(fmt->code);
+	if (!cfe_fmt)
+		return -EINVAL;
+
+	*vc = 0;
+	*dt = cfe_fmt->csi_dt;
+
+	return 0;
+}
+
+static int cfe_get_vc_dt(struct cfe_device *cfe, unsigned int channel,
+			  u8 *vc, u8 *dt)
+{
+	struct v4l2_mbus_frame_desc remote_desc;
+	struct v4l2_subdev_state *state;
+	u32 sink_stream;
+	unsigned int i;
+	int ret;
+
+	state = v4l2_subdev_get_locked_active_state(&cfe->csi2.sd);
+
+	ret = v4l2_subdev_routing_find_opposite_end(&state->routing,
+		CSI2_PAD_FIRST_SOURCE + channel, 0, NULL, &sink_stream);
+	if (ret)
+		return ret;
+
+	ret = v4l2_subdev_call(cfe->source_sd, pad, get_frame_desc,
+			       cfe->source_pad, &remote_desc);
+	if (ret == -ENOIOCTLCMD) {
+		cfe_dbg("source does not support get_frame_desc, use fallback\n");
+		return cfe_get_vc_dt_fallback(cfe, vc, dt);
+	} else if (ret) {
+		cfe_err("Failed to get frame descriptor\n");
+		return ret;
+	}
+
+	if (remote_desc.type != V4L2_MBUS_FRAME_DESC_TYPE_CSI2) {
+		cfe_err("Frame descriptor does not describe CSI-2 link");
+		return -EINVAL;
+	}
+
+	for (i = 0; i < remote_desc.num_entries; i++) {
+		if (remote_desc.entry[i].stream == sink_stream)
+			break;
+	}
+
+	if (i == remote_desc.num_entries) {
+		cfe_err("Stream %u not found in remote frame desc\n",
+			 sink_stream);
+		return -EINVAL;
+	}
+
+	*vc = remote_desc.entry[i].bus.csi2.vc;
+	*dt = remote_desc.entry[i].bus.csi2.dt;
+
+	return 0;
+}
+
 static void cfe_start_channel(struct cfe_node *node)
 {
 	struct cfe_device *cfe = node->cfe;
@@ -766,10 +836,13 @@ static void cfe_start_channel(struct cfe_node *node)
 
 	if (start_fe) {
 		unsigned int width, height;
+		u8 vc, dt;
 
 		WARN_ON(!is_fe_enabled(cfe));
 		cfe_dbg("%s: %s using csi2 channel %d\n", __func__,
 			node_desc[FE_OUT0].name, cfe->fe_csi2_channel);
+
+		cfe_get_vc_dt(cfe, cfe->fe_csi2_channel, &vc, &dt);
 
 		source_fmt = v4l2_subdev_state_get_format(state,
 			node_desc[cfe->fe_csi2_channel].link_pad);
@@ -790,13 +863,16 @@ static void cfe_start_channel(struct cfe_node *node)
 		 */
 		csi2_start_channel(&cfe->csi2, cfe->fe_csi2_channel,
 				   CSI2_MODE_FE_STREAMING,
-				   true, false, width, height);
+				   true, false, width, height, vc, dt);
 		csi2_set_buffer(&cfe->csi2, cfe->fe_csi2_channel, 0, 0, -1);
 		pisp_fe_start(&cfe->fe);
 	}
 
 	if (is_csi2_node(node)) {
 		unsigned int width = 0, height = 0;
+		u8 vc, dt;
+
+		cfe_get_vc_dt(cfe, node->id, &vc, &dt);
 
 		u32 mode = CSI2_MODE_NORMAL;
 
@@ -831,7 +907,7 @@ static void cfe_start_channel(struct cfe_node *node)
 				   false,
 				   /* Pack bytes */
 				   is_meta_node(node) ? true : false,
-				   width, height);
+				   width, height, vc, dt);
 	}
 
 	v4l2_subdev_unlock_state(state);

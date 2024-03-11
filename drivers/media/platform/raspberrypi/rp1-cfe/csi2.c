@@ -309,97 +309,12 @@ void csi2_set_compression(struct csi2_device *csi2, unsigned int channel,
 	csi2_reg_write(csi2, CSI2_CH_COMP_CTRL(channel), compression);
 }
 
-static int csi2_get_vc_dt_fallback(struct csi2_device *csi2, u8 *vc, u8 *dt)
-{
-	struct v4l2_subdev *sd = &csi2->sd;
-	struct v4l2_subdev_state *state;
-	struct v4l2_mbus_framefmt *fmt;
-	const struct cfe_fmt *cfe_fmt;
-
-	state = v4l2_subdev_get_locked_active_state(sd);
-
-	fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_SINK, 0);
-	if (!fmt)
-		return -EINVAL;
-
-	cfe_fmt = find_format_by_code(fmt->code);
-	if (!cfe_fmt)
-		return -EINVAL;
-
-	*vc = 0;
-	*dt = cfe_fmt->csi_dt;
-
-	return 0;
-}
-
-static int csi2_get_vc_dt(struct csi2_device *csi2, unsigned int channel,
-			  u8 *vc, u8 *dt)
-{
-	struct v4l2_mbus_frame_desc remote_desc;
-	struct v4l2_subdev *sd = &csi2->sd;
-	const struct media_pad *remote_pad;
-	struct v4l2_subdev *source_sd;
-	struct v4l2_subdev_state *state;
-	u32 sink_stream;
-	unsigned int i;
-	int ret;
-
-	state = v4l2_subdev_get_locked_active_state(sd);
-
-	ret = v4l2_subdev_routing_find_opposite_end(&state->routing,
-		CSI2_PAD_FIRST_SOURCE + channel, 0, NULL, &sink_stream);
-	if (ret)
-		return ret;
-
-	remote_pad = media_pad_remote_pad_first(&csi2->pad[CSI2_PAD_SINK]);
-	if (!remote_pad)
-		return -EPIPE;
-
-	source_sd = media_entity_to_v4l2_subdev(remote_pad->entity);
-
-	ret = v4l2_subdev_call(source_sd, pad, get_frame_desc,
-			       remote_pad->index, &remote_desc);
-	if (ret == -ENOIOCTLCMD) {
-		csi2_dbg("source does not support get_frame_desc, use fallback\n");
-		return csi2_get_vc_dt_fallback(csi2, vc, dt);
-	} else if (ret) {
-		csi2_err("Failed to get frame descriptor\n");
-		return ret;
-	}
-
-	if (remote_desc.type != V4L2_MBUS_FRAME_DESC_TYPE_CSI2) {
-		csi2_err("Frame descriptor does not describe CSI-2 link");
-		return -EINVAL;
-	}
-
-	for (i = 0; i < remote_desc.num_entries; i++) {
-		if (remote_desc.entry[i].stream == sink_stream)
-			break;
-	}
-
-	if (i == remote_desc.num_entries) {
-		csi2_err("Stream %u not found in remote frame desc\n",
-			 sink_stream);
-		return -EINVAL;
-	}
-
-	*vc = remote_desc.entry[i].bus.csi2.vc;
-	*dt = remote_desc.entry[i].bus.csi2.dt;
-
-	return 0;
-}
-
 void csi2_start_channel(struct csi2_device *csi2, unsigned int channel,
 			enum csi2_mode mode, bool auto_arm, bool pack_bytes,
-			unsigned int width, unsigned int height)
+			unsigned int width, unsigned int height,
+			u8 vc, u8 dt)
 {
 	u32 ctrl;
-	int ret;
-	u8 vc, dt;
-
-	ret = csi2_get_vc_dt(csi2, channel, &vc, &dt);
-	if (ret)
-		return;
 
 	csi2_dbg("%s [%u]\n", __func__, channel);
 

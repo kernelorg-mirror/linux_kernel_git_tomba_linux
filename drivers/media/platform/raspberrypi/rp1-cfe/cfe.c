@@ -46,18 +46,12 @@
 #include <linux/media/raspberrypi/pisp_fe_config.h>
 #include <linux/media/raspberrypi/pisp_fe_statistics.h>
 
+#define CREATE_TRACE_POINTS
+#include "cfe-trace.h"
+
 #define CFE_MODULE_NAME	"rp1-cfe"
 #define CFE_VERSION	"1.0"
 
-bool cfe_debug_verbose;
-module_param_named(verbose_debug, cfe_debug_verbose, bool, 0644);
-MODULE_PARM_DESC(verbose_debug, "verbose debugging messages");
-
-#define cfe_dbg_verbose(fmt, arg...)                          \
-	do {                                                  \
-		if (cfe_debug_verbose)                        \
-			dev_dbg(&cfe->pdev->dev, fmt, ##arg); \
-	} while (0)
 #define cfe_dbg(fmt, arg...) dev_dbg(&cfe->pdev->dev, fmt, ##arg)
 #define cfe_info(fmt, arg...) dev_info(&cfe->pdev->dev, fmt, ##arg)
 #define cfe_err(fmt, arg...) dev_err(&cfe->pdev->dev, fmt, ##arg)
@@ -562,8 +556,7 @@ static void cfe_schedule_next_csi2_job(struct cfe_device *cfe)
 		node->next_frm = buf;
 		list_del(&buf->list);
 
-		cfe_dbg_verbose("%s: [%s] buffer:%p\n", __func__,
-				node_desc[node->id].name, &buf->vb.vb2_buf);
+		trace_cfe_csi2_schedule(node->id, &buf->vb.vb2_buf);
 
 		if (is_meta_node(node)) {
 			size = node->meta_fmt.fmt.meta.buffersize;
@@ -594,8 +587,7 @@ static void cfe_schedule_next_pisp_job(struct cfe_device *cfe)
 		buf = list_first_entry(&node->dma_queue, struct cfe_buffer,
 				       list);
 
-		cfe_dbg_verbose("%s: [%s] buffer:%p\n", __func__,
-				node_desc[node->id].name, &buf->vb.vb2_buf);
+		trace_cfe_fe_schedule(node->id, &buf->vb.vb2_buf);
 
 		node->next_frm = buf;
 		vb2_bufs[node_desc[i].link_pad] = &buf->vb.vb2_buf;
@@ -616,11 +608,8 @@ static bool cfe_check_job_ready(struct cfe_device *cfe)
 		if (!check_state(cfe, NODE_ENABLED, i))
 			continue;
 
-		if (list_empty(&node->dma_queue)) {
-			cfe_dbg_verbose("%s: [%s] has no buffer, unable to schedule job\n",
-				__func__, node_desc[i].name);
+		if (list_empty(&node->dma_queue))
 			return false;
-		}
 	}
 
 	return true;
@@ -628,6 +617,8 @@ static bool cfe_check_job_ready(struct cfe_device *cfe)
 
 static void cfe_prepare_next_job(struct cfe_device *cfe)
 {
+	trace_cfe_prepare_next_job(is_fe_enabled(cfe));
+
 	cfe->job_queued = true;
 	cfe_schedule_next_csi2_job(cfe);
 	if (is_fe_enabled(cfe))
@@ -635,17 +626,12 @@ static void cfe_prepare_next_job(struct cfe_device *cfe)
 
 	/* Flag if another job is ready after this. */
 	cfe->job_ready = cfe_check_job_ready(cfe);
-
-	cfe_dbg_verbose("%s: end with scheduled job\n", __func__);
 }
 
 static void cfe_process_buffer_complete(struct cfe_node *node,
 					enum vb2_buffer_state state)
 {
-	struct cfe_device *cfe = node->cfe;
-
-	cfe_dbg_verbose("%s: [%s] buffer:%p\n", __func__,
-			node_desc[node->id].name, &node->cur_frm->vb.vb2_buf);
+	trace_cfe_buffer_complete(node->id, &node->cur_frm->vb);
 
 	node->cur_frm->vb.sequence = node->fs_count - 1;
 	vb2_buffer_done(&node->cur_frm->vb.vb2_buf, state);
@@ -667,8 +653,7 @@ static void cfe_sof_isr_handler(struct cfe_node *node)
 	bool matching_fs = true;
 	unsigned int i;
 
-	cfe_dbg_verbose("%s: [%s] seq %u\n", __func__, node_desc[node->id].name,
-			node->fs_count);
+	trace_cfe_frame_start(node->id, node->fs_count);
 
 	/*
 	 * If the sensor is producing unexpected frame event ordering over a
@@ -720,8 +705,7 @@ static void cfe_eof_isr_handler(struct cfe_node *node)
 {
 	struct cfe_device *cfe = node->cfe;
 
-	cfe_dbg_verbose("%s: [%s] seq %u\n", __func__, node_desc[node->id].name,
-			node->fs_count - 1);
+	trace_cfe_frame_end(node->id, node->fs_count - 1);
 
 	if (node->cur_frm)
 		cfe_process_buffer_complete(node, VB2_BUF_STATE_DONE);
@@ -937,13 +921,18 @@ static void cfe_return_buffers(struct cfe_node *node,
 	spin_lock_irqsave(&cfe->state_lock, flags);
 	list_for_each_entry_safe(buf, tmp, &node->dma_queue, list) {
 		list_del(&buf->list);
+		trace_cfe_return_buffer(node->id, buf->vb.vb2_buf.index, 2);
 		vb2_buffer_done(&buf->vb.vb2_buf, state);
 	}
 
-	if (node->cur_frm)
+	if (node->cur_frm) {
+		trace_cfe_return_buffer(node->id, node->cur_frm->vb.vb2_buf.index, 0);
 		vb2_buffer_done(&node->cur_frm->vb.vb2_buf, state);
-	if (node->next_frm && node->cur_frm != node->next_frm)
+	}
+	if (node->next_frm && node->cur_frm != node->next_frm) {
+		trace_cfe_return_buffer(node->id, node->next_frm->vb.vb2_buf.index, 1);
 		vb2_buffer_done(&node->next_frm->vb.vb2_buf, state);
+	}
 
 	node->cur_frm = NULL;
 	node->next_frm = NULL;
@@ -990,8 +979,7 @@ static int cfe_buffer_prepare(struct vb2_buffer *vb)
 	struct cfe_buffer *buf = to_cfe_buffer(vb);
 	unsigned long size;
 
-	cfe_dbg_verbose("%s: [%s] buffer:%p\n", __func__,
-			node_desc[node->id].name, vb);
+	trace_cfe_buffer_prepare(node->id, vb);
 
 	size = is_image_node(node) ? node->vid_fmt.fmt.pix.sizeimage :
 				     node->meta_fmt.fmt.meta.buffersize;
@@ -1022,9 +1010,7 @@ static void cfe_buffer_queue(struct vb2_buffer *vb)
 	struct cfe_device *cfe = node->cfe;
 	struct cfe_buffer *buf = to_cfe_buffer(vb);
 	unsigned long flags;
-
-	cfe_dbg_verbose("%s: [%s] buffer:%p\n", __func__,
-			node_desc[node->id].name, vb);
+	bool schedule_now;
 
 	spin_lock_irqsave(&cfe->state_lock, flags);
 
@@ -1033,8 +1019,12 @@ static void cfe_buffer_queue(struct vb2_buffer *vb)
 	if (!cfe->job_ready)
 		cfe->job_ready = cfe_check_job_ready(cfe);
 
-	if (!cfe->job_queued && cfe->job_ready &&
-	    test_all_nodes(cfe, NODE_ENABLED, NODE_STREAMING)) {
+	schedule_now = !cfe->job_queued && cfe->job_ready &&
+		       test_all_nodes(cfe, NODE_ENABLED, NODE_STREAMING);
+
+	trace_cfe_buffer_queue(node->id, vb, schedule_now);
+
+	if (schedule_now) {
 		cfe_dbg("Preparing job immediately for channel %u\n",
 			node->id);
 		cfe_prepare_next_job(cfe);

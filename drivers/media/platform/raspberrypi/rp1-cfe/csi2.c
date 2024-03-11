@@ -16,15 +16,12 @@
 #include "csi2.h"
 #include "cfe.h"
 
+#include "cfe-trace.h"
+
 static bool csi2_track_errors;
 module_param_named(track_csi2_errors, csi2_track_errors, bool, 0);
 MODULE_PARM_DESC(track_csi2_errors, "track csi-2 errors");
 
-#define csi2_dbg_verbose(fmt, arg...)                             \
-	do {                                                      \
-		if (cfe_debug_verbose)                            \
-			dev_dbg(csi2->v4l2_dev->dev, fmt, ##arg); \
-	} while (0)
 #define csi2_dbg(fmt, arg...) dev_dbg(csi2->v4l2_dev->dev, fmt, ##arg)
 #define csi2_info(fmt, arg...) dev_info(csi2->v4l2_dev->dev, fmt, ##arg)
 #define csi2_err(fmt, arg...) dev_err(csi2->v4l2_dev->dev, fmt, ##arg)
@@ -115,7 +112,6 @@ static inline u32 csi2_reg_read(struct csi2_device *csi2, u32 offset)
 static inline void csi2_reg_write(struct csi2_device *csi2, u32 offset, u32 val)
 {
 	writel(val, csi2->base + offset);
-	csi2_dbg_verbose("csi2: write 0x%04x -> 0x%03x\n", val, offset);
 }
 
 static inline void set_field(u32 *valp, u32 field, u32 mask)
@@ -264,7 +260,6 @@ void csi2_isr(struct csi2_device *csi2, bool *sof, bool *eof)
 	u32 status;
 
 	status = csi2_reg_read(csi2, CSI2_STATUS);
-	csi2_dbg_verbose("ISR: STA: 0x%x\n", status);
 
 	/* Write value back to clear the interrupts */
 	csi2_reg_write(csi2, CSI2_STATUS, status);
@@ -277,16 +272,7 @@ void csi2_isr(struct csi2_device *csi2, bool *sof, bool *eof)
 
 		dbg = csi2_reg_read(csi2, CSI2_CH_DEBUG(i));
 
-		csi2_dbg_verbose("ISR: [%u], %s%s%s%s%s frame: %u line: %u\n",
-				 i, (status & IRQ_FS(i)) ? "FS " : "",
-				 (status & IRQ_FE(i)) ? "FE " : "",
-				 (status & IRQ_FE_ACK(i)) ? "FE_ACK " : "",
-				 (status & IRQ_LE(i)) ? "LE " : "",
-				 (status & IRQ_LE_ACK(i)) ? "LE_ACK " : "",
-				 dbg >> 16,
-				 csi2->num_lines[i] ?
-					 ((dbg & 0xffff) % csi2->num_lines[i]) :
-					 0);
+		trace_csi2_irq(i, status, dbg);
 
 		sof[i] = !!(status & IRQ_FS(i));
 		eof[i] = !!(status & IRQ_FE_ACK(i));

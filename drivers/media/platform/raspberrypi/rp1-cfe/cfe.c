@@ -1062,10 +1062,8 @@ static void cfe_buffer_queue(struct vb2_buffer *vb)
 
 	trace_cfe_buffer_queue(node->id, vb, schedule_now);
 
-	if (schedule_now) {
-		cfe_dbg("Preparing job immediately for channel %u\n", node->id);
+	if (schedule_now)
 		cfe_prepare_next_job(cfe);
-	}
 
 	spin_unlock_irqrestore(&cfe->state_lock, flags);
 }

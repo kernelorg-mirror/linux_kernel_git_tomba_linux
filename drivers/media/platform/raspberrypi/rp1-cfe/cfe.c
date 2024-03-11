@@ -817,9 +817,9 @@ static void cfe_start_channel(struct cfe_node *node)
 
 			pixfmt = node->vid_fmt.fmt.pix.pixelformat;
 
-			if (pixfmt == fmt->remap[CFE_REMAP_16BIT])
+			if (pixfmt == fmt->remap[CFE_REMAP_16BIT]) {
 				mode = CSI2_MODE_REMAP;
-			else if (pixfmt == fmt->remap[CFE_REMAP_COMPRESSED]) {
+			} else if (pixfmt == fmt->remap[CFE_REMAP_COMPRESSED]) {
 				mode = CSI2_MODE_COMPRESSED;
 				csi2_set_compression(&cfe->csi2, node->id,
 						     CSI2_COMPRESSION_DELTA, 0,
@@ -1188,16 +1188,14 @@ static void cfe_stop_streaming(struct vb2_queue *vq)
 				streams_mask |= BIT_ULL(route->sink_stream);
 			}
 
-
 			sensor_pad = media_pad_remote_pad_first(&cfe->csi2.pad[CSI2_PAD_SINK]);
 
 			ret = v4l2_subdev_disable_streams(cfe->sensor, sensor_pad->index, streams_mask);
 
 			v4l2_subdev_unlock_state(state);
 
-			if (ret) {
+			if (ret)
 				cfe_err("stream disable failed in subdev\n");
-			}
 		}
 
 		csi2_close_rx(&cfe->csi2);

@@ -66,42 +66,45 @@ MODULE_PARM_DESC(track_csi2_errors, "track csi-2 errors");
 #define CSI2_CH_FE_FRAME_ID(x)	((x) * 0x40 + 0x48)
 
 /* CSI2_STATUS */
-#define IRQ_FS(x)		(BIT(0) << (x))
-#define IRQ_FE(x)		(BIT(4) << (x))
-#define IRQ_FE_ACK(x)		(BIT(8) << (x))
-#define IRQ_LE(x)		(BIT(12) << (x))
-#define IRQ_LE_ACK(x)		(BIT(16) << (x))
-#define IRQ_CH_MASK(x)		(IRQ_FS(x) | IRQ_FE(x) | IRQ_FE_ACK(x) | IRQ_LE(x) | IRQ_LE_ACK(x))
-#define IRQ_OVERFLOW		BIT(20)
-#define IRQ_DISCARD_OVERFLOW	BIT(21)
-#define IRQ_DISCARD_LEN_LIMIT	BIT(22)
-#define IRQ_DISCARD_UNMATCHED	BIT(23)
-#define IRQ_DISCARD_INACTIVE	BIT(24)
+#define CSI2_STATUS_IRQ_FS(x)			(BIT(0) << (x))
+#define CSI2_STATUS_IRQ_FE(x)			(BIT(4) << (x))
+#define CSI2_STATUS_IRQ_FE_ACK(x)		(BIT(8) << (x))
+#define CSI2_STATUS_IRQ_LE(x)			(BIT(12) << (x))
+#define CSI2_STATUS_IRQ_LE_ACK(x)		(BIT(16) << (x))
+#define CSI2_STATUS_IRQ_CH_MASK(x) \
+	(CSI2_STATUS_IRQ_FS(x) | CSI2_STATUS_IRQ_FE(x) | \
+	 CSI2_STATUS_IRQ_FE_ACK(x) | CSI2_STATUS_IRQ_LE(x) | \
+	 CSI2_STATUS_IRQ_LE_ACK(x))
+#define CSI2_STATUS_IRQ_OVERFLOW		BIT(20)
+#define CSI2_STATUS_IRQ_DISCARD_OVERFLOW	BIT(21)
+#define CSI2_STATUS_IRQ_DISCARD_LEN_LIMIT	BIT(22)
+#define CSI2_STATUS_IRQ_DISCARD_UNMATCHED	BIT(23)
+#define CSI2_STATUS_IRQ_DISCARD_INACTIVE	BIT(24)
 
 /* CSI2_CTRL */
-#define EOP_IS_EOL		BIT(0)
+#define CSI2_CTRL_EOP_IS_EOL			BIT(0)
 
 /* CSI2_CH_CTRL */
-#define DMA_EN			BIT(0)
-#define FORCE			BIT(3)
-#define AUTO_ARM		BIT(4)
-#define IRQ_EN_FS		BIT(13)
-#define IRQ_EN_FE		BIT(14)
-#define IRQ_EN_FE_ACK		BIT(15)
-#define IRQ_EN_LE		BIT(16)
-#define IRQ_EN_LE_ACK		BIT(17)
-#define FLUSH_FE		BIT(28)
-#define PACK_LINE		BIT(29)
-#define PACK_BYTES		BIT(30)
-#define CH_MODE_MASK		GENMASK(2, 1)
-#define VC_MASK			GENMASK(6, 5)
-#define DT_MASK			GENMASK(12, 7)
-#define LC_MASK			GENMASK(27, 18)
+#define CSI2_CH_CTRL_DMA_EN			BIT(0)
+#define CSI2_CH_CTRL_FORCE			BIT(3)
+#define CSI2_CH_CTRL_AUTO_ARM			BIT(4)
+#define CSI2_CH_CTRL_IRQ_EN_FS			BIT(13)
+#define CSI2_CH_CTRL_IRQ_EN_FE			BIT(14)
+#define CSI2_CH_CTRL_IRQ_EN_FE_ACK		BIT(15)
+#define CSI2_CH_CTRL_IRQ_EN_LE			BIT(16)
+#define CSI2_CH_CTRL_IRQ_EN_LE_ACK		BIT(17)
+#define CSI2_CH_CTRL_FLUSH_FE			BIT(28)
+#define CSI2_CH_CTRL_PACK_LINE			BIT(29)
+#define CSI2_CH_CTRL_PACK_BYTES			BIT(30)
+#define CSI2_CH_CTRL_CH_MODE_MASK		GENMASK(2, 1)
+#define CSI2_CH_CTRL_VC_MASK			GENMASK(6, 5)
+#define CSI2_CH_CTRL_DT_MASK			GENMASK(12, 7)
+#define CSI2_CH_CTRL_LC_MASK			GENMASK(27, 18)
 
 /* CHx_COMPRESSION_CONTROL */
-#define COMP_OFFSET_MASK	GENMASK(15, 0)
-#define COMP_SHIFT_MASK		GENMASK(19, 16)
-#define COMP_MODE_MASK		GENMASK(25, 24)
+#define CSI2_CH_COMP_CTRL_OFFSET_MASK		GENMASK(15, 0)
+#define CSI2_CH_COMP_CTRL_SHIFT_MASK		GENMASK(19, 16)
+#define CSI2_CH_COMP_CTRL_MODE_MASK		GENMASK(25, 24)
 
 static inline u32 csi2_reg_read(struct csi2_device *csi2, u32 offset)
 {
@@ -215,15 +218,15 @@ static void csi2_isr_handle_errors(struct csi2_device *csi2, u32 status)
 {
 	spin_lock(&csi2->errors_lock);
 
-	if (status & IRQ_OVERFLOW)
+	if (status & CSI2_STATUS_IRQ_OVERFLOW)
 		csi2->overflows++;
 
 	for (unsigned int i = 0; i < DISCARDS_TABLE_NUM_ENTRIES; ++i) {
 		static const u32 discard_bits[] = {
-			IRQ_DISCARD_OVERFLOW,
-			IRQ_DISCARD_LEN_LIMIT,
-			IRQ_DISCARD_UNMATCHED,
-			IRQ_DISCARD_INACTIVE,
+			CSI2_STATUS_IRQ_DISCARD_OVERFLOW,
+			CSI2_STATUS_IRQ_DISCARD_LEN_LIMIT,
+			CSI2_STATUS_IRQ_DISCARD_UNMATCHED,
+			CSI2_STATUS_IRQ_DISCARD_INACTIVE,
 		};
 		static const u8 discard_regs[] = {
 			CSI2_DISCARDS_OVERFLOW,
@@ -266,15 +269,15 @@ void csi2_isr(struct csi2_device *csi2, bool *sof, bool *eof)
 	for (i = 0; i < CSI2_NUM_CHANNELS; i++) {
 		u32 dbg;
 
-		if ((status & IRQ_CH_MASK(i)) == 0)
+		if ((status & CSI2_STATUS_IRQ_CH_MASK(i)) == 0)
 			continue;
 
 		dbg = csi2_reg_read(csi2, CSI2_CH_DEBUG(i));
 
 		trace_csi2_irq(i, status, dbg);
 
-		sof[i] = !!(status & IRQ_FS(i));
-		eof[i] = !!(status & IRQ_FE_ACK(i));
+		sof[i] = !!(status & CSI2_STATUS_IRQ_FS(i));
+		eof[i] = !!(status & CSI2_STATUS_IRQ_FE_ACK(i));
 	}
 
 	if (csi2_track_errors)
@@ -302,9 +305,9 @@ void csi2_set_compression(struct csi2_device *csi2, unsigned int channel,
 {
 	u32 compression = 0;
 
-	set_field(&compression, COMP_OFFSET_MASK, offset);
-	set_field(&compression, COMP_SHIFT_MASK, shift);
-	set_field(&compression, COMP_MODE_MASK, mode);
+	set_field(&compression, CSI2_CH_COMP_CTRL_OFFSET_MASK, offset);
+	set_field(&compression, CSI2_CH_COMP_CTRL_SHIFT_MASK, shift);
+	set_field(&compression, CSI2_CH_COMP_CTRL_MODE_MASK, mode);
 	csi2_reg_write(csi2, CSI2_CH_COMP_CTRL(channel), compression);
 }
 
@@ -404,28 +407,29 @@ void csi2_start_channel(struct csi2_device *csi2, unsigned int channel,
 
 	csi2_reg_write(csi2, CSI2_CH_CTRL(channel), 0);
 	csi2_reg_write(csi2, CSI2_CH_DEBUG(channel), 0);
-	csi2_reg_write(csi2, CSI2_STATUS, IRQ_CH_MASK(channel));
+	csi2_reg_write(csi2, CSI2_STATUS, CSI2_STATUS_IRQ_CH_MASK(channel));
 
 	/* Enable channel and FS/FE interrupts. */
-	ctrl = DMA_EN | IRQ_EN_FS | IRQ_EN_FE_ACK | PACK_LINE;
+	ctrl = CSI2_CH_CTRL_DMA_EN | CSI2_CH_CTRL_IRQ_EN_FS |
+	       CSI2_CH_CTRL_IRQ_EN_FE_ACK | CSI2_CH_CTRL_PACK_LINE;
 	/* PACK_BYTES ensures no striding for embedded data. */
 	if (pack_bytes)
-		ctrl |= PACK_BYTES;
+		ctrl |= CSI2_CH_CTRL_PACK_BYTES;
 
 	if (auto_arm)
-		ctrl |= AUTO_ARM;
+		ctrl |= CSI2_CH_CTRL_AUTO_ARM;
 
 	if (width && height) {
-		set_field(&ctrl, mode, CH_MODE_MASK);
+		set_field(&ctrl, mode, CSI2_CH_CTRL_CH_MODE_MASK);
 		csi2_reg_write(csi2, CSI2_CH_FRAME_SIZE(channel),
 			       (height << 16) | width);
 	} else {
-		set_field(&ctrl, 0x0, CH_MODE_MASK);
+		set_field(&ctrl, 0x0, CSI2_CH_CTRL_CH_MODE_MASK);
 		csi2_reg_write(csi2, CSI2_CH_FRAME_SIZE(channel), 0);
 	}
 
-	set_field(&ctrl, vc, VC_MASK);
-	set_field(&ctrl, dt, DT_MASK);
+	set_field(&ctrl, vc, CSI2_CH_CTRL_VC_MASK);
+	set_field(&ctrl, dt, CSI2_CH_CTRL_DT_MASK);
 	csi2_reg_write(csi2, CSI2_CH_CTRL(channel), ctrl);
 	csi2->num_lines[channel] = height;
 }
@@ -435,7 +439,7 @@ void csi2_stop_channel(struct csi2_device *csi2, unsigned int channel)
 	csi2_dbg("%s [%u]\n", __func__, channel);
 
 	/* Channel disable.  Use FORCE to allow stopping mid-frame. */
-	csi2_reg_write(csi2, CSI2_CH_CTRL(channel), FORCE);
+	csi2_reg_write(csi2, CSI2_CH_CTRL(channel), CSI2_CH_CTRL_FORCE);
 	/* Latch the above change by writing to the ADDR0 register. */
 	csi2_reg_write(csi2, CSI2_CH_ADDR0(channel), 0);
 	/* Write this again, the HW needs it! */
@@ -450,7 +454,7 @@ void csi2_open_rx(struct csi2_device *csi2)
 	dphy_start(&csi2->dphy);
 
 	csi2_reg_write(csi2, CSI2_CTRL,
-		       csi2->multipacket_line ? 0 : EOP_IS_EOL);
+		       csi2->multipacket_line ? 0 : CSI2_CTRL_EOP_IS_EOL);
 }
 
 void csi2_close_rx(struct csi2_device *csi2)

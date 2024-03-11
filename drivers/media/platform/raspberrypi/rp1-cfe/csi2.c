@@ -128,7 +128,6 @@ static inline void set_field(u32 *valp, u32 field, u32 mask)
 static int csi2_regs_show(struct seq_file *s, void *data)
 {
 	struct csi2_device *csi2 = s->private;
-	unsigned int i;
 	int ret;
 
 	ret = pm_runtime_resume_and_get(csi2->v4l2_dev->dev);
@@ -148,7 +147,7 @@ static int csi2_regs_show(struct seq_file *s, void *data)
 	DUMP(CSI2_IRQ_MASK);
 	DUMP(CSI2_CTRL);
 
-	for (i = 0; i < CSI2_NUM_CHANNELS; ++i) {
+	for (unsigned int i = 0; i < CSI2_NUM_CHANNELS; ++i) {
 		DUMP_CH(i, CSI2_CH_CTRL);
 		DUMP_CH(i, CSI2_CH_ADDR0);
 		DUMP_CH(i, CSI2_CH_ADDR1);
@@ -258,7 +257,6 @@ static void csi2_isr_handle_errors(struct csi2_device *csi2, u32 status)
 
 void csi2_isr(struct csi2_device *csi2, bool *sof, bool *eof)
 {
-	unsigned int i;
 	u32 status;
 
 	status = csi2_reg_read(csi2, CSI2_STATUS);
@@ -266,7 +264,7 @@ void csi2_isr(struct csi2_device *csi2, bool *sof, bool *eof)
 	/* Write value back to clear the interrupts */
 	csi2_reg_write(csi2, CSI2_STATUS, status);
 
-	for (i = 0; i < CSI2_NUM_CHANNELS; i++) {
+	for (unsigned int i = 0; i < CSI2_NUM_CHANNELS; i++) {
 		u32 dbg;
 
 		if ((status & CSI2_STATUS_IRQ_CH_MASK(i)) == 0)
@@ -605,7 +603,7 @@ static const struct v4l2_subdev_internal_ops csi2_internal_ops = {
 
 int csi2_init(struct csi2_device *csi2, struct dentry *debugfs)
 {
-	unsigned int i, ret;
+	unsigned int ret;
 
 	spin_lock_init(&csi2->errors_lock);
 
@@ -620,7 +618,8 @@ int csi2_init(struct csi2_device *csi2, struct dentry *debugfs)
 
 	csi2->pad[CSI2_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 
-	for (i = CSI2_PAD_FIRST_SOURCE; i < CSI2_PAD_FIRST_SOURCE + CSI2_PAD_NUM_SOURCES; i++)
+	for (unsigned int i = CSI2_PAD_FIRST_SOURCE;
+	     i < CSI2_PAD_FIRST_SOURCE + CSI2_PAD_NUM_SOURCES; i++)
 		csi2->pad[i].flags = MEDIA_PAD_FL_SOURCE;
 
 	ret = media_entity_pads_init(&csi2->sd.entity, ARRAY_SIZE(csi2->pad),

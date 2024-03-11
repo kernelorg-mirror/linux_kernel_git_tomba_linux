@@ -171,14 +171,14 @@ static void pisp_config_write(struct pisp_fe_device *fe,
 {
 	const unsigned int max_offset =
 		offsetof(struct pisp_fe_config, ch[PISP_FE_NUM_OUTPUTS]);
-	unsigned int i, end_offset;
+	unsigned int end_offset;
 	u32 *cfg = (u32 *)config;
 
 	start_offset = min(start_offset, max_offset);
 	end_offset = min(start_offset + size, max_offset);
 
 	cfg += start_offset >> 2;
-	for (i = start_offset; i < end_offset; i += 4, cfg++)
+	for (unsigned int i = start_offset; i < end_offset; i += 4, cfg++)
 		pisp_fe_reg_write_relaxed(fe, PISP_FE_CONFIG_BASE_OFFSET + i,
 					  *cfg);
 }
@@ -186,7 +186,6 @@ static void pisp_config_write(struct pisp_fe_device *fe,
 void pisp_fe_isr(struct pisp_fe_device *fe, bool *sof, bool *eof)
 {
 	u32 status, int_status, out_status, frame_status, error_status;
-	unsigned int i;
 
 	pisp_fe_reg_write(fe, FE_CONTROL, FE_CONTROL_LATCH_REGS);
 	status = pisp_fe_reg_read(fe, FE_STATUS);
@@ -201,7 +200,7 @@ void pisp_fe_isr(struct pisp_fe_device *fe, bool *sof, bool *eof)
 		     int_status);
 
 	/* We do not report interrupts for the input/stream pad. */
-	for (i = 0; i < FE_NUM_PADS - 1; i++) {
+	for (unsigned int i = 0; i < FE_NUM_PADS - 1; i++) {
 		sof[i] = !!(int_status & FE_INT_SOF);
 		eof[i] = !!(int_status & FE_INT_EOF);
 	}
@@ -253,8 +252,6 @@ int pisp_fe_validate_config(struct pisp_fe_device *fe,
 			    struct v4l2_format const *f0,
 			    struct v4l2_format const *f1)
 {
-	unsigned int i;
-
 	/*
 	 * Check the input is enabled, streaming and has nonzero size;
 	 * to avoid cases where the hardware might lock up or try to
@@ -267,7 +264,7 @@ int pisp_fe_validate_config(struct pisp_fe_device *fe,
 		return -EINVAL;
 	}
 
-	for (i = 0; i < PISP_FE_NUM_OUTPUTS; i++) {
+	for (unsigned int i = 0; i < PISP_FE_NUM_OUTPUTS; i++) {
 		if (!(cfg->global.enables & PISP_FE_ENABLE_OUTPUT(i))) {
 			if (cfg->global.enables &
 					PISP_FE_ENABLE_OUTPUT_CLUSTER(i)) {
@@ -294,7 +291,6 @@ int pisp_fe_validate_config(struct pisp_fe_device *fe,
 void pisp_fe_submit_job(struct pisp_fe_device *fe, struct vb2_buffer **vb2_bufs,
 			struct pisp_fe_config *cfg)
 {
-	unsigned int i;
 	u64 addr;
 	u32 status;
 
@@ -302,7 +298,7 @@ void pisp_fe_submit_job(struct pisp_fe_device *fe, struct vb2_buffer **vb2_bufs,
 	 * Check output buffers exist and outputs are correctly configured.
 	 * If valid, set the buffer's DMA address; otherwise disable.
 	 */
-	for (i = 0; i < PISP_FE_NUM_OUTPUTS; i++) {
+	for (unsigned int i = 0; i < PISP_FE_NUM_OUTPUTS; i++) {
 		struct vb2_buffer *buf = vb2_bufs[FE_OUTPUT0_PAD + i];
 
 		if (!(cfg->global.enables & PISP_FE_ENABLE_OUTPUT(i)))
@@ -348,7 +344,7 @@ void pisp_fe_submit_job(struct pisp_fe_device *fe, struct vb2_buffer **vb2_bufs,
 			     (PISP_FE_ENABLE_STATS_CROP        |
 			      PISP_FE_ENABLE_OUTPUT_CLUSTER(0) |
 			      PISP_FE_ENABLE_OUTPUT_CLUSTER(1)));
-	for (i = 0; i < ARRAY_SIZE(pisp_fe_config_map); i++) {
+	for (unsigned int i = 0; i < ARRAY_SIZE(pisp_fe_config_map); i++) {
 		const struct pisp_fe_config_param *p = &pisp_fe_config_map[i];
 
 		if (cfg->dirty_flags & p->dirty_flags ||

@@ -357,9 +357,7 @@ static void clear_state(struct cfe_device *cfe, unsigned long state,
 
 static bool test_any_node(struct cfe_device *cfe, unsigned long cond)
 {
-	unsigned int i;
-
-	for (i = 0; i < NUM_NODES; i++) {
+	for (unsigned int i = 0; i < NUM_NODES; i++) {
 		if (check_state(cfe, cond, i))
 			return true;
 	}
@@ -370,9 +368,7 @@ static bool test_any_node(struct cfe_device *cfe, unsigned long cond)
 static bool test_all_nodes(struct cfe_device *cfe, unsigned long precond,
 			   unsigned long cond)
 {
-	unsigned int i;
-
-	for (i = 0; i < NUM_NODES; i++) {
+	for (unsigned int i = 0; i < NUM_NODES; i++) {
 		if (check_state(cfe, precond, i)) {
 			if (!check_state(cfe, cond, i))
 				return false;
@@ -407,13 +403,12 @@ static int mipi_cfg_regs_show(struct seq_file *s, void *data)
 static int format_show(struct seq_file *s, void *data)
 {
 	struct cfe_device *cfe = s->private;
-	unsigned int i;
 
-	for (i = 0; i < NUM_NODES; i++) {
+	for (unsigned int i = 0; i < NUM_NODES; i++) {
 		struct cfe_node *node = &cfe->node[i];
-		unsigned long sb, state = 0;
+		unsigned long state = 0;
 
-		for (sb = 0; sb < NUM_STATES; sb++) {
+		for (unsigned long sb = 0; sb < NUM_STATES; sb++) {
 			if (check_state(cfe, BIT(sb), i))
 				state |= BIT(sb);
 		}
@@ -447,9 +442,7 @@ DEFINE_SHOW_ATTRIBUTE(format);
 /* Format setup functions */
 const struct cfe_fmt *find_format_by_code(u32 code)
 {
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(formats); i++) {
+	for (unsigned int i = 0; i < ARRAY_SIZE(formats); i++) {
 		if (formats[i].code == code)
 			return &formats[i];
 	}
@@ -459,9 +452,7 @@ const struct cfe_fmt *find_format_by_code(u32 code)
 
 const struct cfe_fmt *find_format_by_pix(u32 pixelformat)
 {
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(formats); i++) {
+	for (unsigned int i = 0; i < ARRAY_SIZE(formats); i++) {
 		if (formats[i].fourcc == pixelformat)
 			return &formats[i];
 	}
@@ -540,10 +531,9 @@ static int cfe_calc_format_size_bpl(struct cfe_device *cfe,
 static void cfe_schedule_next_csi2_job(struct cfe_device *cfe)
 {
 	struct cfe_buffer *buf;
-	unsigned int i;
 	dma_addr_t addr;
 
-	for (i = 0; i < CSI2_NUM_CHANNELS; i++) {
+	for (unsigned int i = 0; i < CSI2_NUM_CHANNELS; i++) {
 		struct cfe_node *node = &cfe->node[i];
 		unsigned int stride, size;
 
@@ -575,9 +565,8 @@ static void cfe_schedule_next_pisp_job(struct cfe_device *cfe)
 	struct vb2_buffer *vb2_bufs[FE_NUM_PADS] = { 0 };
 	struct cfe_config_buffer *config_buf;
 	struct cfe_buffer *buf;
-	unsigned int i;
 
-	for (i = CSI2_NUM_CHANNELS; i < NUM_NODES; i++) {
+	for (unsigned int i = CSI2_NUM_CHANNELS; i < NUM_NODES; i++) {
 		struct cfe_node *node = &cfe->node[i];
 
 		if (!check_state(cfe, NODE_STREAMING, i))
@@ -599,9 +588,7 @@ static void cfe_schedule_next_pisp_job(struct cfe_device *cfe)
 
 static bool cfe_check_job_ready(struct cfe_device *cfe)
 {
-	unsigned int i;
-
-	for (i = 0; i < NUM_NODES; i++) {
+	for (unsigned int i = 0; i < NUM_NODES; i++) {
 		struct cfe_node *node = &cfe->node[i];
 
 		if (!check_state(cfe, NODE_ENABLED, i))
@@ -650,7 +637,6 @@ static void cfe_sof_isr_handler(struct cfe_node *node)
 {
 	struct cfe_device *cfe = node->cfe;
 	bool matching_fs = true;
-	unsigned int i;
 
 	trace_cfe_frame_start(node->id, node->fs_count);
 
@@ -670,7 +656,7 @@ static void cfe_sof_isr_handler(struct cfe_node *node)
 	node->fs_count++;
 
 	node->ts = ktime_get_ns();
-	for (i = 0; i < NUM_NODES; i++) {
+	for (unsigned int i = 0; i < NUM_NODES; i++) {
 		if (!check_state(cfe, NODE_STREAMING, i) || i == node->id)
 			continue;
 		/*
@@ -717,7 +703,6 @@ static void cfe_eof_isr_handler(struct cfe_node *node)
 static irqreturn_t cfe_isr(int irq, void *dev)
 {
 	struct cfe_device *cfe = dev;
-	unsigned int i;
 	bool sof[NUM_NODES] = { 0 }, eof[NUM_NODES] = { 0 };
 	u32 sts;
 
@@ -732,7 +717,7 @@ static irqreturn_t cfe_isr(int irq, void *dev)
 
 	spin_lock(&cfe->state_lock);
 
-	for (i = 0; i < NUM_NODES; i++) {
+	for (unsigned int i = 0; i < NUM_NODES; i++) {
 		struct cfe_node *node = &cfe->node[i];
 
 		/*
@@ -1682,11 +1667,10 @@ static void cfe_notify(struct v4l2_subdev *sd, unsigned int notification,
 		       void *arg)
 {
 	struct cfe_device *cfe = to_cfe_device(sd->v4l2_dev);
-	unsigned int i;
 
 	switch (notification) {
 	case V4L2_DEVICE_NOTIFY_EVENT:
-		for (i = 0; i < NUM_NODES; i++) {
+		for (unsigned int i = 0; i < NUM_NODES; i++) {
 			struct cfe_node *node = &cfe->node[i];
 
 			if (check_state(cfe, NODE_REGISTERED, i))
@@ -1744,7 +1728,6 @@ static int cfe_video_link_validate(struct media_link *link)
 	if (is_image_output_node(node)) {
 		struct v4l2_pix_format *pix_fmt = &node->vid_fmt.fmt.pix;
 		const struct cfe_fmt *fmt = NULL;
-		unsigned int i;
 
 		if (source_fmt->width != pix_fmt->width ||
 		    source_fmt->height != pix_fmt->height) {
@@ -1755,7 +1738,7 @@ static int cfe_video_link_validate(struct media_link *link)
 			goto out;
 		}
 
-		for (i = 0; i < ARRAY_SIZE(formats); i++) {
+		for (unsigned int i = 0; i < ARRAY_SIZE(formats); i++) {
 			if (formats[i].code == source_fmt->code &&
 			    formats[i].fourcc == pix_fmt->pixelformat) {
 				fmt = &formats[i];
@@ -1807,7 +1790,6 @@ static int cfe_video_link_notify(struct media_link *link, u32 flags,
 	struct media_entity *fe = &cfe->fe.sd.entity;
 	struct media_entity *csi2 = &cfe->csi2.sd.entity;
 	unsigned long lock_flags;
-	unsigned int i;
 
 	if (notification != MEDIA_DEV_NOTIFY_POST_LINK_CH)
 		return 0;
@@ -1818,7 +1800,7 @@ static int cfe_video_link_notify(struct media_link *link, u32 flags,
 
 	spin_lock_irqsave(&cfe->state_lock, lock_flags);
 
-	for (i = 0; i < NUM_NODES; i++) {
+	for (unsigned int i = 0; i < NUM_NODES; i++) {
 		if (link->sink->entity != &cfe->node[i].video_dev.entity &&
 		    link->source->entity != &cfe->node[i].video_dev.entity)
 			continue;
@@ -2010,9 +1992,7 @@ static int cfe_register_node(struct cfe_device *cfe, int id)
 
 static void cfe_unregister_nodes(struct cfe_device *cfe)
 {
-	unsigned int i;
-
-	for (i = 0; i < NUM_NODES; i++) {
+	for (unsigned int i = 0; i < NUM_NODES; i++) {
 		struct cfe_node *node = &cfe->node[i];
 
 		if (check_state(cfe, NODE_REGISTERED, i)) {
@@ -2024,7 +2004,6 @@ static void cfe_unregister_nodes(struct cfe_device *cfe)
 
 static int cfe_link_node_pads(struct cfe_device *cfe)
 {
-	unsigned int i;
 	int ret;
 	int pad;
 
@@ -2046,7 +2025,7 @@ static int cfe_link_node_pads(struct cfe_device *cfe)
 	if (ret)
 		return ret;
 
-	for (i = 0; i < CSI2_NUM_CHANNELS; i++) {
+	for (unsigned int i = 0; i < CSI2_NUM_CHANNELS; i++) {
 		struct cfe_node *node = &cfe->node[i];
 
 		if (!check_state(cfe, NODE_REGISTERED, i))
@@ -2070,7 +2049,7 @@ static int cfe_link_node_pads(struct cfe_device *cfe)
 		}
 	}
 
-	for (; i < NUM_NODES; i++) {
+	for (unsigned int i = CSI2_NUM_CHANNELS; i < NUM_NODES; i++) {
 		struct cfe_node *node = &cfe->node[i];
 		struct media_entity *src, *dst;
 		unsigned int src_pad, dst_pad;
@@ -2099,12 +2078,11 @@ static int cfe_link_node_pads(struct cfe_device *cfe)
 
 static int cfe_probe_complete(struct cfe_device *cfe)
 {
-	unsigned int i;
 	int ret;
 
 	cfe->v4l2_dev.notify = cfe_notify;
 
-	for (i = 0; i < NUM_NODES; i++) {
+	for (unsigned int i = 0; i < NUM_NODES; i++) {
 		ret = cfe_register_node(cfe, i);
 		if (ret) {
 			cfe_err("Unable to register video node %u.\n", i);
@@ -2168,7 +2146,6 @@ static int of_cfe_connect_subdevs(struct cfe_device *cfe)
 	struct device_node *ep_node;
 	struct device_node *sensor_node = NULL;
 	struct device_node *remote_ep_node = NULL;
-	unsigned int lane;
 	int ret = -EINVAL;
 
 	/* Get the local endpoint and remote device. */
@@ -2202,7 +2179,7 @@ static int of_cfe_connect_subdevs(struct cfe_device *cfe)
 		return -EINVAL;
 	}
 
-	for (lane = 0; lane < ep.bus.mipi_csi2.num_data_lanes; lane++) {
+	for (unsigned int lane = 0; lane < ep.bus.mipi_csi2.num_data_lanes; lane++) {
 		if (ep.bus.mipi_csi2.data_lanes[lane] != lane + 1) {
 			cfe_err("subdevice %pOF: data lanes reordering not supported\n",
 				sensor_node);

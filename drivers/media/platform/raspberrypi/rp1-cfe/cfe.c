@@ -400,44 +400,7 @@ static int mipi_cfg_regs_show(struct seq_file *s, void *data)
 	return 0;
 }
 
-static int format_show(struct seq_file *s, void *data)
-{
-	struct cfe_device *cfe = s->private;
-
-	for (unsigned int i = 0; i < NUM_NODES; i++) {
-		struct cfe_node *node = &cfe->node[i];
-		unsigned long state = 0;
-
-		for (unsigned long sb = 0; sb < NUM_STATES; sb++) {
-			if (check_state(cfe, BIT(sb), i))
-				state |= BIT(sb);
-		}
-
-		seq_printf(s, "\nNode %u (%s) state: 0x%lx\n", i,
-			   node_desc[i].name, state);
-
-		if (node_supports_image(node))
-			seq_printf(s, "format: %p4cc 0x%x\n"
-				      "resolution: %ux%u\nbpl: %u\nsize: %u\n",
-				   &node->vid_fmt.fmt.pix.pixelformat,
-				   node->vid_fmt.fmt.pix.pixelformat,
-				   node->vid_fmt.fmt.pix.width,
-				   node->vid_fmt.fmt.pix.height,
-				   node->vid_fmt.fmt.pix.bytesperline,
-				   node->vid_fmt.fmt.pix.sizeimage);
-
-		if (node_supports_meta(node))
-			seq_printf(s, "format: %p4cc 0x%x\nsize: %u\n",
-				   &node->meta_fmt.fmt.meta.dataformat,
-				   node->meta_fmt.fmt.meta.dataformat,
-				   node->meta_fmt.fmt.meta.buffersize);
-	}
-
-	return 0;
-}
-
 DEFINE_SHOW_ATTRIBUTE(mipi_cfg_regs);
-DEFINE_SHOW_ATTRIBUTE(format);
 
 /* Format setup functions */
 const struct cfe_fmt *find_format_by_code(u32 code)
@@ -2311,7 +2274,6 @@ static int cfe_probe(struct platform_device *pdev)
 	snprintf(debugfs_name, sizeof(debugfs_name), "rp1-cfe:%s",
 		 dev_name(&pdev->dev));
 	cfe->debugfs = debugfs_create_dir(debugfs_name, NULL);
-	debugfs_create_file("format", 0444, cfe->debugfs, cfe, &format_fops);
 	debugfs_create_file("regs", 0444, cfe->debugfs, cfe,
 			    &mipi_cfg_regs_fops);
 

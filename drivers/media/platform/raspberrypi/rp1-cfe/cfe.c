@@ -820,29 +820,33 @@ static int cfe_get_vc_dt(struct cfe_device *cfe, unsigned int channel,
 	return 0;
 }
 
-static void cfe_start_channel(struct cfe_node *node)
+static int cfe_start_channel(struct cfe_node *node)
 {
 	struct cfe_device *cfe = node->cfe;
 	struct v4l2_subdev_state *state;
 	struct v4l2_mbus_framefmt *source_fmt;
 	const struct cfe_fmt *fmt;
 	unsigned long flags;
-	bool start_fe = is_fe_enabled(cfe) &&
-			test_all_nodes(cfe, NODE_ENABLED, NODE_STREAMING);
+	bool start_fe;
+	int ret;
 
 	cfe_dbg("%s: [%s]\n", __func__, node_desc[node->id].name);
 
-	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
+	start_fe = is_fe_enabled(cfe) &&
+		   test_all_nodes(cfe, NODE_ENABLED, NODE_STREAMING);
+
+	state = v4l2_subdev_get_locked_active_state(&cfe->csi2.sd);
 
 	if (start_fe) {
 		unsigned int width, height;
 		u8 vc, dt;
 
-		WARN_ON(!is_fe_enabled(cfe));
 		cfe_dbg("%s: %s using csi2 channel %d\n", __func__,
 			node_desc[FE_OUT0].name, cfe->fe_csi2_channel);
 
-		cfe_get_vc_dt(cfe, cfe->fe_csi2_channel, &vc, &dt);
+		ret = cfe_get_vc_dt(cfe, cfe->fe_csi2_channel, &vc, &dt);
+		if (ret)
+			return ret;
 
 		source_fmt = v4l2_subdev_state_get_format(state,
 			node_desc[cfe->fe_csi2_channel].link_pad);
@@ -872,7 +876,15 @@ static void cfe_start_channel(struct cfe_node *node)
 		unsigned int width = 0, height = 0;
 		u8 vc, dt;
 
-		cfe_get_vc_dt(cfe, node->id, &vc, &dt);
+		ret = cfe_get_vc_dt(cfe, node->id, &vc, &dt);
+		if (ret) {
+			if (start_fe) {
+				csi2_stop_channel(&cfe->csi2, cfe->fe_csi2_channel);
+				pisp_fe_stop(&cfe->fe);
+			}
+
+			return ret;
+		}
 
 		u32 mode = CSI2_MODE_NORMAL;
 
@@ -910,12 +922,12 @@ static void cfe_start_channel(struct cfe_node *node)
 				   width, height, vc, dt);
 	}
 
-	v4l2_subdev_unlock_state(state);
-
 	spin_lock_irqsave(&cfe->state_lock, flags);
 	if (cfe->job_ready && test_all_nodes(cfe, NODE_ENABLED, NODE_STREAMING))
 		cfe_prepare_next_job(cfe);
 	spin_unlock_irqrestore(&cfe->state_lock, flags);
+
+	return 0;
 }
 
 static void cfe_stop_channel(struct cfe_node *node, bool fe_stop)
@@ -1068,10 +1080,9 @@ static u64 sensor_link_rate(struct cfe_device *cfe)
 	struct media_pad *pad;
 	s64 link_freq;
 
-	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
+	state = v4l2_subdev_get_locked_active_state(&cfe->csi2.sd);
 	source_fmt = v4l2_subdev_state_get_format(state, 0);
 	fmt = find_format_by_code(source_fmt->code);
-	v4l2_subdev_unlock_state(state);
 
 	/*
 	 * Walk up the media graph to find either the sensor entity, or another
@@ -1149,13 +1160,19 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 		goto err_pm_put;
 	}
 
+	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
+
 	clear_state(cfe, FS_INT | FE_INT, node->id);
 	set_state(cfe, NODE_STREAMING, node->id);
 	node->fs_count = 0;
-	cfe_start_channel(node);
+
+	ret = cfe_start_channel(node);
+	if (ret)
+		goto err_unlock_state;
 
 	if (!test_all_nodes(cfe, NODE_ENABLED, NODE_STREAMING)) {
 		cfe_dbg("Not all nodes are set to streaming yet!\n");
+		v4l2_subdev_unlock_state(state);
 		return 0;
 	}
 
@@ -1166,7 +1183,7 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 			       &mbus_config);
 	if (ret < 0 && ret != -ENOIOCTLCMD) {
 		cfe_err("g_mbus_config failed\n");
-		goto err_pm_put;
+		goto err_clear_inte;
 	}
 
 	cfe->csi2.dphy.active_lanes = mbus_config.bus.mipi_csi2.num_data_lanes;
@@ -1176,7 +1193,7 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 		cfe_err("Device has requested %u data lanes, which is >%u configured in DT\n",
 			cfe->csi2.dphy.active_lanes, cfe->csi2.dphy.max_lanes);
 		ret = -EINVAL;
-		goto err_disable_cfe;
+		goto err_clear_inte;
 	}
 
 	cfe_dbg("Configuring CSI-2 block - %u data lanes\n",
@@ -1186,21 +1203,18 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	cfe_dbg("Starting sensor streaming\n");
 
-	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
-
 	cfe->streams_mask = 0;
 
 	for_each_active_route(&state->routing, route)
 		cfe->streams_mask |= BIT_ULL(route->sink_stream);
 
 	ret = v4l2_subdev_enable_streams(cfe->source_sd, cfe->source_pad, cfe->streams_mask);
-
-	v4l2_subdev_unlock_state(state);
-
 	if (ret) {
 		cfe_err("stream on failed in subdev\n");
 		goto err_disable_cfe;
 	}
+
+	v4l2_subdev_unlock_state(state);
 
 	cfe_dbg("%s: [%s] end.\n", __func__, node_desc[node->id].name);
 
@@ -1208,9 +1222,14 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 err_disable_cfe:
 	csi2_close_rx(&cfe->csi2);
+err_clear_inte:
+	cfg_reg_write(cfe, MIPICFG_INTE, 0);
+
 	cfe_stop_channel(node,
 			 is_fe_enabled(cfe) && test_all_nodes(cfe, NODE_ENABLED,
 							      NODE_STREAMING));
+err_unlock_state:
+	v4l2_subdev_unlock_state(state);
 	media_pipeline_stop(&node->pad);
 err_pm_put:
 	pm_runtime_put(&cfe->pdev->dev);

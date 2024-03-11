@@ -39,12 +39,13 @@
 #include <media/v4l2-ioctl.h>
 #include <media/videobuf2-dma-contig.h>
 
-#include "cfe.h"
-#include "cfe-fmts.h"
-#include "csi2.h"
-#include "pisp-fe.h"
 #include <linux/media/raspberrypi/pisp_fe_config.h>
 #include <linux/media/raspberrypi/pisp_fe_statistics.h>
+
+#include "cfe-fmts.h"
+#include "cfe.h"
+#include "csi2.h"
+#include "pisp-fe.h"
 
 #define CREATE_TRACE_POINTS
 #include "cfe-trace.h"

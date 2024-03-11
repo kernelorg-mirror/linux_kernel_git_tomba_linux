@@ -13,8 +13,8 @@
 
 #include <media/videobuf2-dma-contig.h>
 
-#include "csi2.h"
 #include "cfe.h"
+#include "csi2.h"
 
 #include "cfe-trace.h"
 

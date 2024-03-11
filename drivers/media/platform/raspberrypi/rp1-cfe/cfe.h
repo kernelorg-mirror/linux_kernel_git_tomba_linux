@@ -8,8 +8,8 @@
 #ifndef _RP1_CFE_
 #define _RP1_CFE_
 
-#include <linux/types.h>
 #include <linux/media-bus-format.h>
+#include <linux/types.h>
 #include <linux/videodev2.h>
 
 extern bool cfe_debug_verbose;

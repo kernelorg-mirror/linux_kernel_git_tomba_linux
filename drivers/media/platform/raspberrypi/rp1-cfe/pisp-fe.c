@@ -13,8 +13,8 @@
 
 #include <media/videobuf2-dma-contig.h>
 
-#include "pisp-fe.h"
 #include "cfe.h"
+#include "pisp-fe.h"
 
 #include "cfe-trace.h"
 

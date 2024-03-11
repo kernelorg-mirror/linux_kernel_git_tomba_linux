@@ -39,13 +39,6 @@ enum csi2_compression_mode {
 	CSI2_COMPRESSION_COMBINED = 3,
 };
 
-struct csi2_cfg {
-	u16 width;
-	u16 height;
-	u32 stride;
-	u32 buffer_size;
-};
-
 enum discards_table_index {
 	DISCARDS_TABLE_OVERFLOW = 0,
 	DISCARDS_TABLE_LENGTH_LIMIT,

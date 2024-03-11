@@ -1917,8 +1917,6 @@ static int cfe_register_node(struct cfe_device *cfe, int id)
 		 node_desc[id].name);
 
 	video_set_drvdata(vdev, node);
-	if (node->id == FE_OUT0)
-		vdev->entity.flags |= MEDIA_ENT_FL_DEFAULT;
 	node->pad.flags = node_desc[id].pad_flags;
 	media_entity_pads_init(&vdev->entity, 1, &node->pad);
 

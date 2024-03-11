@@ -12,14 +12,14 @@
 #include <linux/device.h>
 #include <linux/dma-mapping.h>
 #include <linux/err.h>
+#include <linux/fwnode.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
-#include <linux/of_graph.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
@@ -267,9 +267,6 @@ struct cfe_node {
 struct cfe_device {
 	struct dentry *debugfs;
 	struct kref kref;
-
-	/* V4l2 specific parameters */
-	struct v4l2_async_connection *asd;
 
 	/* peripheral base address */
 	void __iomem *mipi_cfg_base;
@@ -2099,84 +2096,82 @@ static const struct v4l2_async_notifier_operations cfe_async_ops = {
 	.complete = cfe_async_complete,
 };
 
-static int of_cfe_connect_subdevs(struct cfe_device *cfe)
+static int cfe_register_async_nf(struct cfe_device *cfe)
 {
 	struct platform_device *pdev = cfe->pdev;
 	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2_DPHY };
-	struct device_node *node = pdev->dev.of_node;
-	struct device_node *ep_node;
-	struct device_node *sensor_node = NULL;
-	struct device_node *remote_ep_node = NULL;
 	int ret = -EINVAL;
+	struct fwnode_handle *local_ep_fwnode;
+	struct fwnode_handle *remote_ep_fwnode;
+	struct v4l2_async_connection *asd;
 
-	/* Get the local endpoint and remote device. */
-	ep_node = of_graph_get_next_endpoint(node, NULL);
-	if (!ep_node) {
-		cfe_err("can't get next endpoint\n");
-		return -EINVAL;
+	local_ep_fwnode = fwnode_graph_get_endpoint_by_id(pdev->dev.fwnode, 0, 0, 0);
+	if (!local_ep_fwnode) {
+		cfe_err("Failed to find local endpoint fwnode\n");
+		return -ENODEV;
 	}
 
-	cfe_dbg("ep_node is %pOF\n", ep_node);
-
-	remote_ep_node = of_graph_get_remote_endpoint(ep_node);
-	if (!remote_ep_node) {
-		cfe_err("can't get remote endpoint\n");
-		goto cleanup_exit;
+	remote_ep_fwnode = fwnode_graph_get_remote_endpoint(local_ep_fwnode);
+	if (!remote_ep_fwnode) {
+		cfe_err("Failed to find remote endpoint fwnode\n");
+		ret = -ENODEV;
+		goto err_put_local_fwnode;
 	}
-
-	sensor_node = of_graph_get_remote_port_parent(ep_node);
-	if (!sensor_node) {
-		cfe_err("can't get remote parent\n");
-		goto cleanup_exit;
-	}
-
-	cfe_dbg("found subdevice %pOF\n", sensor_node);
 
 	/* Parse the local endpoint and validate its configuration. */
-	v4l2_fwnode_endpoint_parse(of_fwnode_handle(ep_node), &ep);
+	v4l2_fwnode_endpoint_parse(local_ep_fwnode, &ep);
 
 	if (ep.bus_type != V4L2_MBUS_CSI2_DPHY) {
 		cfe_err("endpoint node type != CSI2\n");
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err_put_remote_fwnode;
 	}
 
 	for (unsigned int lane = 0; lane < ep.bus.mipi_csi2.num_data_lanes; lane++) {
 		if (ep.bus.mipi_csi2.data_lanes[lane] != lane + 1) {
-			cfe_err("subdevice %pOF: data lanes reordering not supported\n",
-				sensor_node);
-			goto cleanup_exit;
+			cfe_err("subdevice %pfwf: data lanes reordering not supported\n",
+				remote_ep_fwnode);
+			ret = -EINVAL;
+			goto err_put_remote_fwnode;
 		}
 	}
 
 	cfe->csi2.dphy.max_lanes = ep.bus.mipi_csi2.num_data_lanes;
 	cfe->csi2.bus_flags = ep.bus.mipi_csi2.flags;
-	cfe->remote_ep_fwnode = fwnode_handle_get(of_fwnode_handle(remote_ep_node));
 
-	cfe_dbg("subdevice %pOF: %u data lanes, flags=0x%08x\n",
-		sensor_node, cfe->csi2.dphy.max_lanes, cfe->csi2.bus_flags);
+	cfe->remote_ep_fwnode = remote_ep_fwnode;
+
+	cfe_dbg("source %pfwf: %u data lanes, flags=0x%08x\n",
+		remote_ep_fwnode, cfe->csi2.dphy.max_lanes, cfe->csi2.bus_flags);
 
 	/* Initialize and register the async notifier. */
 	v4l2_async_nf_init(&cfe->notifier, &cfe->v4l2_dev);
 	cfe->notifier.ops = &cfe_async_ops;
 
-	cfe->asd = v4l2_async_nf_add_fwnode(&cfe->notifier,
-					    of_fwnode_handle(sensor_node),
-					    struct v4l2_async_connection);
-	if (IS_ERR(cfe->asd)) {
+	asd = v4l2_async_nf_add_fwnode(&cfe->notifier, remote_ep_fwnode,
+				       struct v4l2_async_connection);
+	if (IS_ERR(asd)) {
+		ret = PTR_ERR(asd);
 		cfe_err("Error adding subdevice: %d\n", ret);
-		goto cleanup_exit;
+		goto err_put_remote_fwnode;
 	}
 
 	ret = v4l2_async_nf_register(&cfe->notifier);
 	if (ret) {
 		cfe_err("Error registering async notifier: %d\n", ret);
-		ret = -EINVAL;
+		goto err_nf_cleanup;
 	}
 
-cleanup_exit:
-	of_node_put(remote_ep_node);
-	of_node_put(sensor_node);
-	of_node_put(ep_node);
+	fwnode_handle_put(local_ep_fwnode);
+
+	return 0;
+
+err_nf_cleanup:
+	v4l2_async_nf_cleanup(&cfe->notifier);
+err_put_remote_fwnode:
+	fwnode_handle_put(remote_ep_fwnode);
+err_put_local_fwnode:
+	fwnode_handle_put(local_ep_fwnode);
 
 	return ret;
 }
@@ -2303,7 +2298,7 @@ static int cfe_probe(struct platform_device *pdev)
 		goto err_pisp_fe_uninit;
 	}
 
-	ret = of_cfe_connect_subdevs(cfe);
+	ret = cfe_register_async_nf(cfe);
 	if (ret) {
 		cfe_err("Failed to connect subdevs\n");
 		goto err_media_unregister;

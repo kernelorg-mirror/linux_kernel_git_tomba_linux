@@ -288,8 +288,10 @@ struct cfe_device {
 	/* subdevice async Notifier */
 	struct v4l2_async_notifier notifier;
 
-	/* ptr to sub device */
-	struct v4l2_subdev *sensor;
+	/* Source sub device */
+	struct v4l2_subdev *source_sd;
+	/* Source subdev's pad */
+	u32 source_pad;
 	/* fwnode handle for the source's endpoint */
 	struct fwnode_handle *remote_ep_fwnode;
 
@@ -300,6 +302,9 @@ struct cfe_device {
 	struct pisp_fe_device fe;
 
 	int fe_csi2_channel;
+
+	/* Mask of enabled streams */
+	u64 streams_mask;
 };
 
 static inline bool is_fe_enabled(struct cfe_device *cfe)
@@ -1035,6 +1040,8 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 	struct v4l2_mbus_config mbus_config = { 0 };
 	struct cfe_node *node = vb2_get_drv_priv(vq);
 	struct cfe_device *cfe = node->cfe;
+	struct v4l2_subdev_state *state;
+	struct v4l2_subdev_route *route;
 	int ret;
 
 	cfe_dbg("%s: [%s] begin.\n", __func__, node_desc[node->id].name);
@@ -1079,7 +1086,7 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 	cfg_reg_write(cfe, MIPICFG_CFG, MIPICFG_CFG_SEL_CSI);
 	cfg_reg_write(cfe, MIPICFG_INTE, MIPICFG_INT_CSI_DMA | MIPICFG_INT_PISP_FE);
 
-	ret = v4l2_subdev_call(cfe->sensor, pad, get_mbus_config, 0,
+	ret = v4l2_subdev_call(cfe->source_sd, pad, get_mbus_config, 0,
 			       &mbus_config);
 	if (ret < 0 && ret != -ENOIOCTLCMD) {
 		cfe_err("g_mbus_config failed\n");
@@ -1103,29 +1110,20 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	cfe_dbg("Starting sensor streaming\n");
 
-	{
-		struct v4l2_subdev_state *state;
-		u64 streams_mask = 0;
-		struct media_pad *sensor_pad;
+	state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
 
-		state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
+	cfe->streams_mask = 0;
 
-		for (unsigned int i = 0; i < state->routing.num_routes; ++i) {
-			struct v4l2_subdev_route *route = &state->routing.routes[i];
+	for_each_active_route(&state->routing, route)
+		cfe->streams_mask |= BIT_ULL(route->sink_stream);
 
-			streams_mask |= BIT_ULL(route->sink_stream);
-		}
+	ret = v4l2_subdev_enable_streams(cfe->source_sd, cfe->source_pad, cfe->streams_mask);
 
-		sensor_pad = media_pad_remote_pad_first(&cfe->csi2.pad[CSI2_PAD_SINK]);
+	v4l2_subdev_unlock_state(state);
 
-		ret = v4l2_subdev_enable_streams(cfe->sensor, sensor_pad->index, streams_mask);
-
-		v4l2_subdev_unlock_state(state);
-
-		if (ret) {
-			cfe_err("stream on failed in subdev\n");
-			goto err_disable_cfe;
-		}
+	if (ret) {
+		cfe_err("stream on failed in subdev\n");
+		goto err_disable_cfe;
 	}
 
 	cfe_dbg("%s: [%s] end.\n", __func__, node_desc[node->id].name);
@@ -1167,29 +1165,16 @@ static void cfe_stop_streaming(struct vb2_queue *vq)
 	cfe_stop_channel(node, fe_stop);
 
 	if (!test_any_node(cfe, NODE_STREAMING)) {
-		{
-			struct v4l2_subdev_state *state;
-			u64 streams_mask = 0;
-			struct media_pad *sensor_pad;
-			int ret;
+		struct v4l2_subdev_state *state;
+		int ret;
 
-			state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
+		state = v4l2_subdev_lock_and_get_active_state(&cfe->csi2.sd);
 
-			for (unsigned int i = 0; i < state->routing.num_routes; ++i) {
-				struct v4l2_subdev_route *route = &state->routing.routes[i];
+		ret = v4l2_subdev_disable_streams(cfe->source_sd, cfe->source_pad, cfe->streams_mask);
+		if (ret)
+			cfe_err("stream disable failed in subdev\n");
 
-				streams_mask |= BIT_ULL(route->sink_stream);
-			}
-
-			sensor_pad = media_pad_remote_pad_first(&cfe->csi2.pad[CSI2_PAD_SINK]);
-
-			ret = v4l2_subdev_disable_streams(cfe->sensor, sensor_pad->index, streams_mask);
-
-			v4l2_subdev_unlock_state(state);
-
-			if (ret)
-				cfe_err("stream disable failed in subdev\n");
-		}
+		v4l2_subdev_unlock_state(state);
 
 		csi2_close_rx(&cfe->csi2);
 
@@ -1965,16 +1950,18 @@ static int cfe_link_node_pads(struct cfe_device *cfe)
 
 	/* Source -> CSI2 */
 
-	pad = media_entity_get_fwnode_pad(&cfe->sensor->entity,
+	pad = media_entity_get_fwnode_pad(&cfe->source_sd->entity,
 					  cfe->remote_ep_fwnode,
 					  MEDIA_PAD_FL_SOURCE);
 	if (pad < 0) {
 		cfe_err("Source %s has no connected source pad\n",
-			cfe->sensor->name);
+			cfe->source_sd->name);
 		return pad;
 	}
 
-	ret = media_create_pad_link(&cfe->sensor->entity, pad,
+	cfe->source_pad = pad;
+
+	ret = media_create_pad_link(&cfe->source_sd->entity, pad,
 				    &cfe->csi2.sd.entity, CSI2_PAD_SINK,
 				    MEDIA_LNK_FL_IMMUTABLE |
 				    MEDIA_LNK_FL_ENABLED);
@@ -2071,13 +2058,14 @@ static int cfe_async_bound(struct v4l2_async_notifier *notifier,
 {
 	struct cfe_device *cfe = to_cfe_device(notifier->v4l2_dev);
 
-	if (cfe->sensor) {
+	if (cfe->source_sd) {
 		cfe_err("Rejecting subdev %s (Already set!!)", subdev->name);
 		return 0;
 	}
 
-	cfe->sensor = subdev;
-	cfe_dbg("Using sensor %s for capture\n", subdev->name);
+	cfe->source_sd = subdev;
+
+	cfe_dbg("Using source %s for capture\n", subdev->name);
 
 	return 0;
 }

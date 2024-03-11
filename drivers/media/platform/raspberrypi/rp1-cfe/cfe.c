@@ -122,7 +122,7 @@ enum node_ids {
 };
 
 struct node_description {
-	unsigned int id;
+	enum node_ids id;
 	const char *name;
 	unsigned int caps;
 	unsigned int pad_flags;
@@ -241,7 +241,7 @@ struct cfe_config_buffer *to_cfe_config_buffer(struct cfe_buffer *buf)
 
 struct cfe_node {
 	/* Node id */
-	unsigned int id;
+	enum node_ids id;
 	/* Pointer pointing to current v4l2_buffer */
 	struct cfe_buffer *cur_frm;
 	/* Pointer pointing to next v4l2_buffer */
@@ -1438,9 +1438,9 @@ static int try_fmt_meta(struct cfe_node *node, struct v4l2_format *f)
 		f->fmt.meta.dataformat = V4L2_META_FMT_RPI_FE_CFG;
 		f->fmt.meta.buffersize = sizeof(struct pisp_fe_config);
 		return 0;
+	default:
+		return -EINVAL;
 	}
-
-	return -EINVAL;
 }
 
 static int cfe_g_fmt_meta(struct file *file, void *priv, struct v4l2_format *f)

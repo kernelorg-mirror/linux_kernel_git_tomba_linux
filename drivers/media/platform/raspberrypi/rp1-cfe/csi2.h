@@ -64,7 +64,6 @@ struct csi2_device {
 
 	enum v4l2_mbus_type bus_type;
 	unsigned int bus_flags;
-	bool multipacket_line;
 	unsigned int num_lines[CSI2_NUM_CHANNELS];
 
 	struct media_pad pad[CSI2_NUM_PADS];

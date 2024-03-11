@@ -453,8 +453,7 @@ void csi2_open_rx(struct csi2_device *csi2)
 
 	dphy_start(&csi2->dphy);
 
-	csi2_reg_write(csi2, CSI2_CTRL,
-		       csi2->multipacket_line ? 0 : CSI2_CTRL_EOP_IS_EOL);
+	csi2_reg_write(csi2, CSI2_CTRL, CSI2_CTRL_EOP_IS_EOL);
 }
 
 void csi2_close_rx(struct csi2_device *csi2)

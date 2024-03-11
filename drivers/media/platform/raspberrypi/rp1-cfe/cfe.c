@@ -2197,10 +2197,6 @@ static int of_cfe_connect_subdevs(struct cfe_device *cfe)
 	/* Parse the local endpoint and validate its configuration. */
 	v4l2_fwnode_endpoint_parse(of_fwnode_handle(ep_node), &ep);
 
-	cfe->csi2.multipacket_line =
-		fwnode_property_present(of_fwnode_handle(ep_node),
-					"multipacket-line");
-
 	if (ep.bus_type != V4L2_MBUS_CSI2_DPHY) {
 		cfe_err("endpoint node type != CSI2\n");
 		return -EINVAL;
@@ -2218,9 +2214,8 @@ static int of_cfe_connect_subdevs(struct cfe_device *cfe)
 	cfe->csi2.bus_flags = ep.bus.mipi_csi2.flags;
 	cfe->remote_ep_fwnode = fwnode_handle_get(of_fwnode_handle(remote_ep_node));
 
-	cfe_dbg("subdevice %pOF: %u data lanes, flags=0x%08x, multipacket_line=%u\n",
-		sensor_node, cfe->csi2.dphy.max_lanes, cfe->csi2.bus_flags,
-		cfe->csi2.multipacket_line);
+	cfe_dbg("subdevice %pOF: %u data lanes, flags=0x%08x\n",
+		sensor_node, cfe->csi2.dphy.max_lanes, cfe->csi2.bus_flags);
 
 	/* Initialize and register the async notifier. */
 	v4l2_async_nf_init(&cfe->notifier, &cfe->v4l2_dev);

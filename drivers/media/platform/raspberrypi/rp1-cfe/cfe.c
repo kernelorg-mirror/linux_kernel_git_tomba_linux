@@ -2401,6 +2401,7 @@ static struct platform_driver cfe_driver = {
 module_platform_driver(cfe_driver);
 
 MODULE_AUTHOR("Naushir Patuck <naush@raspberrypi.com>");
-MODULE_DESCRIPTION("RP1 Camera Front End driver");
+MODULE_AUTHOR("Tomi Valkeinen <tomi.valkeinen@ideasonboard.com>");
+MODULE_DESCRIPTION("Raspberry Pi RP1 Camera Front End driver");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(CFE_VERSION);

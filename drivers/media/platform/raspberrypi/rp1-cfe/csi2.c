@@ -390,9 +390,8 @@ static int csi2_get_vc_dt(struct csi2_device *csi2, unsigned int channel,
 }
 
 void csi2_start_channel(struct csi2_device *csi2, unsigned int channel,
-			enum csi2_mode mode, bool auto_arm,
-			bool pack_bytes, unsigned int width,
-			unsigned int height)
+			enum csi2_mode mode, bool auto_arm, bool pack_bytes,
+			unsigned int width, unsigned int height)
 {
 	u32 ctrl;
 	int ret;

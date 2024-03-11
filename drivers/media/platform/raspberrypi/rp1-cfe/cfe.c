@@ -530,9 +530,8 @@ static int cfe_calc_format_size_bpl(struct cfe_device *cfe,
 
 	f->fmt.pix.sizeimage = f->fmt.pix.height * f->fmt.pix.bytesperline;
 
-	cfe_dbg("%s: %p4cc size: %ux%u bpl:%u img_size:%u\n",
-		__func__, &f->fmt.pix.pixelformat,
-		f->fmt.pix.width, f->fmt.pix.height,
+	cfe_dbg("%s: %p4cc size: %ux%u bpl:%u img_size:%u\n", __func__,
+		&f->fmt.pix.pixelformat, f->fmt.pix.width, f->fmt.pix.height,
 		f->fmt.pix.bytesperline, f->fmt.pix.sizeimage);
 
 	return 0;
@@ -719,7 +718,7 @@ static irqreturn_t cfe_isr(int irq, void *dev)
 {
 	struct cfe_device *cfe = dev;
 	unsigned int i;
-	bool sof[NUM_NODES] = {0}, eof[NUM_NODES] = {0};
+	bool sof[NUM_NODES] = { 0 }, eof[NUM_NODES] = { 0 };
 	u32 sts;
 
 	sts = cfg_reg_read(cfe, MIPICFG_INTS);
@@ -741,8 +740,7 @@ static irqreturn_t cfe_isr(int irq, void *dev)
 		 * over the CSI2_CHx nodes when the FE is active since they
 		 * generate interrupts even though the node is not streaming.
 		 */
-		if (!check_state(cfe, NODE_STREAMING, i) ||
-		    !(sof[i] || eof[i]))
+		if (!check_state(cfe, NODE_STREAMING, i) || !(sof[i] || eof[i]))
 			continue;
 
 		/*
@@ -820,12 +818,11 @@ static void cfe_start_channel(struct cfe_node *node)
 		unsigned int width, height;
 
 		WARN_ON(!is_fe_enabled(cfe));
-		cfe_dbg("%s: %s using csi2 channel %d\n",
-			__func__, node_desc[FE_OUT0].name,
-			cfe->fe_csi2_channel);
+		cfe_dbg("%s: %s using csi2 channel %d\n", __func__,
+			node_desc[FE_OUT0].name, cfe->fe_csi2_channel);
 
 		source_fmt = v4l2_subdev_state_get_format(state,
-							node_desc[cfe->fe_csi2_channel].link_pad);
+			node_desc[cfe->fe_csi2_channel].link_pad);
 		fmt = find_format_by_code(source_fmt->code);
 
 		width = source_fmt->width;
@@ -861,14 +858,16 @@ static void cfe_start_channel(struct cfe_node *node)
 		WARN_ON(!fmt->csi_dt);
 
 		if (is_image_output_node(node)) {
+			u32  pixfmt;
+
 			width = source_fmt->width;
 			height = source_fmt->height;
 
-			if (node->vid_fmt.fmt.pix.pixelformat ==
-					fmt->remap[CFE_REMAP_16BIT])
+			pixfmt = node->vid_fmt.fmt.pix.pixelformat;
+
+			if (pixfmt == fmt->remap[CFE_REMAP_16BIT])
 				mode = CSI2_MODE_REMAP;
-			else if (node->vid_fmt.fmt.pix.pixelformat ==
-					fmt->remap[CFE_REMAP_COMPRESSED]) {
+			else if (pixfmt == fmt->remap[CFE_REMAP_COMPRESSED]) {
 				mode = CSI2_MODE_COMPRESSED;
 				csi2_set_compression(&cfe->csi2, node->id,
 						     CSI2_COMPRESSION_DELTA, 0,
@@ -897,8 +896,8 @@ static void cfe_stop_channel(struct cfe_node *node, bool fe_stop)
 {
 	struct cfe_device *cfe = node->cfe;
 
-	cfe_dbg("%s: [%s] fe_stop %u\n", __func__,
-		node_desc[node->id].name, fe_stop);
+	cfe_dbg("%s: [%s] fe_stop %u\n", __func__, node_desc[node->id].name,
+		fe_stop);
 
 	if (fe_stop) {
 		csi2_stop_channel(&cfe->csi2, cfe->fe_csi2_channel);
@@ -949,8 +948,9 @@ static int cfe_queue_setup(struct vb2_queue *vq, unsigned int *nbuffers,
 {
 	struct cfe_node *node = vb2_get_drv_priv(vq);
 	struct cfe_device *cfe = node->cfe;
-	unsigned int size = is_image_node(node) ? node->vid_fmt.fmt.pix.sizeimage :
-						  node->meta_fmt.fmt.meta.buffersize;
+	unsigned int size = is_image_node(node) ?
+				    node->vid_fmt.fmt.pix.sizeimage :
+				    node->meta_fmt.fmt.meta.buffersize;
 
 	cfe_dbg("%s: [%s] type:%u\n", __func__, node_desc[node->id].name,
 		node->buffer_queue.type);
@@ -1025,8 +1025,7 @@ static void cfe_buffer_queue(struct vb2_buffer *vb)
 	trace_cfe_buffer_queue(node->id, vb, schedule_now);
 
 	if (schedule_now) {
-		cfe_dbg("Preparing job immediately for channel %u\n",
-			node->id);
+		cfe_dbg("Preparing job immediately for channel %u\n", node->id);
 		cfe_prepare_next_job(cfe);
 	}
 
@@ -1152,7 +1151,8 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 		goto err_disable_cfe;
 	}
 
-	cfe_dbg("Configuring CSI-2 block - %u data lanes\n", cfe->csi2.dphy.active_lanes);
+	cfe_dbg("Configuring CSI-2 block - %u data lanes\n",
+		cfe->csi2.dphy.active_lanes);
 	cfe->csi2.dphy.dphy_rate = sensor_link_rate(cfe) / 1000000UL;
 	csi2_open_rx(&cfe->csi2);
 
@@ -1189,8 +1189,9 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 err_disable_cfe:
 	csi2_close_rx(&cfe->csi2);
-	cfe_stop_channel(node, is_fe_enabled(cfe) &&
-			       test_all_nodes(cfe, NODE_ENABLED, NODE_STREAMING));
+	cfe_stop_channel(node,
+			 is_fe_enabled(cfe) && test_all_nodes(cfe, NODE_ENABLED,
+							      NODE_STREAMING));
 	media_pipeline_stop(&node->pad);
 err_pm_put:
 	pm_runtime_put(&cfe->pdev->dev);
@@ -1329,8 +1330,7 @@ static int cfe_enum_fmt_vid_cap(struct file *file, void *priv,
 	return -EINVAL;
 }
 
-static int cfe_g_fmt(struct file *file, void *priv,
-		     struct v4l2_format *f)
+static int cfe_g_fmt(struct file *file, void *priv, struct v4l2_format *f)
 {
 	struct cfe_node *node = video_drvdata(file);
 	struct cfe_device *cfe = node->cfe;
@@ -1350,9 +1350,8 @@ static int try_fmt_vid_cap(struct cfe_node *node, struct v4l2_format *f)
 	struct cfe_device *cfe = node->cfe;
 	const struct cfe_fmt *fmt;
 
-	cfe_dbg("%s: [%s] %ux%u, V4L2 pix %p4cc\n",
-		__func__, node_desc[node->id].name,
-		f->fmt.pix.width, f->fmt.pix.height,
+	cfe_dbg("%s: [%s] %ux%u, V4L2 pix %p4cc\n", __func__,
+		node_desc[node->id].name, f->fmt.pix.width, f->fmt.pix.height,
 		&f->fmt.pix.pixelformat);
 
 	if (!node_supports_image_output(node))
@@ -1736,8 +1735,7 @@ static int cfe_video_link_validate(struct media_link *link)
 
 	state = v4l2_subdev_lock_and_get_active_state(source_sd);
 
-	source_fmt = v4l2_subdev_state_get_format(state,
-						link->source->index);
+	source_fmt = v4l2_subdev_state_get_format(state, link->source->index);
 	if (!source_fmt) {
 		ret = -EINVAL;
 		goto out;
@@ -1752,8 +1750,7 @@ static int cfe_video_link_validate(struct media_link *link)
 		    source_fmt->height != pix_fmt->height) {
 			cfe_err("Wrong width or height %ux%u (remote pad set to %ux%u)\n",
 				pix_fmt->width, pix_fmt->height,
-				source_fmt->width,
-				source_fmt->height);
+				source_fmt->width, source_fmt->height);
 			ret = -EINVAL;
 			goto out;
 		}
@@ -1988,8 +1985,7 @@ static int cfe_register_node(struct cfe_device *cfe, int id)
 	if (!node_supports_image(node)) {
 		v4l2_disable_ioctl(&node->video_dev,
 				   VIDIOC_ENUM_FRAMEINTERVALS);
-		v4l2_disable_ioctl(&node->video_dev,
-				   VIDIOC_ENUM_FRAMESIZES);
+		v4l2_disable_ioctl(&node->video_dev, VIDIOC_ENUM_FRAMESIZES);
 	}
 
 	ret = video_register_device(vdev, VFL_TYPE_VIDEO, -1);

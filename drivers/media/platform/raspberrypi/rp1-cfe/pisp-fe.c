@@ -131,8 +131,8 @@ static inline void pisp_fe_reg_write(struct pisp_fe_device *fe, u32 offset,
 	writel(val, fe->base + offset);
 }
 
-static inline void pisp_fe_reg_write_relaxed(struct pisp_fe_device *fe, u32 offset,
-					     u32 val)
+static inline void pisp_fe_reg_write_relaxed(struct pisp_fe_device *fe,
+					     u32 offset, u32 val)
 {
 	writel_relaxed(val, fe->base + offset);
 }
@@ -168,8 +168,7 @@ DEFINE_SHOW_ATTRIBUTE(pisp_regs);
 
 static void pisp_config_write(struct pisp_fe_device *fe,
 			      struct pisp_fe_config *config,
-			      unsigned int start_offset,
-			      unsigned int size)
+			      unsigned int start_offset, unsigned int size)
 {
 	const unsigned int max_offset =
 		offsetof(struct pisp_fe_config, ch[PISP_FE_NUM_OUTPUTS]);
@@ -199,7 +198,8 @@ void pisp_fe_isr(struct pisp_fe_device *fe, bool *sof, bool *eof)
 	int_status = pisp_fe_reg_read(fe, FE_INT_STATUS);
 	pisp_fe_reg_write(fe, FE_INT_STATUS, int_status);
 
-	trace_fe_irq(status, out_status, frame_status, error_status, int_status);
+	trace_fe_irq(status, out_status, frame_status, error_status,
+		     int_status);
 
 	/* We do not report interrupts for the input/stream pad. */
 	for (i = 0; i < FE_NUM_PADS - 1; i++) {
@@ -229,8 +229,7 @@ static bool pisp_fe_validate_output(struct pisp_fe_config const *cfg,
 	if ((cfg->global.enables & PISP_FE_ENABLE_CROP(c)) &&
 	    ((cfg->ch[c].crop.offset_x >= (cfg->input.format.width & ~1) ||
 	      cfg->ch[c].crop.offset_y >= cfg->input.format.height ||
-	      cfg->ch[c].crop.width < 2 ||
-	      cfg->ch[c].crop.height < 2)))
+	      cfg->ch[c].crop.width < 2 || cfg->ch[c].crop.height < 2)))
 		return false;
 
 	if ((cfg->global.enables & PISP_FE_ENABLE_DOWNSCALE(c)) &&
@@ -247,8 +246,7 @@ static bool pisp_fe_validate_stats(struct pisp_fe_config const *cfg)
 	return (!(cfg->global.enables & PISP_FE_ENABLE_STATS_CROP) ||
 		(cfg->stats_crop.offset_x < (cfg->input.format.width & ~1) &&
 		 cfg->stats_crop.offset_y < cfg->input.format.height &&
-		 cfg->stats_crop.width >= 2 &&
-		 cfg->stats_crop.height >= 2));
+		 cfg->stats_crop.width >= 2 && cfg->stats_crop.height >= 2));
 }
 
 int pisp_fe_validate_config(struct pisp_fe_device *fe,

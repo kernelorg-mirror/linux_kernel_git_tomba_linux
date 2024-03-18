@@ -862,16 +862,22 @@ static int cal_video_check_format(struct cal_ctx *ctx)
 	} else {
 		const struct cal_format_info *fmtinfo;
 
-		if (ctx->meta_fmtinfo->code != format->code)
-			return -EPIPE;
+		if (ctx->meta_fmtinfo->code != format->code) {
+			ret = -EPIPE;
+			goto out;
+		}
 
 		fmtinfo = cal_format_by_code(format->code);
-		if (!fmtinfo)
-			return -EPIPE;
+		if (!fmtinfo) {
+			ret = -EPIPE;
+			goto out;
+		}
 
 		if (ctx->v_meta_fmt.fmt.meta.buffersize !=
-		    format->width * format->height * fmtinfo->bpp / 8)
-			return -EPIPE;
+		    format->width * format->height * fmtinfo->bpp / 8) {
+			ret = -EPIPE;
+			goto out;
+		}
 	}
 
 out:

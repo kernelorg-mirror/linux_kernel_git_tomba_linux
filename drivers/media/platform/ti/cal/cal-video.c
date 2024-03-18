@@ -558,6 +558,7 @@ static int cal_mc_enum_fmt_meta_cap(struct file *file, void  *priv,
 		if (idx == f->index) {
 			f->pixelformat = cal_formats[i].fourcc;
 			f->type = V4L2_BUF_TYPE_META_CAPTURE;
+			f->flags = V4L2_FMT_FLAG_META_LINE_BASED;
 			return 0;
 		}
 
@@ -588,11 +589,21 @@ static void cal_mc_try_fmt_meta(struct cal_ctx *ctx, struct v4l2_format *f,
 
 	f->fmt.meta.dataformat = fmtinfo->fourcc;
 
+	v4l_bound_align_image(&f->fmt.meta.width,
+			      DIV_ROUND_UP(CAL_MIN_WIDTH_BYTES * 8, fmtinfo->bpp),
+			      DIV_ROUND_UP(CAL_MAX_WIDTH_BYTES * 8, fmtinfo->bpp),
+			      2, &f->fmt.meta.height, CAL_MIN_HEIGHT_LINES,
+			      CAL_MAX_HEIGHT_LINES, 0, 0);
+
+	f->fmt.meta.bytesperline = (f->fmt.meta.width * fmtinfo->bpp) / 8;
+	f->fmt.meta.buffersize = f->fmt.meta.height * f->fmt.pix.bytesperline;
+
 	if (info)
 		*info = fmtinfo;
 
-	ctx_dbg(3, ctx, "%s: %p4cc (buffersize %u)\n",
+	ctx_dbg(3, ctx, "%s: %p4cc (bytesperline %u buffersize %u)\n",
 		__func__, &f->fmt.meta.dataformat,
+		f->fmt.meta.bytesperline,
 		f->fmt.meta.buffersize);
 }
 
@@ -849,6 +860,8 @@ static int cal_video_check_format(struct cal_ctx *ctx)
 		const struct cal_format_info *fmtinfo;
 
 		if (ctx->meta_fmtinfo->code != format->code) {
+			cal_dbg(1, ctx->cal, "metadata code mismatch %#x != %#x\n",
+			        ctx->meta_fmtinfo->code, format->code);
 			ret = -EPIPE;
 			goto out;
 		}
@@ -861,6 +874,9 @@ static int cal_video_check_format(struct cal_ctx *ctx)
 
 		if (ctx->v_meta_fmt.fmt.meta.buffersize !=
 		    format->width * format->height * fmtinfo->bpp / 8) {
+			cal_dbg(1, ctx->cal, "metadata size mismatch %u != %u\n",
+				ctx->v_meta_fmt.fmt.meta.buffersize,
+				format->width * format->height * fmtinfo->bpp / 8);
 			ret = -EPIPE;
 			goto out;
 		}
@@ -1105,13 +1121,10 @@ static int cal_ctx_v4l2_init_mc_format(struct cal_ctx *ctx)
 
 	ctx->v_meta_fmt.type = V4L2_BUF_TYPE_META_CAPTURE;
 	meta_fmt->dataformat = V4L2_META_FMT_GENERIC_8;
-	meta_fmt->buffersize = 64;
+	meta_fmt->width = 640;
+	meta_fmt->height = 1;
 
-	fmtinfo = cal_format_by_fourcc(meta_fmt->dataformat);
-	if (!fmtinfo)
-		return -EINVAL;
-
-	ctx->meta_fmtinfo = fmtinfo;
+	cal_mc_try_fmt_meta(ctx, &ctx->v_meta_fmt, &ctx->meta_fmtinfo);
 
 	return 0;
 }

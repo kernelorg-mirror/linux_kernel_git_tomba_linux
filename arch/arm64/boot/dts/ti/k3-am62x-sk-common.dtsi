@@ -32,7 +32,7 @@
 
 		framebuffer0: framebuffer@0 {
 			compatible = "simple-framebuffer";
-			power-domains = <&k3_pds 186 TI_SCI_PD_EXCLUSIVE>;
+			power-domains = <&k3_pds 186 (TI_SCI_PD_EXCLUSIVE | TI_SCI_PD_KEEP_BOOT_STATE)>;
 			clocks = <&k3_clks 186 6>,
 				 <&k3_clks 186 0>,
 				 <&k3_clks 186 2>;

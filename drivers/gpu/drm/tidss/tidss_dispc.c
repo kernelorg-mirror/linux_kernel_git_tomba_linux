@@ -12,10 +12,11 @@
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/media-bus-format.h>
-#include <linux/module.h>
 #include <linux/mfd/syscon.h>
+#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/sys_soc.h>
@@ -3036,6 +3037,8 @@ int dispc_init(struct tidss_device *tidss)
 
 void dispc_splash_fini(struct dispc_device *dispc)
 {
+	struct generic_pm_domain *genpd;
+
 	if (WARN_ON(!dispc->tidss->boot_enabled_vp_mask))
 		return;
 
@@ -3067,4 +3070,9 @@ void dispc_splash_fini(struct dispc_device *dispc)
 	pm_runtime_put_noidle(dispc->dev);
 
 	dispc->tidss->boot_enabled_vp_mask = 0;
+
+	genpd = pd_to_genpd(dispc->dev->pm_domain);
+
+	if (genpd->flags & GENPD_FLAG_ALWAYS_ON)
+		genpd->flags &= ~GENPD_FLAG_ALWAYS_ON;
 }

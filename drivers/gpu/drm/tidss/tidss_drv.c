@@ -210,6 +210,8 @@ err_irq_disable:
 	pm_runtime_dont_use_autosuspend(dev);
 	pm_runtime_disable(dev);
 
+	printk("probe failed: %d\n", ret);
+
 	return ret;
 }
 

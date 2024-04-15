@@ -154,6 +154,19 @@ static int tidss_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0) {
+		ret = irq;
+		return ret;
+	}
+	tidss->irq = irq;
+
+	ret = tidss_irq_install(ddev, irq);
+	if (ret) {
+		dev_err(dev, "tidss_irq_install failed: %d\n", ret);
+		return ret;
+	}
+
 	ret = dispc_init_hw(tidss->dispc);
 	if (ret) {
 		printk("INIT HW FAILED\n");
@@ -170,18 +183,7 @@ static int tidss_probe(struct platform_device *pdev)
 	dispc_runtime_resume(tidss->dispc);
 #endif
 
-	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		ret = irq;
-		goto err_runtime_suspend;
-	}
-	tidss->irq = irq;
-
-	ret = tidss_irq_install(ddev, irq);
-	if (ret) {
-		dev_err(dev, "tidss_irq_install failed: %d\n", ret);
-		goto err_runtime_suspend;
-	}
+	enable_irq(tidss->irq);
 
 	drm_kms_helper_poll_init(ddev);
 
@@ -190,7 +192,7 @@ static int tidss_probe(struct platform_device *pdev)
 	ret = drm_dev_register(ddev, 0);
 	if (ret) {
 		dev_err(dev, "failed to register DRM device\n");
-		goto err_irq_uninstall;
+		goto err_irq_disable;
 	}
 
 	drm_fbdev_dma_setup(ddev, 32);
@@ -199,10 +201,9 @@ static int tidss_probe(struct platform_device *pdev)
 
 	return 0;
 
-err_irq_uninstall:
-	tidss_irq_uninstall(ddev);
+err_irq_disable:
+	disable_irq(tidss->irq);
 
-err_runtime_suspend:
 #ifndef CONFIG_PM
 	dispc_runtime_suspend(tidss->dispc);
 #endif
@@ -224,7 +225,7 @@ static void tidss_remove(struct platform_device *pdev)
 
 	drm_atomic_helper_shutdown(ddev);
 
-	tidss_irq_uninstall(ddev);
+	disable_irq(tidss->irq);
 
 #ifndef CONFIG_PM
 	/* If we don't have PM, we need to call suspend manually */

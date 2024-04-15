@@ -2733,6 +2733,8 @@ int dispc_runtime_resume(struct dispc_device *dispc)
 
 	tidss_irq_resume(dispc->tidss);
 
+	printk("COUNT at end of dispc_runtime_resume %u\n", atomic_read(&dispc->dev->power.usage_count));
+
 	return 0;
 }
 
@@ -3075,4 +3077,6 @@ void dispc_splash_fini(struct dispc_device *dispc)
 
 	if (genpd->flags & GENPD_FLAG_ALWAYS_ON)
 		genpd->flags &= ~GENPD_FLAG_ALWAYS_ON;
+
+	printk("COUNT at dispc_splash_fini %u\n", atomic_read(&dispc->dev->power.usage_count));
 }

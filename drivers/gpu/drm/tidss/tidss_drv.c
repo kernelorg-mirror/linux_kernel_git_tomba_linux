@@ -187,6 +187,8 @@ static int tidss_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	printk("COUNT after hw init %u\n", atomic_read(&tidss->dev->power.usage_count));
+
 	pm_runtime_enable(dev);
 
 	pm_runtime_set_autosuspend_delay(dev, 1000);
@@ -213,6 +215,8 @@ static int tidss_probe(struct platform_device *pdev)
 
 	dev_dbg(dev, "%s done\n", __func__);
 
+	printk("COUNT at probe end %u\n", atomic_read(&tidss->dev->power.usage_count));
+
 	return 0;
 
 err_irq_disable:
@@ -229,6 +233,8 @@ err_irq_disable:
 
 	printk("probe failed: %d\n", ret);
 
+	printk("COUNT at probe fail %u\n", atomic_read(&tidss->dev->power.usage_count));
+
 	return ret;
 }
 
@@ -239,6 +245,8 @@ static void tidss_remove(struct platform_device *pdev)
 	struct drm_device *ddev = &tidss->ddev;
 
 	dev_dbg(dev, "%s\n", __func__);
+
+	printk("COUNT at remove start %u\n", atomic_read(&tidss->dev->power.usage_count));
 
 	drm_dev_unregister(ddev);
 
@@ -260,6 +268,7 @@ static void tidss_remove(struct platform_device *pdev)
 	dispc_remove(tidss);
 
 	dev_dbg(dev, "%s done\n", __func__);
+	printk("COUNT at remove end %u\n", atomic_read(&tidss->dev->power.usage_count));
 }
 
 static void tidss_shutdown(struct platform_device *pdev)

@@ -146,6 +146,14 @@ static int tidss_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	ret = tidss_modeset_init(tidss);
+	if (ret < 0) {
+		printk("modeset init failed: %d\n", ret);
+		if (ret != -EPROBE_DEFER)
+			dev_err(dev, "failed to init DRM/KMS (%d)\n", ret);
+		return ret;
+	}
+
 	ret = dispc_init_hw(tidss->dispc);
 	if (ret) {
 		printk("INIT HW FAILED\n");
@@ -161,13 +169,6 @@ static int tidss_probe(struct platform_device *pdev)
 	/* If we don't have PM, we need to call resume manually */
 	dispc_runtime_resume(tidss->dispc);
 #endif
-
-	ret = tidss_modeset_init(tidss);
-	if (ret < 0) {
-		if (ret != -EPROBE_DEFER)
-			dev_err(dev, "failed to init DRM/KMS (%d)\n", ret);
-		goto err_runtime_suspend;
-	}
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {

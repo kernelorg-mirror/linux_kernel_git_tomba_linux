@@ -3075,8 +3075,10 @@ void dispc_splash_fini(struct dispc_device *dispc)
 
 	genpd = pd_to_genpd(dispc->dev->pm_domain);
 
-	if (genpd->flags & GENPD_FLAG_ALWAYS_ON)
+	if (genpd->flags & GENPD_FLAG_ALWAYS_ON) {
+		printk("Clear GENPD_FLAG_ALWAYS_ON\n");
 		genpd->flags &= ~GENPD_FLAG_ALWAYS_ON;
+	}
 
 	printk("COUNT at dispc_splash_fini %u\n", atomic_read(&dispc->dev->power.usage_count));
 }

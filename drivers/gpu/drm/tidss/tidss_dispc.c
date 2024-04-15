@@ -2797,7 +2797,7 @@ static int dispc_softreset(struct dispc_device *dispc)
 	return 0;
 }
 
-static int dispc_init_hw(struct dispc_device *dispc)
+int dispc_init_hw(struct dispc_device *dispc)
 {
 	struct device *dev = dispc->dev;
 	int ret;
@@ -2948,10 +2948,6 @@ int dispc_init(struct tidss_device *tidss)
 
 	of_property_read_u32(dispc->dev->of_node, "max-memory-bandwidth",
 			     &dispc->memory_bandwidth_limit);
-
-	r = dispc_init_hw(dispc);
-	if (r)
-		return r;
 
 	tidss->dispc = dispc;
 

@@ -146,6 +146,12 @@ static int tidss_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	ret = dispc_init_hw(tidss->dispc);
+	if (ret) {
+		printk("INIT HW FAILED\n");
+		return ret;
+	}
+
 	pm_runtime_enable(dev);
 
 	pm_runtime_set_autosuspend_delay(dev, 1000);

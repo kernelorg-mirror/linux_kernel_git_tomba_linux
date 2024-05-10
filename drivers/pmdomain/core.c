@@ -848,7 +848,7 @@ static void genpd_queue_power_off_work(struct generic_pm_domain *genpd)
  * Request power off for all unused domains of the provider.
  * This should be used exclusively as sync state callback for genpd providers.
  */
-void pm_genpd_power_off_unused_sync_state(struct device *dev)
+static void pm_genpd_power_off_unused_sync_state(struct device *dev)
 {
 	struct generic_pm_domain *genpd;
 
@@ -860,7 +860,6 @@ void pm_genpd_power_off_unused_sync_state(struct device *dev)
 
 	mutex_unlock(&gpd_list_lock);
 }
-EXPORT_SYMBOL_GPL(pm_genpd_power_off_unused_sync_state);
 
 /**
  * genpd_keep_on - Tells if the domain should skip the power 'off' request

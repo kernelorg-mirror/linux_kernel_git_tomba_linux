@@ -291,6 +291,7 @@ enum v4l2_xfer_func {
 	V4L2_XFER_FUNC_NONE        = 5,
 	V4L2_XFER_FUNC_DCI_P3      = 6,
 	V4L2_XFER_FUNC_SMPTE2084   = 7,
+	V4L2_XFER_FUNC_HLG         = 8,
 #ifdef __KERNEL__
 	/*
 	 * Largest supported transfer function value, assigned by the compiler,
@@ -584,13 +585,20 @@ struct v4l2_pix_format {
 #define V4L2_PIX_FMT_BGR48_12    v4l2_fourcc('B', '3', '1', '2') /* 48  BGR 12-bit per component */
 #define V4L2_PIX_FMT_ABGR64_12   v4l2_fourcc('B', '4', '1', '2') /* 64  BGRA 12-bit per component */
 
+// XXX this is duplicate with V4L2_PIX_FMT_RGBX1010102
+#define V4L2_PIX_FMT_XBGR30  v4l2_fourcc('R', 'X', '3', '0') /* 32  XBGR-2-10-10-10 */
+#define V4L2_PIX_FMT_XBGR40  v4l2_fourcc('R', 'X', '4', '0') /* 40  XBGR-4-12-12-12 */
+#define V4L2_PIX_FMT_BGR48   v4l2_fourcc('R', 'G', '4', '8') /* 32  BGR-16-16-16 */
+
 /* Grey formats */
 #define V4L2_PIX_FMT_GREY    v4l2_fourcc('G', 'R', 'E', 'Y') /*  8  Greyscale     */
 #define V4L2_PIX_FMT_Y4      v4l2_fourcc('Y', '0', '4', ' ') /*  4  Greyscale     */
 #define V4L2_PIX_FMT_Y6      v4l2_fourcc('Y', '0', '6', ' ') /*  6  Greyscale     */
 #define V4L2_PIX_FMT_Y10     v4l2_fourcc('Y', '1', '0', ' ') /* 10  Greyscale     */
+#define V4L2_PIX_FMT_XY10    v4l2_fourcc('X', 'Y', '1', '0') /* 10  Greyscale 2-10-10-10 */
 #define V4L2_PIX_FMT_Y12     v4l2_fourcc('Y', '1', '2', ' ') /* 12  Greyscale     */
 #define V4L2_PIX_FMT_Y012    v4l2_fourcc('Y', '0', '1', '2') /* 12  Greyscale     */
+#define V4L2_PIX_FMT_XY12    v4l2_fourcc('X', 'Y', '1', '2') /* 12  Greyscale 4-12-12-12 */
 #define V4L2_PIX_FMT_Y14     v4l2_fourcc('Y', '1', '4', ' ') /* 14  Greyscale     */
 #define V4L2_PIX_FMT_Y16     v4l2_fourcc('Y', '1', '6', ' ') /* 16  Greyscale     */
 #define V4L2_PIX_FMT_Y16_BE  v4l2_fourcc_be('Y', '1', '6', ' ') /* 16  Greyscale BE  */
@@ -616,6 +624,9 @@ struct v4l2_pix_format {
 #define V4L2_PIX_FMT_VYUY    v4l2_fourcc('V', 'Y', 'U', 'Y') /* 16  YUV 4:2:2     */
 #define V4L2_PIX_FMT_Y41P    v4l2_fourcc('Y', '4', '1', 'P') /* 12  YUV 4:1:1     */
 #define V4L2_PIX_FMT_YUV444  v4l2_fourcc('Y', '4', '4', '4') /* 16  xxxxyyyy uuuuvvvv */
+#define V4L2_PIX_FMT_XVUY32  v4l2_fourcc('X', 'V', '3', '2') /* 32  XVUY 8:8:8:8 */
+#define V4L2_PIX_FMT_AVUY32  v4l2_fourcc('A', 'V', '3', '2') /* 32  AVUY 8:8:8:8 */
+#define V4L2_PIX_FMT_VUY24   v4l2_fourcc('V', 'U', '2', '4') /* 24  VUY 8:8:8 */
 #define V4L2_PIX_FMT_YUV555  v4l2_fourcc('Y', 'U', 'V', 'O') /* 16  YUV-5-5-5     */
 #define V4L2_PIX_FMT_YUV565  v4l2_fourcc('Y', 'U', 'V', 'P') /* 16  YUV-5-6-5     */
 #define V4L2_PIX_FMT_YUV24   v4l2_fourcc('Y', 'U', 'V', '3') /* 24  YUV-8-8-8     */
@@ -628,6 +639,7 @@ struct v4l2_pix_format {
 #define V4L2_PIX_FMT_YUVX32  v4l2_fourcc('Y', 'U', 'V', 'X') /* 32  YUVX-8-8-8-8  */
 #define V4L2_PIX_FMT_M420    v4l2_fourcc('M', '4', '2', '0') /* 12  YUV 4:2:0 2 lines y, 1 line uv interleaved */
 #define V4L2_PIX_FMT_YUV48_12    v4l2_fourcc('Y', '3', '1', '2') /* 48  YUV 4:4:4 12-bit per component */
+#define V4L2_PIX_FMT_XVUY10  v4l2_fourcc('X', '4', '1', '0') /* 32  XVUY 2-10-10-10 */
 
 /*
  * YCbCr packed format. For each Y2xx format, xx bits of valid data occupy the MSBs
@@ -646,6 +658,15 @@ struct v4l2_pix_format {
 #define V4L2_PIX_FMT_NV42    v4l2_fourcc('N', 'V', '4', '2') /* 24  Y/CrCb 4:4:4  */
 #define V4L2_PIX_FMT_P010    v4l2_fourcc('P', '0', '1', '0') /* 24  Y/CbCr 4:2:0 10-bit per component */
 #define V4L2_PIX_FMT_P012    v4l2_fourcc('P', '0', '1', '2') /* 24  Y/CbCr 4:2:0 12-bit per component */
+#define V4L2_PIX_FMT_XV20    v4l2_fourcc('X', 'V', '2', '0') /* 32  XY/UV 4:2:2 10-bit */
+#define V4L2_PIX_FMT_XV15    v4l2_fourcc('X', 'V', '1', '5') /* 32  XY/UV 4:2:0 10-bit */
+#define V4L2_PIX_FMT_X012    v4l2_fourcc('X', '0', '1', '2') /* 40  XY/UV 4:2:0 12-bit 4-12-12-12 */
+#define V4L2_PIX_FMT_X212    v4l2_fourcc('X', '2', '1', '2') /* 40  XY/UV 4:2:2 12-bit 4-12-12-12 */
+#define V4L2_PIX_FMT_X412    v4l2_fourcc('X', '4', '1', '2') /* 40  XY/UV 4:4:4 12-bit 4-12-12-12 */
+#define V4L2_PIX_FMT_X016    v4l2_fourcc('X', '0', '1', '6') /* 32  XY/UV 4:2:0 16-bit */
+#define V4L2_PIX_FMT_X216    v4l2_fourcc('X', '2', '1', '6') /* 32  XY/UV 4:2:2 16-bit */
+#define V4L2_PIX_FMT_X416    v4l2_fourcc('X', '4', '1', '6') /* 32  XY/UV 4:4:4 16-bit */
+#define V4L2_PIX_FMT_HM12    v4l2_fourcc('H', 'M', '1', '2') /*  8  YUV 4:2:0 16x16 macroblocks */
 
 /* two non contiguous planes - one Y, one Cr + Cb interleaved  */
 #define V4L2_PIX_FMT_NV12M   v4l2_fourcc('N', 'M', '1', '2') /* 12  Y/CbCr 4:2:0  */
@@ -653,6 +674,16 @@ struct v4l2_pix_format {
 #define V4L2_PIX_FMT_NV16M   v4l2_fourcc('N', 'M', '1', '6') /* 16  Y/CbCr 4:2:2  */
 #define V4L2_PIX_FMT_NV61M   v4l2_fourcc('N', 'M', '6', '1') /* 16  Y/CrCb 4:2:2  */
 #define V4L2_PIX_FMT_P012M   v4l2_fourcc('P', 'M', '1', '2') /* 24  Y/CbCr 4:2:0 12-bit per component */
+#define V4L2_PIX_FMT_NV12MT  v4l2_fourcc('T', 'M', '1', '2') /* 12  Y/CbCr 4:2:0 64x32 macroblocks */
+#define V4L2_PIX_FMT_XV20M   v4l2_fourcc('X', 'M', '2', '0') /* 32  XY/UV 4:2:2 10-bit */
+#define V4L2_PIX_FMT_XV15M   v4l2_fourcc('X', 'M', '1', '5') /* 32  XY/UV 4:2:0 10-bit */
+#define V4L2_PIX_FMT_X012M   v4l2_fourcc('M', '0', '1', '2') /* 40  XY/UV 4:2:0 12-bit 4-12-12-12 */
+#define V4L2_PIX_FMT_X212M   v4l2_fourcc('M', '2', '1', '2') /* 40  XY/UV 4:2:2 12-bit 4-12-12-12 */
+#define V4L2_PIX_FMT_X412M   v4l2_fourcc('M', '4', '1', '2') /* 40  XY/UV 4:4:4 12-bit 4-12-12-12 */
+#define V4L2_PIX_FMT_X016M   v4l2_fourcc('M', '0', '1', '6') /* 32  XY/UV 4:2:0 16-bit */
+#define V4L2_PIX_FMT_X216M   v4l2_fourcc('M', '2', '1', '6') /* 32  XY/UV 4:2:2 16-bit */
+#define V4L2_PIX_FMT_X416M   v4l2_fourcc('M', '4', '1', '6') /* 32  XY/UV 4:4:4 16-bit */
+#define V4L2_PIX_FMT_NV12MT_16X16 v4l2_fourcc('V', 'M', '1', '2') /* 12  Y/CbCr 4:2:0 16x16 macroblocks */
 
 /* three planes - Y Cb, Cr */
 #define V4L2_PIX_FMT_YUV410  v4l2_fourcc('Y', 'U', 'V', '9') /*  9  YUV 4:1:0     */
@@ -661,6 +692,8 @@ struct v4l2_pix_format {
 #define V4L2_PIX_FMT_YUV420  v4l2_fourcc('Y', 'U', '1', '2') /* 12  YUV 4:2:0     */
 #define V4L2_PIX_FMT_YVU420  v4l2_fourcc('Y', 'V', '1', '2') /* 12  YVU 4:2:0     */
 #define V4L2_PIX_FMT_YUV422P v4l2_fourcc('4', '2', '2', 'P') /* 16  YVU422 planar */
+#define V4L2_PIX_FMT_YUV444P v4l2_fourcc('4', '4', '4', 'P') /* 24  YUV444 planar */
+#define V4L2_PIX_FMT_X403    v4l2_fourcc('X', '4', '0', '3') /* 32  XYUV 4:4:4 10-bit */
 
 /* three non contiguous planes - Y, Cb, Cr */
 #define V4L2_PIX_FMT_YUV420M v4l2_fourcc('Y', 'M', '1', '2') /* 12  YUV420 planar */
@@ -1936,6 +1969,8 @@ enum v4l2_ctrl_type {
 	V4L2_CTRL_TYPE_AV1_TILE_GROUP_ENTRY = 0x281,
 	V4L2_CTRL_TYPE_AV1_FRAME	    = 0x282,
 	V4L2_CTRL_TYPE_AV1_FILM_GRAIN	    = 0x283,
+
+	V4L2_CTRL_TYPE_HDR	     = 0x0400,
 };
 
 /*  Used in the VIDIOC_QUERYCTRL ioctl for querying controls */

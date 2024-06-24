@@ -3204,7 +3204,7 @@ static int xhdmirx_g_input_status(struct v4l2_subdev *sd, u32 *status)
  *
  * Returns: 0 on success else -ENOLINK
  */
-static int xhdmirx_query_dv_timings(struct v4l2_subdev *subdev,
+static int xhdmirx_query_dv_timings(struct v4l2_subdev *subdev, unsigned int pad,
 				    struct v4l2_dv_timings *timings)
 {
 	struct xhdmirx_state *xhdmi = to_xhdmirx_state(subdev);
@@ -3323,7 +3323,6 @@ static int xhdmirx_subscribe_event(struct v4l2_subdev *sd, struct v4l2_fh *fh,
 }
 
 static const struct v4l2_subdev_video_ops xvideo_ops = {
-	.query_dv_timings	= xhdmirx_query_dv_timings,
 	.g_input_status		= xhdmirx_g_input_status,
 };
 
@@ -3340,6 +3339,7 @@ static const struct v4l2_subdev_pad_ops xpad_ops = {
 	.set_fmt		= xhdmirx_set_format,
 	.enable_streams		= xvip_enable_streams,
 	.disable_streams	= xvip_disable_streams,
+	.query_dv_timings	= xhdmirx_query_dv_timings,
 };
 
 static const struct v4l2_subdev_ops xhdmirx_ops = {

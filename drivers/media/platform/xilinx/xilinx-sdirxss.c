@@ -2190,7 +2190,7 @@ static int xsdirxss_enum_dv_timings(struct v4l2_subdev *sd,
  * Return: -ENOLCK when video is not locked, -ERANGE when corresponding timing
  * entry is not found or zero on success.
  */
-static int xsdirxss_query_dv_timings(struct v4l2_subdev *sd,
+static int xsdirxss_query_dv_timings(struct v4l2_subdev *sd, unsigned int pad,
 				     struct v4l2_dv_timings *timings)
 {
 	struct xsdirxss_state *state = to_xsdirxssstate(sd);
@@ -2392,7 +2392,6 @@ static const struct v4l2_subdev_core_ops xsdirxss_core_ops = {
 
 static const struct v4l2_subdev_video_ops xsdirxss_video_ops = {
 	.g_input_status = xsdirxss_g_input_status,
-	.query_dv_timings = xsdirxss_query_dv_timings,
 };
 
 static const struct v4l2_subdev_pad_ops xsdirxss_pad_ops = {
@@ -2403,6 +2402,7 @@ static const struct v4l2_subdev_pad_ops xsdirxss_pad_ops = {
 	.enum_dv_timings = xsdirxss_enum_dv_timings,
 	.enable_streams = xvip_enable_streams,
 	.disable_streams = xvip_disable_streams,
+	.query_dv_timings = xsdirxss_query_dv_timings,
 };
 
 static const struct v4l2_subdev_ops xsdirxss_ops = {

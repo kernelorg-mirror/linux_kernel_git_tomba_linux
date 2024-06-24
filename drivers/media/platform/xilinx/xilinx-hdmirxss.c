@@ -3232,8 +3232,7 @@ __xhdmirx_get_pad_format_ptr(struct xhdmirx_state *xhdmi,
 	case V4L2_SUBDEV_FORMAT_TRY:
 		dev_dbg(xhdmi->xvip.dev, "%s V4L2_SUBDEV_FORMAT_TRY\n",
 			__func__);
-		return v4l2_subdev_get_try_format(&xhdmi->xvip.subdev, sd_state,
-						  pad);
+		return v4l2_subdev_state_get_format(sd_state, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		dev_dbg(xhdmi->xvip.dev, "%s V4L2_SUBDEV_FORMAT_ACTIVE\n",
 			__func__);

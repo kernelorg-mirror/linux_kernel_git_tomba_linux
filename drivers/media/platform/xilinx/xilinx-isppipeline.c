@@ -266,8 +266,7 @@ static struct v4l2_mbus_framefmt
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		get_fmt = v4l2_subdev_get_try_format(&xisp->xvip.subdev,
-						     sd_state, pad);
+		get_fmt = v4l2_subdev_state_get_format(sd_state, pad);
 		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		get_fmt = &xisp->formats[pad];

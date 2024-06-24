@@ -1732,7 +1732,7 @@ static int xdprxss_get_dv_timings_cap(struct v4l2_subdev *subdev,
 	return 0;
 }
 
-static int xdprxss_query_dv_timings(struct v4l2_subdev *sd,
+static int xdprxss_query_dv_timings(struct v4l2_subdev *sd, unsigned int pad,
 				    struct v4l2_dv_timings *timings)
 {
 	struct xdprxss_state *state = to_xdprxssstate(sd);
@@ -2067,7 +2067,6 @@ static const struct v4l2_subdev_core_ops xdprxss_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops xdprxss_video_ops = {
-	.query_dv_timings	= xdprxss_query_dv_timings,
 	.g_input_status		= xdprxss_g_input_status,
 };
 
@@ -2079,6 +2078,7 @@ static const struct v4l2_subdev_pad_ops xdprxss_pad_ops = {
 	.dv_timings_cap         = xdprxss_get_dv_timings_cap,
 	.enable_streams		= xvip_enable_streams,
 	.disable_streams	= xvip_disable_streams,
+	.query_dv_timings	= xdprxss_query_dv_timings,
 };
 
 static const struct v4l2_subdev_ops xdprxss_ops = {

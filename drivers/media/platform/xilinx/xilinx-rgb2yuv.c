@@ -110,8 +110,7 @@ __xrgb2yuv_get_pad_format(struct xrgb2yuv_device *xrgb2yuv,
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xrgb2yuv->xvip.subdev,
-						    sd_state, pad);
+		format = v4l2_subdev_state_get_format(sd_state, pad);
 		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		format = &xrgb2yuv->formats[pad];
@@ -181,10 +180,10 @@ static int xrgb2yuv_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 	struct v4l2_mbus_framefmt *format;
 
 	/* Initialize with default formats */
-	format = v4l2_subdev_get_try_format(subdev, fh->state, XVIP_PAD_SINK);
+	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SINK);
 	*format = xrgb2yuv->default_formats[XVIP_PAD_SINK];
 
-	format = v4l2_subdev_get_try_format(subdev, fh->state, XVIP_PAD_SOURCE);
+	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SOURCE);
 	*format = xrgb2yuv->default_formats[XVIP_PAD_SOURCE];
 
 	return 0;
@@ -448,7 +447,7 @@ static int xrgb2yuv_probe(struct platform_device *pdev)
 	v4l2_subdev_init(subdev, &xrgb2yuv_ops);
 	subdev->dev = &pdev->dev;
 	subdev->internal_ops = &xrgb2yuv_internal_ops;
-	strlcpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
+	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	v4l2_set_subdevdata(subdev, xrgb2yuv);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 

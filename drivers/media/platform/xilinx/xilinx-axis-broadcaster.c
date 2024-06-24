@@ -47,8 +47,7 @@ xvbr_get_pad_format(struct xvbroadcaster_device *xvbr,
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_format(&xvbr->xvip.subdev, sd_state,
-						  pad);
+		return v4l2_subdev_state_get_format(sd_state, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		return &xvbr->formats;
 	default:
@@ -95,7 +94,7 @@ static int xvbr_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 	num_pads = xvbr->xvip.num_sinks + xvbr->xvip.num_sources;
 
 	for (i = 0; i < num_pads; ++i) {
-		format = v4l2_subdev_get_try_format(subdev, fh->state, i);
+		format = v4l2_subdev_state_get_format(fh->state, i);
 		*format = xvbr->formats;
 	}
 
@@ -205,7 +204,7 @@ static int xvbr_probe(struct platform_device *pdev)
 	v4l2_subdev_init(subdev, &xvbr_ops);
 	subdev->dev = &pdev->dev;
 	subdev->internal_ops = &xvbr_internal_ops;
-	strlcpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
+	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	v4l2_set_subdevdata(subdev, xvbr);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	subdev->entity.ops = &xvbr_media_ops;

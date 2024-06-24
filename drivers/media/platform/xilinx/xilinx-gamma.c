@@ -183,9 +183,7 @@ __xg_get_pad_format(struct xgamma_dev *xg,
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xg->xvip.subdev,
-						    sd_state,
-						    pad);
+		format = v4l2_subdev_state_get_format(sd_state, pad);
 		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		format = &xg->formats[pad];
@@ -255,10 +253,10 @@ static int xg_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 	struct xgamma_dev *xg = to_xg(subdev);
 	struct v4l2_mbus_framefmt *format;
 
-	format = v4l2_subdev_get_try_format(subdev, fh->state, XVIP_PAD_SINK);
+	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SINK);
 	*format = xg->default_formats[XVIP_PAD_SINK];
 
-	format = v4l2_subdev_get_try_format(subdev, fh->state, XVIP_PAD_SOURCE);
+	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SOURCE);
 	*format = xg->default_formats[XVIP_PAD_SOURCE];
 	return 0;
 }
@@ -487,7 +485,7 @@ static int xg_probe(struct platform_device *pdev)
 	v4l2_subdev_init(subdev, &xg_ops);
 	subdev->dev = &pdev->dev;
 	subdev->internal_ops = &xg_internal_ops;
-	strlcpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
+	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
 	/* Default Formats Initialization */

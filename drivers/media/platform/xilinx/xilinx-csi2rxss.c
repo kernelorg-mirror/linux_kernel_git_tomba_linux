@@ -893,7 +893,7 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 	 * Set the format on the sink stream and propagate it to the source
 	 * stream.
 	 */
-	sink_fmt = v4l2_subdev_state_get_stream_format(state, format->pad,
+	sink_fmt = v4l2_subdev_state_get_format(state, format->pad,
 						       format->stream);
 	source_fmt = v4l2_subdev_state_get_opposite_stream_format(state,
 								  format->pad,
@@ -944,7 +944,7 @@ static const struct v4l2_subdev_ops xcsi2rxss_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops xcsi2rxss_internal_ops = {
-	.init_state = xcsi2rxss_init_state,
+	.init_state = xcsi2rxss_init_cfg,
 };
 
 static int xcsi2rxss_parse_of(struct xcsi2rxss_state *csi2rx)

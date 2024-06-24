@@ -198,16 +198,15 @@ static int xvip_dma_submit_buffer(struct xvip_dma_buffer *buf,
 	xilinx_xdma_v4l2_config(dma->dma, format);
 	dma->xt.frame_size = num_planes;
 
-	dma->sgl[0].size = width;
-	dma->sgl[0].icg = bpl - width;
+	dma->sgl.size = width;
+	dma->sgl.icg = bpl - width;
 
 	/*
 	 * dst_icg is the number of bytes to jump after last luma addr
 	 * and before first chroma addr
 	 */
 	if (num_planes == 2)
-		dma->sgl[0].dst_icg = dma_addrs[1] - dma_addrs[0]
-				    - bpl * height;
+		dma->sgl.dst_icg = dma_addrs[1] - dma_addrs[0] - bpl * height;
 
 	dma->xt.numf = height;
 

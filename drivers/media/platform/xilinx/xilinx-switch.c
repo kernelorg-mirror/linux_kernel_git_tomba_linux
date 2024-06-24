@@ -212,7 +212,7 @@ static int xsw_set_format(struct v4l2_subdev *subdev,
 	 * Set the format on the sink stream and propagate it to the source
 	 * stream.
 	 */
-	sink_fmt = v4l2_subdev_state_get_stream_format(state, format->pad,
+	sink_fmt = v4l2_subdev_state_get_format(state, format->pad,
 						       format->stream);
 	source_fmt = v4l2_subdev_state_get_opposite_stream_format(state,
 								  format->pad,
@@ -243,7 +243,6 @@ static int xsw_set_routing(struct v4l2_subdev *subdev,
  */
 
 static const struct v4l2_subdev_pad_ops xsw_pad_ops = {
-	.init_cfg = xsw_init_cfg,
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = v4l2_subdev_get_fmt,
@@ -255,6 +254,10 @@ static const struct v4l2_subdev_pad_ops xsw_pad_ops = {
 
 static const struct v4l2_subdev_ops xsw_ops = {
 	.pad = &xsw_pad_ops,
+};
+
+static const struct v4l2_subdev_internal_ops xsw_internal_ops = {
+	.init_state = xsw_init_cfg,
 };
 
 /* -----------------------------------------------------------------------------
@@ -325,8 +328,9 @@ static int xsw_probe(struct platform_device *pdev)
 
 	subdev = &xsw->xvip.subdev;
 	v4l2_subdev_init(subdev, &xsw_ops);
+	subdev->internal_ops = &xsw_internal_ops;
 	subdev->dev = &pdev->dev;
-	strlcpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
+	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	v4l2_set_subdevdata(subdev, xsw);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_STREAMS;
 	subdev->entity.ops = &xsw_media_ops;

@@ -16,6 +16,7 @@
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
 #include <linux/of_device.h>
+#include <linux/of_platform.h>
 #include <linux/phy/phy.h>
 #include <linux/phy/phy-dp.h>
 #include <linux/platform_device.h>
@@ -1570,8 +1571,7 @@ __xdprxss_get_pad_format(struct xdprxss_state *xdprxss,
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xdprxss->xvip.subdev,
-						    sd_state, pad);
+		format = v4l2_subdev_state_get_format(sd_state, pad);
 		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		format = &xdprxss->format;
@@ -1600,7 +1600,7 @@ static int xdprxss_init_cfg(struct v4l2_subdev *sd,
 	struct xdprxss_state *xdprxss = to_xdprxssstate(sd);
 	struct v4l2_mbus_framefmt *format;
 
-	format = v4l2_subdev_get_try_format(sd, sd_state, 0);
+	format = v4l2_subdev_state_get_format(sd_state, 0);
 
 	if (!xdprxss->valid_stream)
 		*format = xdprxss->format;
@@ -2072,7 +2072,6 @@ static const struct v4l2_subdev_video_ops xdprxss_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops xdprxss_pad_ops = {
-	.init_cfg		= xdprxss_init_cfg,
 	.enum_mbus_code		= xdprxss_enum_mbus_code,
 	.get_fmt		= xdprxss_getset_format,
 	.set_fmt		= xdprxss_getset_format,
@@ -2086,6 +2085,10 @@ static const struct v4l2_subdev_ops xdprxss_ops = {
 	.core	= &xdprxss_core_ops,
 	.video	= &xdprxss_video_ops,
 	.pad	= &xdprxss_pad_ops
+};
+
+static const struct v4l2_subdev_internal_ops xdprxss_internal_ops = {
+	.init_state = xdprxss_init_cfg,
 };
 
 /* ----------------------------------------------------------------
@@ -2643,6 +2646,7 @@ static int xdprxss_probe(struct platform_device *pdev)
 	/* Initialize V4L2 subdevice and media entity */
 	subdev = &xdprxss->xvip.subdev;
 	v4l2_subdev_init(subdev, &xdprxss_ops);
+	subdev->internal_ops = &xdprxss_internal_ops;
 	subdev->dev = dev;
 	strscpy(subdev->name, dev_name(dev), sizeof(subdev->name));
 

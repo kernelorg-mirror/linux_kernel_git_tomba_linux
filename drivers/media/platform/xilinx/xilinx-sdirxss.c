@@ -1998,6 +1998,7 @@ static int xsdirxss_log_status(struct v4l2_subdev *sd)
  * Return: 0 on success
  */
 static int xsdirxss_g_frame_interval(struct v4l2_subdev *sd,
+				     struct v4l2_subdev_state *state,
 				     struct v4l2_subdev_frame_interval *fi)
 {
 	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
@@ -2049,9 +2050,7 @@ __xsdirxss_get_pad_format(struct xsdirxss_state *xsdirxss,
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xsdirxss->core.xvip.subdev,
-						    sd_state,
-						    pad);
+		format = v4l2_subdev_state_get_format(sd_state, pad);
 		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		format = &xsdirxss->format;
@@ -2228,7 +2227,7 @@ static int xsdirxss_open(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *format;
 	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
 
-	format = v4l2_subdev_get_try_format(sd, fh->state, 0);
+	format = v4l2_subdev_state_get_format(fh->state, 0);
 	*format = xsdirxss->default_format;
 
 	return 0;
@@ -2392,12 +2391,12 @@ static const struct v4l2_subdev_core_ops xsdirxss_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops xsdirxss_video_ops = {
-	.g_frame_interval = xsdirxss_g_frame_interval,
 	.g_input_status = xsdirxss_g_input_status,
 	.query_dv_timings = xsdirxss_query_dv_timings,
 };
 
 static const struct v4l2_subdev_pad_ops xsdirxss_pad_ops = {
+	.get_frame_interval = xsdirxss_g_frame_interval,
 	.get_fmt = xsdirxss_get_format,
 	.set_fmt = xsdirxss_set_format,
 	.enum_mbus_code = xsdirxss_enum_mbus_code,

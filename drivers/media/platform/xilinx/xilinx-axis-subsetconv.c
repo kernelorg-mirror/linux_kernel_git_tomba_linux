@@ -70,7 +70,7 @@ xsubsetconv_get_pad_format(struct xsubsetconv_state *xsubsetconv,
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xsubsetconv->subdev, state, pad);
+		format = v4l2_subdev_state_get_format(state, pad);
 		break;
 
 	case V4L2_SUBDEV_FORMAT_ACTIVE:

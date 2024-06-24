@@ -173,7 +173,7 @@ static int xremap_enum_mbus_code(struct v4l2_subdev *subdev,
 		if (code->index)
 			return -EINVAL;
 
-		format = v4l2_subdev_get_try_format(subdev, sd_state, code->pad);
+		format = v4l2_subdev_state_get_format(sd_state, code->pad);
 		code->code = format->code;
 	}
 
@@ -186,7 +186,7 @@ static int xremap_enum_frame_size(struct v4l2_subdev *subdev,
 {
 	struct v4l2_mbus_framefmt *format;
 
-	format = v4l2_subdev_get_try_format(subdev, sd_state, fse->pad);
+	format = v4l2_subdev_state_get_format(sd_state, fse->pad);
 
 	if (fse->index || fse->code != format->code)
 		return -EINVAL;
@@ -219,8 +219,7 @@ xremap_get_pad_format(struct xremap_device *xremap,
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xremap->xvip.subdev,
-						    sd_state, pad);
+		format = v4l2_subdev_state_get_format(sd_state, pad);
 		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		format = &xremap->formats[pad];
@@ -494,7 +493,7 @@ static int xremap_probe(struct platform_device *pdev)
 	v4l2_subdev_init(subdev, &xremap_ops);
 	subdev->dev = &pdev->dev;
 	subdev->internal_ops = &xremap_internal_ops;
-	strlcpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
+	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	v4l2_set_subdevdata(subdev, xremap);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 

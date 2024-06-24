@@ -120,8 +120,7 @@ __xcfa_get_pad_format(struct xcfa_device *xcfa,
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xcfa->xvip.subdev,
-						    sd_state, pad);
+		format = v4l2_subdev_state_get_format(sd_state, pad);
 		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		format = &xcfa->formats[pad];
@@ -194,10 +193,10 @@ static int xcfa_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
 	struct v4l2_mbus_framefmt *format;
 
 	/* Initialize with default formats */
-	format = v4l2_subdev_get_try_format(subdev, fh->state, XVIP_PAD_SINK);
+	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SINK);
 	*format = xcfa->default_formats[XVIP_PAD_SINK];
 
-	format = v4l2_subdev_get_try_format(subdev, fh->state, XVIP_PAD_SOURCE);
+	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SOURCE);
 	*format = xcfa->default_formats[XVIP_PAD_SOURCE];
 
 	return 0;
@@ -293,7 +292,7 @@ static int xcfa_probe(struct platform_device *pdev)
 	v4l2_subdev_init(subdev, &xcfa_ops);
 	subdev->dev = &pdev->dev;
 	subdev->internal_ops = &xcfa_internal_ops;
-	strlcpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
+	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	v4l2_set_subdevdata(subdev, xcfa);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 

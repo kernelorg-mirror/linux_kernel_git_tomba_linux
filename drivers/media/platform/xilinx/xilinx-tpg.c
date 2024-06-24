@@ -371,6 +371,7 @@ static const struct xvip_device_ops xtpg_xvip_device_ops = {
  */
 
 static int xtpg_g_frame_interval(struct v4l2_subdev *subdev,
+				 struct v4l2_subdev_state *state,
 				 struct v4l2_subdev_frame_interval *fi)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
@@ -382,6 +383,7 @@ static int xtpg_g_frame_interval(struct v4l2_subdev *subdev,
 }
 
 static int xtpg_s_frame_interval(struct v4l2_subdev *subdev,
+				 struct v4l2_subdev_state *state,
 				 struct v4l2_subdev_frame_interval *fi)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
@@ -700,14 +702,6 @@ static const struct v4l2_ctrl_ops xtpg_ctrl_ops = {
 	.s_ctrl	= xtpg_s_ctrl,
 };
 
-static const struct v4l2_subdev_core_ops xtpg_core_ops = {
-};
-
-static const struct v4l2_subdev_video_ops xtpg_video_ops = {
-	.g_frame_interval = xtpg_g_frame_interval,
-	.s_frame_interval = xtpg_s_frame_interval,
-};
-
 static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {
 	.enum_mbus_code		= xvip_enum_mbus_code,
 	.enum_frame_size	= xtpg_enum_frame_size,
@@ -715,11 +709,11 @@ static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {
 	.set_fmt		= xtpg_set_format,
 	.enable_streams		= xvip_enable_streams,
 	.disable_streams	= xvip_disable_streams,
+	.get_frame_interval = xtpg_g_frame_interval,
+	.set_frame_interval = xtpg_s_frame_interval,
 };
 
 static const struct v4l2_subdev_ops xtpg_ops = {
-	.core   = &xtpg_core_ops,
-	.video  = &xtpg_video_ops,
 	.pad    = &xtpg_pad_ops,
 };
 

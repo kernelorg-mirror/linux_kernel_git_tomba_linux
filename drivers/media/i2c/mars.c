@@ -387,7 +387,7 @@ mars_get_pad_format(struct mars_device *dev, struct v4l2_subdev_state *state,
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_format(&dev->sd, state, pad);
+		return v4l2_subdev_state_get_format(state, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		return &dev->fmt;
 	default:

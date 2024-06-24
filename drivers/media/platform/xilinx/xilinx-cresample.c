@@ -101,8 +101,7 @@ __xcresample_get_pad_format(struct xcresample_device *xcresample,
 
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_get_try_format(&xcresample->xvip.subdev,
-						    sd_state, pad);
+		format = v4l2_subdev_state_get_format(sd_state, pad);
 		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		format = &xcresample->formats[pad];
@@ -173,10 +172,10 @@ static int xcresample_open(struct v4l2_subdev *subdev,
 	struct v4l2_mbus_framefmt *format;
 
 	/* Initialize with default formats */
-	format = v4l2_subdev_get_try_format(subdev, fh->state, XVIP_PAD_SINK);
+	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SINK);
 	*format = xcresample->default_formats[XVIP_PAD_SINK];
 
-	format = v4l2_subdev_get_try_format(subdev, fh->state, XVIP_PAD_SOURCE);
+	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SOURCE);
 	*format = xcresample->default_formats[XVIP_PAD_SOURCE];
 
 	return 0;
@@ -326,7 +325,7 @@ static int xcresample_probe(struct platform_device *pdev)
 	v4l2_subdev_init(subdev, &xcresample_ops);
 	subdev->dev = &pdev->dev;
 	subdev->internal_ops = &xcresample_internal_ops;
-	strlcpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
+	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	v4l2_set_subdevdata(subdev, xcresample);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 

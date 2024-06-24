@@ -685,7 +685,7 @@ static void max9286_config_links(struct max9286_priv *priv,
 	 * must be identical.
 	 */
 	pad = __ffs(priv->route_mask);
-	format = v4l2_subdev_state_get_stream_format(state, pad, 0);
+	format = v4l2_subdev_state_get_format(state, pad, 0);
 
 	max9286_set_video_format(priv, format);
 	max9286_set_fsync_period(priv);
@@ -1048,8 +1048,7 @@ static int max9286_set_fmt(struct v4l2_subdev *sd,
 	if (i == ARRAY_SIZE(max9286_formats))
 		format->format.code = max9286_formats[0].code;
 
-	fmt = v4l2_subdev_state_get_stream_format(state, format->pad,
-						  format->stream);
+	fmt = v4l2_subdev_state_get_format(state, format->pad, format->stream);
 	if (!fmt)
 		return -EINVAL;
 	*fmt = format->format;
@@ -1084,8 +1083,8 @@ static int max9286_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 						&fd->entry[fd->num_entries];
 		struct v4l2_mbus_framefmt *fmt;
 
-		fmt = v4l2_subdev_state_get_stream_format(state, pad,
-							  route->source_stream);
+		fmt = v4l2_subdev_state_get_format(state, pad,
+						   route->source_stream);
 		if (!fmt) {
 			ret = -EINVAL;
 			goto out;
@@ -1249,7 +1248,6 @@ static const struct v4l2_subdev_video_ops max9286_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops max9286_pad_ops = {
-	.init_cfg	= max9286_init_cfg,
 	.enum_mbus_code = max9286_enum_mbus_code,
 	.get_fmt	= v4l2_subdev_get_fmt,
 	.set_fmt	= max9286_set_fmt,
@@ -1264,6 +1262,10 @@ static const struct v4l2_subdev_pad_ops max9286_pad_ops = {
 static const struct v4l2_subdev_ops max9286_subdev_ops = {
 	.video		= &max9286_video_ops,
 	.pad		= &max9286_pad_ops,
+};
+
+static const struct v4l2_subdev_internal_ops xcsi2rxss_internal_ops = {
+	.init_state = max9286_init_cfg,
 };
 
 static u64 max9286_has_pad_interdep(struct media_entity *entity,
@@ -1333,6 +1335,8 @@ static int max9286_v4l2_register(struct max9286_priv *priv)
 
 	v4l2_i2c_subdev_init(&priv->sd, priv->client, &max9286_subdev_ops);
 	priv->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_STREAMS;
+
+	priv->sd.internal_ops = &xcsi2rxss_internal_ops;
 
 	v4l2_ctrl_handler_init(&priv->ctrls, 1);
 	priv->pixelrate_ctrl = v4l2_ctrl_new_std(&priv->ctrls,

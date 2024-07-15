@@ -653,6 +653,63 @@ static const struct ub960_format_info *ub960_find_format(u32 code)
 	return NULL;
 }
 
+struct ub960_rxport_iter {
+	unsigned int nport;
+	struct ub960_rxport *rxport;
+};
+
+enum ub960_iter_flags {
+	UB960_ITER_ACTIVE_ONLY = BIT(0),
+	UB960_ITER_FPD4_ONLY = BIT(1),
+};
+
+static struct ub960_rxport_iter ub960_iter_rxport(struct ub960_data *priv,
+						  struct ub960_rxport_iter it,
+						  enum ub960_iter_flags flags)
+{
+	for (; it.nport < priv->hw_data->num_rxports; it.nport++) {
+		it.rxport = priv->rxports[it.nport];
+
+		if ((flags & UB960_ITER_ACTIVE_ONLY) && !it.rxport)
+			continue;
+
+		if ((flags & UB960_ITER_FPD4_ONLY) &&
+		    it.rxport->cdr_mode != RXPORT_CDR_FPD4)
+			continue;
+
+		return it;
+	}
+
+	it.rxport = NULL;
+
+	return it;
+}
+
+#define for_each_rxport()                                                     \
+	for (struct ub960_rxport_iter it =                                    \
+		     ub960_iter_rxport(priv, (struct ub960_rxport_iter){ 0 }, \
+				       0);                                    \
+	     it.nport < priv->hw_data->num_rxports;                           \
+	     it.nport++, it = ub960_iter_rxport(priv, it, 0))
+
+#define for_each_active_rxport()                                              \
+	for (struct ub960_rxport_iter it =                                    \
+		     ub960_iter_rxport(priv, (struct ub960_rxport_iter){ 0 }, \
+				       UB960_ITER_ACTIVE_ONLY);               \
+	     it.nport < priv->hw_data->num_rxports;                           \
+	     it.nport++, it = ub960_iter_rxport(priv, it,                     \
+						UB960_ITER_ACTIVE_ONLY))
+
+#define for_each_active_rxport_fpd4()                                         \
+	for (struct ub960_rxport_iter it =                                    \
+		     ub960_iter_rxport(priv, (struct ub960_rxport_iter){ 0 }, \
+				       UB960_ITER_ACTIVE_ONLY |               \
+					       UB960_ITER_FPD4_ONLY);         \
+	     it.nport < priv->hw_data->num_rxports;                           \
+	     it.nport++, it = ub960_iter_rxport(priv, it,                     \
+						UB960_ITER_ACTIVE_ONLY |      \
+							UB960_ITER_FPD4_ONLY))
+
 /* -----------------------------------------------------------------------------
  * Basic device access
  */
@@ -1255,25 +1312,25 @@ static void ub960_csi_handle_events(struct ub960_data *priv, u8 nport)
 
 static int ub960_rxport_enable_vpocs(struct ub960_data *priv)
 {
-	unsigned int nport;
+	unsigned int failed_nport;
 	int ret;
 
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
-		struct ub960_rxport *rxport = priv->rxports[nport];
-
-		if (!rxport || !rxport->vpoc)
+	for_each_active_rxport() {
+		if (!it.rxport->vpoc)
 			continue;
 
-		ret = regulator_enable(rxport->vpoc);
-		if (ret)
+		ret = regulator_enable(it.rxport->vpoc);
+		if (ret) {
+			failed_nport = it.nport;
 			goto err_disable_vpocs;
+		}
 	}
 
 	return 0;
 
 err_disable_vpocs:
-	while (nport--) {
-		struct ub960_rxport *rxport = priv->rxports[nport];
+	while (failed_nport--) {
+		struct ub960_rxport *rxport = priv->rxports[failed_nport];
 
 		if (!rxport || !rxport->vpoc)
 			continue;
@@ -1286,15 +1343,11 @@ err_disable_vpocs:
 
 static void ub960_rxport_disable_vpocs(struct ub960_data *priv)
 {
-	unsigned int nport;
-
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
-		struct ub960_rxport *rxport = priv->rxports[nport];
-
-		if (!rxport || !rxport->vpoc)
+	for_each_active_rxport() {
+		if (!it.rxport->vpoc)
 			continue;
 
-		regulator_disable(rxport->vpoc);
+		regulator_disable(it.rxport->vpoc);
 	}
 }
 
@@ -1316,10 +1369,8 @@ static void ub960_rxport_clear_errors(struct ub960_data *priv,
 
 static void ub960_clear_rx_errors(struct ub960_data *priv)
 {
-	unsigned int nport;
-
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++)
-		ub960_rxport_clear_errors(priv, nport);
+	for_each_rxport()
+		ub960_rxport_clear_errors(priv, it.nport);
 }
 
 static int ub960_rxport_get_strobe_pos(struct ub960_data *priv,
@@ -1757,30 +1808,27 @@ static void ub960_rxport_remove_serializer(struct ub960_data *priv, u8 nport)
 /* Add serializer i2c devices for all initialized ports */
 static int ub960_rxport_add_serializers(struct ub960_data *priv)
 {
-	unsigned int nport;
+	unsigned int failed_nport;
 	int ret;
 
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
-		struct ub960_rxport *rxport = priv->rxports[nport];
-
-		if (!rxport)
-			continue;
-
-		ret = ub960_rxport_add_serializer(priv, nport);
-		if (ret)
+	for_each_active_rxport() {
+		ret = ub960_rxport_add_serializer(priv, it.nport);
+		if (ret) {
+			failed_nport = it.nport;
 			goto err_remove_sers;
+		}
 	}
 
 	return 0;
 
 err_remove_sers:
-	while (nport--) {
-		struct ub960_rxport *rxport = priv->rxports[nport];
+	while (failed_nport--) {
+		struct ub960_rxport *rxport = priv->rxports[failed_nport];
 
 		if (!rxport)
 			continue;
 
-		ub960_rxport_remove_serializer(priv, nport);
+		ub960_rxport_remove_serializer(priv, failed_nport);
 	}
 
 	return ret;
@@ -1788,16 +1836,8 @@ err_remove_sers:
 
 static void ub960_rxport_remove_serializers(struct ub960_data *priv)
 {
-	unsigned int nport;
-
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
-		struct ub960_rxport *rxport = priv->rxports[nport];
-
-		if (!rxport)
-			continue;
-
-		ub960_rxport_remove_serializer(priv, nport);
-	}
+	for_each_active_rxport()
+		ub960_rxport_remove_serializer(priv, it.nport);
 }
 
 static void ub960_init_tx_port(struct ub960_data *priv,
@@ -2224,18 +2264,11 @@ static void ub960_init_rx_port_ub9702(struct ub960_data *priv,
 
 static int ub960_init_rx_ports(struct ub960_data *priv)
 {
-	unsigned int nport;
-
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
-		struct ub960_rxport *rxport = priv->rxports[nport];
-
-		if (!rxport)
-			continue;
-
+	for_each_active_rxport() {
 		if (priv->hw_data->is_ub9702)
-			ub960_init_rx_port_ub9702(priv, rxport);
+			ub960_init_rx_port_ub9702(priv, it.rxport);
 		else
-			ub960_init_rx_port_ub960(priv, rxport);
+			ub960_init_rx_port_ub960(priv, it.rxport);
 	}
 
 	return 0;
@@ -2453,20 +2486,15 @@ static void ub960_disable_rx_port(struct ub960_data *priv, unsigned int nport)
  */
 static int ub960_validate_stream_vcs(struct ub960_data *priv)
 {
-	unsigned int nport;
 	unsigned int i;
 
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
-		struct ub960_rxport *rxport = priv->rxports[nport];
+	for_each_active_rxport() {
 		struct v4l2_mbus_frame_desc desc;
 		int ret;
 		u8 vc;
 
-		if (!rxport)
-			continue;
-
-		ret = v4l2_subdev_call(rxport->source.sd, pad, get_frame_desc,
-				       rxport->source.pad, &desc);
+		ret = v4l2_subdev_call(it.rxport->source.sd, pad, get_frame_desc,
+				       it.rxport->source.pad, &desc);
 		if (ret)
 			return ret;
 
@@ -2484,7 +2512,7 @@ static int ub960_validate_stream_vcs(struct ub960_data *priv)
 
 			dev_err(&priv->client->dev,
 				"rx%u: source with multiple virtual-channels is not supported\n",
-				nport);
+				it.nport);
 			return -ENODEV;
 		}
 	}
@@ -2505,7 +2533,6 @@ static int ub960_configure_ports_for_streaming(struct ub960_data *priv,
 	} rx_data[UB960_MAX_RX_NPORTS] = {};
 	u8 vc_map[UB960_MAX_RX_NPORTS] = {};
 	struct v4l2_subdev_route *route;
-	unsigned int nport;
 	int ret;
 
 	ret = ub960_validate_stream_vcs(priv);
@@ -2575,19 +2602,20 @@ static int ub960_configure_ports_for_streaming(struct ub960_data *priv,
 	 */
 	fwd_ctl = GENMASK(7, 4);
 
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
-		struct ub960_rxport *rxport = priv->rxports[nport];
+	for_each_active_rxport() {
+		unsigned long nport = it.nport;
+
 		u8 vc = vc_map[nport];
 
 		if (rx_data[nport].num_streams == 0)
 			continue;
 
-		switch (rxport->rx_mode) {
+		switch (it.rxport->rx_mode) {
 		case RXPORT_MODE_RAW10:
 			ub960_rxport_write(priv, nport, UB960_RR_RAW10_ID,
 				rx_data[nport].pixel_dt | (vc << UB960_RR_RAW10_ID_VC_SHIFT));
 
-			ub960_rxport_write(priv, rxport->nport,
+			ub960_rxport_write(priv, it.rxport->nport,
 				UB960_RR_RAW_EMBED_DTYPE,
 				(rx_data[nport].meta_lines << UB960_RR_RAW_EMBED_DTYPE_LINES_SHIFT) |
 					rx_data[nport].meta_dt);
@@ -2653,7 +2681,6 @@ static int ub960_enable_streams(struct v4l2_subdev *sd,
 	u64 sink_streams[UB960_MAX_RX_NPORTS] = {};
 	struct v4l2_subdev_route *route;
 	unsigned int failed_port;
-	unsigned int nport;
 	int ret;
 
 	if (!priv->streaming) {
@@ -2675,6 +2702,8 @@ static int ub960_enable_streams(struct v4l2_subdev *sd,
 
 	/* Collect sink streams per pad which we need to enable */
 	for_each_active_route(&state->routing, route) {
+		unsigned int nport;
+
 		if (route->source_pad != source_pad)
 			continue;
 
@@ -2686,7 +2715,9 @@ static int ub960_enable_streams(struct v4l2_subdev *sd,
 		sink_streams[nport] |= BIT_ULL(route->sink_stream);
 	}
 
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
+	for_each_rxport() {
+		unsigned int nport = it.nport;
+
 		if (!sink_streams[nport])
 			continue;
 
@@ -2724,7 +2755,7 @@ static int ub960_enable_streams(struct v4l2_subdev *sd,
 	return 0;
 
 err:
-	for (nport = 0; nport < failed_port; nport++) {
+	for (unsigned int nport = 0; nport < failed_port; nport++) {
 		if (!sink_streams[nport])
 			continue;
 
@@ -2764,11 +2795,12 @@ static int ub960_disable_streams(struct v4l2_subdev *sd,
 	struct device *dev = &priv->client->dev;
 	u64 sink_streams[UB960_MAX_RX_NPORTS] = {};
 	struct v4l2_subdev_route *route;
-	unsigned int nport;
 	int ret;
 
 	/* Collect sink streams per pad which we need to disable */
 	for_each_active_route(&state->routing, route) {
+		unsigned int nport;
+
 		if (route->source_pad != source_pad)
 			continue;
 
@@ -2780,7 +2812,9 @@ static int ub960_disable_streams(struct v4l2_subdev *sd,
 		sink_streams[nport] |= BIT_ULL(route->sink_stream);
 	}
 
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
+	for_each_rxport() {
+		unsigned int nport = it.nport;
+
 		if (!sink_streams[nport])
 			continue;
 
@@ -3084,7 +3118,6 @@ static int ub960_log_status(struct v4l2_subdev *sd)
 	struct ub960_data *priv = sd_to_ub960(sd);
 	struct device *dev = &priv->client->dev;
 	struct v4l2_subdev_state *state;
-	unsigned int nport;
 	unsigned int i;
 	u16 v16 = 0;
 	u8 v = 0;
@@ -3097,7 +3130,8 @@ static int ub960_log_status(struct v4l2_subdev *sd)
 
 	dev_info(dev, "ID '%.*s'\n", (int)sizeof(id), id);
 
-	for (nport = 0; nport < priv->hw_data->num_txports; nport++) {
+	for (unsigned int nport = 0; nport < priv->hw_data->num_txports;
+	     nport++) {
 		struct ub960_txport *txport = priv->txports[nport];
 
 		dev_info(dev, "TX %u\n", nport);
@@ -3124,13 +3158,13 @@ static int ub960_log_status(struct v4l2_subdev *sd)
 		dev_info(dev, "\tline error counter %u\n", v16);
 	}
 
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
-		struct ub960_rxport *rxport = priv->rxports[nport];
+	for_each_rxport() {
+		unsigned int nport = it.nport;
 		unsigned int i;
 
 		dev_info(dev, "RX %u\n", nport);
 
-		if (!rxport) {
+		if (!it.rxport) {
 			dev_info(dev, "\tNot initialized\n");
 			continue;
 		}
@@ -3234,12 +3268,9 @@ static irqreturn_t ub960_handle_events(int irq, void *arg)
 			ub960_csi_handle_events(priv, i);
 	}
 
-	for (i = 0; i < priv->hw_data->num_rxports; i++) {
-		if (!priv->rxports[i])
-			continue;
-
-		if (int_sts & UB960_SR_INTERRUPT_STS_IS_RX(i))
-			ub960_rxport_handle_events(priv, i);
+	for_each_active_rxport() {
+		if (int_sts & UB960_SR_INTERRUPT_STS_IS_RX(it.nport))
+			ub960_rxport_handle_events(priv, it.nport);
 	}
 
 	return IRQ_HANDLED;
@@ -3274,19 +3305,12 @@ static void ub960_txport_free_ports(struct ub960_data *priv)
 
 static void ub960_rxport_free_ports(struct ub960_data *priv)
 {
-	unsigned int nport;
+	for_each_active_rxport() {
+		fwnode_handle_put(it.rxport->source.ep_fwnode);
+		fwnode_handle_put(it.rxport->ser.fwnode);
 
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
-		struct ub960_rxport *rxport = priv->rxports[nport];
-
-		if (!rxport)
-			continue;
-
-		fwnode_handle_put(rxport->source.ep_fwnode);
-		fwnode_handle_put(rxport->ser.fwnode);
-
-		kfree(rxport);
-		priv->rxports[nport] = NULL;
+		kfree(it.rxport);
+		priv->rxports[it.nport] = NULL;
 	}
 }
 
@@ -3545,7 +3569,6 @@ static int ub960_parse_dt_rxports(struct ub960_data *priv)
 {
 	struct device *dev = &priv->client->dev;
 	struct fwnode_handle *links_fwnode;
-	unsigned int nport;
 	int ret;
 
 	links_fwnode = fwnode_get_named_child_node(dev_fwnode(dev), "links");
@@ -3560,9 +3583,10 @@ static int ub960_parse_dt_rxports(struct ub960_data *priv)
 
 	priv->strobe.manual = fwnode_property_read_bool(links_fwnode, "ti,manual-strobe");
 
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
+	for_each_rxport() {
 		struct fwnode_handle *link_fwnode;
 		struct fwnode_handle *ep_fwnode;
+		unsigned int nport = it.nport;
 
 		link_fwnode = ub960_fwnode_get_link_by_regs(links_fwnode, nport);
 		if (!link_fwnode)
@@ -3651,7 +3675,6 @@ static int ub960_notify_bound(struct v4l2_async_notifier *notifier,
 	struct ub960_rxport *rxport = to_ub960_asd(asd)->rxport;
 	struct device *dev = &priv->client->dev;
 	u8 nport = rxport->nport;
-	unsigned int i;
 	int ret;
 
 	ret = media_entity_get_fwnode_pad(&subdev->entity,
@@ -3676,8 +3699,8 @@ static int ub960_notify_bound(struct v4l2_async_notifier *notifier,
 		return ret;
 	}
 
-	for (i = 0; i < priv->hw_data->num_rxports; i++) {
-		if (priv->rxports[i] && !priv->rxports[i]->source.sd) {
+	for_each_active_rxport() {
+		if (!it.rxport->source.sd) {
 			dev_dbg(dev, "Waiting for more subdevs to be bound\n");
 			return 0;
 		}
@@ -3703,29 +3726,24 @@ static const struct v4l2_async_notifier_operations ub960_notify_ops = {
 static int ub960_v4l2_notifier_register(struct ub960_data *priv)
 {
 	struct device *dev = &priv->client->dev;
-	unsigned int i;
 	int ret;
 
 	v4l2_async_subdev_nf_init(&priv->notifier, &priv->sd);
 
-	for (i = 0; i < priv->hw_data->num_rxports; i++) {
-		struct ub960_rxport *rxport = priv->rxports[i];
+	for_each_active_rxport() {
 		struct ub960_asd *asd;
 
-		if (!rxport)
-			continue;
-
 		asd = v4l2_async_nf_add_fwnode(&priv->notifier,
-					       rxport->source.ep_fwnode,
+					       it.rxport->source.ep_fwnode,
 					       struct ub960_asd);
 		if (IS_ERR(asd)) {
 			dev_err(dev, "Failed to add subdev for source %u: %pe",
-				i, asd);
+				it.nport, asd);
 			v4l2_async_nf_cleanup(&priv->notifier);
 			return PTR_ERR(asd);
 		}
 
-		asd->rxport = rxport;
+		asd->rxport = it.rxport;
 	}
 
 	priv->notifier.ops = &ub960_notify_ops;
@@ -3987,7 +4005,6 @@ static int ub960_probe(struct i2c_client *client)
 	struct ub960_data *priv;
 	unsigned int port_lock_mask;
 	unsigned int port_mask;
-	unsigned int nport;
 	int ret;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
@@ -4038,14 +4055,8 @@ static int ub960_probe(struct i2c_client *client)
 
 	port_mask = 0;
 
-	for (nport = 0; nport < priv->hw_data->num_rxports; nport++) {
-		struct ub960_rxport *rxport = priv->rxports[nport];
-
-		if (!rxport)
-			continue;
-
-		port_mask |= BIT(nport);
-	}
+	for_each_active_rxport()
+		port_mask |= BIT(it.nport);
 
 	ret = ub960_rxport_wait_locks(priv, port_mask, &port_lock_mask);
 	if (ret)

@@ -64,7 +64,7 @@
  *
  * Only for debug purposes.
  */
-/* #define UB960_DEBUG_I2C_RX_ID	0x40 */
+#define UB960_DEBUG_I2C_RX_ID	0x40
 
 #define UB960_POLL_TIME_MS	500
 

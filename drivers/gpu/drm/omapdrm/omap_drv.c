@@ -794,6 +794,8 @@ static int pdev_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	dma_set_max_seg_size(&pdev->dev, UINT_MAX);
+
 	/* Allocate and initialize the driver private structure. */
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv)

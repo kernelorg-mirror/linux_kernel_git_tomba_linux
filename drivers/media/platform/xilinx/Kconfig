@@ -37,6 +37,17 @@ config VIDEO_XILINX_TPG
 	help
 	  Driver for the Xilinx Video Test Pattern Generator
 
+config VIDEO_XILINX_HLS_TPG
+	tristate "Xilinx Video HLS Test Pattern Generator"
+	depends on VIDEO_XILINX
+	select VIDEO_XILINX_VTC
+	help
+	  Driver for the Xilinx Video Test Pattern Generator v8. This IP is a
+	  redesign of the TPG based on Vivado HLS, with a register interface
+	  incompatible with the older versions supported by VIDEO_XILINX_TPG.
+
+	  Say M to modularize. Say N if unsure.
+
 config VIDEO_XILINX_VTC
 	tristate "Xilinx Video Timing Controller"
 	depends on VIDEO_XILINX

@@ -26,4 +26,5 @@ config XLNX_EVENT_MANAGER
 	  management request to firmware.
 
 	  If in doubt, say N.
+
 endmenu

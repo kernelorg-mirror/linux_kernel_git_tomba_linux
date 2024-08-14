@@ -94,8 +94,13 @@ struct xvip_dma {
 	struct list_head queued_bufs;
 	spinlock_t queued_lock;
 
-	struct dma_chan *dma;
 	unsigned int align;
+
+	/* dmaengine */
+	struct dma_chan *dma;
+
+	/* fb dma */
+	struct xilinx_fb_dma *xdma;
 };
 
 #define to_xvip_dma(vdev)	container_of(vdev, struct xvip_dma, video)

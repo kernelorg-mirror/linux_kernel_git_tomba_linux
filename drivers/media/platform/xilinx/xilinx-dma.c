@@ -9,6 +9,7 @@
  *           Laurent Pinchart <laurent.pinchart@ideasonboard.com>
  */
 
+#include <linux/dma/xilinx-fb-dma.h>
 #include <linux/dma/xilinx_dma.h>
 #include <linux/lcm.h>
 #include <linux/list.h>
@@ -324,7 +325,7 @@ static int xvip_dma_buffer_prepare(struct vb2_buffer *vb)
 	return 0;
 }
 
-static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
+static void xvip_dma_buffer_queue_dmaengine(struct vb2_buffer *vb)
 {
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
 	struct xvip_dma *dma = vb2_get_drv_priv(vb->vb2_queue);
@@ -373,6 +374,61 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 		dma_async_issue_pending(dma->dma);
 }
 
+static void xvip_dma_buffer_queue_fb_dma(struct vb2_buffer *vb)
+{
+	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
+	struct xvip_dma *dma = vb2_get_drv_priv(vb->vb2_queue);
+	struct xvip_dma_buffer *buf = to_xvip_dma_buffer(vbuf);
+	dma_addr_t addr = vb2_dma_contig_plane_dma_addr(vb, 0);
+	struct xilinx_fb_dma_descriptor *desc;
+	struct v4l2_pix_format *pix;
+	struct xilinx_fb_dma_params params = {0};
+
+	pix = &dma->format;
+	dma->xdma->ops->v4l2_config(dma->xdma, pix->pixelformat);
+
+	params.width = dma->format.width;
+	params.height = dma->format.height;
+	params.bpp = dma->fmtinfo->bpp;
+	params.bytesperline = dma->format.bytesperline;
+
+	params.num_planes = 1;
+	params.planes[0].addr = addr;
+
+	params.callback = xvip_dma_complete;
+	params.callback_data = buf;
+
+	params.direction = dma->queue.type == V4L2_BUF_TYPE_VIDEO_CAPTURE ?
+		XDMA_TO_MEM : XDMA_FROM_MEM;
+
+	desc = dma->xdma->ops->prepare(dma->xdma, &params);
+
+	if (IS_ERR(desc)) {
+		dev_err(dma->xdev->dev, "Failed to prepare DMA transfer\n");
+		vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_ERROR);
+		return;
+	}
+
+	spin_lock_irq(&dma->queued_lock);
+	list_add_tail(&buf->queue, &dma->queued_bufs);
+	spin_unlock_irq(&dma->queued_lock);
+
+	dma->xdma->ops->submit(dma->xdma, desc);
+
+	if (vb2_is_streaming(&dma->queue))
+		dma->xdma->ops->async_issue_pending(dma->xdma);
+}
+
+static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
+{
+	struct xvip_dma *dma = vb2_get_drv_priv(vb->vb2_queue);
+
+	if (dma->xdma)
+		xvip_dma_buffer_queue_fb_dma(vb);
+	else
+		xvip_dma_buffer_queue_dmaengine(vb);
+}
+
 static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct xvip_dma *dma = vb2_get_drv_priv(vq);
@@ -409,7 +465,10 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	/* Start the DMA engine. This must be done before starting the blocks
 	 * in the pipeline to avoid DMA synchronization issues.
 	 */
-	dma_async_issue_pending(dma->dma);
+	if (dma->xdma)
+		dma->xdma->ops->async_issue_pending(dma->xdma);
+	else
+		dma_async_issue_pending(dma->dma);
 
 	/* Start the pipeline. */
 	xvip_pipeline_set_stream(pipe, true);
@@ -441,7 +500,10 @@ static void xvip_dma_stop_streaming(struct vb2_queue *vq)
 	xvip_pipeline_set_stream(pipe, false);
 
 	/* Stop and reset the DMA engine. */
-	dmaengine_terminate_all(dma->dma);
+	if (dma->xdma)
+		dma->xdma->ops->terminate_all(dma->xdma);
+	else
+		dmaengine_terminate_all(dma->dma);
 
 	/* Cleanup the pipeline and mark it as being stopped. */
 	xvip_pipeline_cleanup(pipe);
@@ -709,12 +771,31 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	snprintf(name, sizeof(name), "port%u", port);
 	dma->dma = dma_request_chan(dma->xdev->dev, name);
 	if (IS_ERR(dma->dma)) {
-		ret = dev_err_probe(dma->xdev->dev, PTR_ERR(dma->dma),
-				    "no VDMA channel found\n");
-		goto error;
+		/* If no dmaengine dma found, try xilinx fb dma */
+
+		dma->xdma = xilinx_fb_dma_request(xdev->dev, name);
+		if (IS_ERR(dma->xdma)) {
+			printk("No FB DMA found\n");
+			// XXX TODO error handling
+
+			ret = PTR_ERR(dma->xdma);
+
+			goto error;
+		} else {
+			printk("Xilinx media with xilinx fb dma %p\n", dma->xdma);
+		}
+
+		//ret = dev_err_probe(dma->xdev->dev, PTR_ERR(dma->dma),
+		//		    "no VDMA channel found\n");
+		//goto error;
+	} else {
+		printk("Xilinx media with dmaengine dma %p\n", dma->dma);
 	}
 
-	dma->align = 1 << dma->dma->device->copy_align;
+	if (dma->xdma)
+		dma->align = 1 << dma->xdma->copy_align;
+	else
+		dma->align = 1 << dma->dma->device->copy_align;
 
 	ret = video_register_device(&dma->video, VFL_TYPE_VIDEO, -1);
 	if (ret < 0) {
@@ -736,6 +817,9 @@ void xvip_dma_cleanup(struct xvip_dma *dma)
 
 	if (!IS_ERR_OR_NULL(dma->dma))
 		dma_release_channel(dma->dma);
+
+	if (!IS_ERR_OR_NULL(dma->xdma))
+		xilinx_fb_dma_release(dma->xdma);
 
 	media_entity_cleanup(&dma->video.entity);
 

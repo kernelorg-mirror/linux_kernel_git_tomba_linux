@@ -485,6 +485,7 @@ struct ov1063x_priv {
 	 * lock.
 	 */
 	enum ov1063x_streaming_state	streaming;
+	u32				streaming_count;
 	struct v4l2_rect		analog_crop;
 	struct v4l2_rect		digital_crop;
 
@@ -1118,28 +1119,15 @@ static const struct v4l2_ctrl_ops ov1063x_ctrl_ops = {
  * V4L2 Subdev Operations
  */
 
-static int ov1063x_s_stream(struct v4l2_subdev *sd, int enable)
+static int ov1063x_enable_streams(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state, u32 pad,
+				 u64 streams_mask)
 {
 	struct ov1063x_priv *priv = to_ov1063x(sd);
-	int ret = 0;
-	struct v4l2_subdev_state *state;
+	int ret;
 
-	state = v4l2_subdev_lock_and_get_active_state(sd);
-
-	if (!enable) {
-		ov1063x_write(priv, OV1063X_STREAM_MODE, 0, &ret);
-		ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST2,
-			      OV1063X_SC_CMMN_CLKRST2_SCLK, &ret);
-
-		pm_runtime_mark_last_busy(priv->dev);
-		pm_runtime_put_autosuspend(priv->dev);
-
-		priv->streaming = OV1063X_STREAM_OFF;
-
-		v4l2_subdev_unlock_state(state);
-
-		return ret;
-	}
+	if (priv->streaming_count++)
+		return 0;
 
 	/* Streaming needs to be true for ov1063x_s_ctrl() to proceed. */
 	priv->streaming = OV1063X_STREAM_STARTING;
@@ -1172,9 +1160,30 @@ done:
 		 */
 		pm_runtime_put_sync(priv->dev);
 		priv->streaming = OV1063X_STREAM_OFF;
+		priv->streaming_count--;
 	}
 
-	v4l2_subdev_unlock_state(state);
+	return ret;
+}
+
+static int ov1063x_disable_streams(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *state, u32 pad,
+				  u64 streams_mask)
+{
+	struct ov1063x_priv *priv = to_ov1063x(sd);
+	int ret = 0;
+
+	if (--priv->streaming_count)
+		return 0;
+
+	ov1063x_write(priv, OV1063X_STREAM_MODE, 0, &ret);
+	ov1063x_write(priv, OV1063X_SC_CMMN_CLKRST2,
+		      OV1063X_SC_CMMN_CLKRST2_SCLK, &ret);
+
+	pm_runtime_mark_last_busy(priv->dev);
+	pm_runtime_put_autosuspend(priv->dev);
+
+	priv->streaming = OV1063X_STREAM_OFF;
 
 	return ret;
 }
@@ -1532,10 +1541,6 @@ static const struct v4l2_subdev_core_ops ov1063x_subdev_core_ops = {
 	.unsubscribe_event	= v4l2_event_subdev_unsubscribe,
 };
 
-static const struct v4l2_subdev_video_ops ov1063x_subdev_video_ops = {
-	.s_stream	= ov1063x_s_stream,
-};
-
 static const struct v4l2_subdev_pad_ops ov1063x_subdev_pad_ops = {
 	.enum_mbus_code		= ov1063x_enum_mbus_code,
 	.enum_frame_size	= ov1063x_enum_frame_sizes,
@@ -1543,11 +1548,12 @@ static const struct v4l2_subdev_pad_ops ov1063x_subdev_pad_ops = {
 	.set_fmt		= ov1063x_set_fmt,
 	.set_routing		= ov1063x_set_routing,
 	.get_frame_desc		= ov1063x_get_frame_desc,
+	.enable_streams		= ov1063x_enable_streams,
+	.disable_streams	= ov1063x_disable_streams,
 };
 
 static const struct v4l2_subdev_ops ov1063x_subdev_ops = {
 	.core	= &ov1063x_subdev_core_ops,
-	.video	= &ov1063x_subdev_video_ops,
 	.pad	= &ov1063x_subdev_pad_ops,
 };
 

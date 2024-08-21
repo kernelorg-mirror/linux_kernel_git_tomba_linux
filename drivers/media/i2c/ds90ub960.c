@@ -1138,6 +1138,29 @@ out_unlock:
 	return ret;
 }
 
+static void ub960_reset(struct ub960_data *priv, bool reset_regs)
+{
+	struct device *dev = &priv->client->dev;
+	unsigned int v;
+	int ret;
+	u8 bit;
+
+	bit = reset_regs ? UB960_SR_RESET_DIGITAL_RESET1 :
+			   UB960_SR_RESET_DIGITAL_RESET0;
+
+	ub960_write(priv, UB960_SR_RESET, bit);
+
+	mutex_lock(&priv->reg_lock);
+
+	ret = regmap_read_poll_timeout(priv->regmap, UB960_SR_RESET, v,
+				       (v & bit) == 0, 2000, 100000);
+
+	mutex_unlock(&priv->reg_lock);
+
+	if (ret)
+		dev_err(dev, "reset failed: %d\n", ret);
+}
+
 /* -----------------------------------------------------------------------------
  * I2C-ATR (address translator)
  */
@@ -2264,12 +2287,40 @@ static void ub960_init_rx_port_ub9702(struct ub960_data *priv,
 
 static int ub960_init_rx_ports(struct ub960_data *priv)
 {
+	struct device *dev = &priv->client->dev;
+	unsigned int port_lock_mask;
+	unsigned int port_mask;
+	int ret;
+
 	for_each_active_rxport() {
 		if (priv->hw_data->is_ub9702)
 			ub960_init_rx_port_ub9702(priv, it.rxport);
 		else
 			ub960_init_rx_port_ub960(priv, it.rxport);
 	}
+
+	ub960_reset(priv, false);
+
+	port_mask = 0;
+
+	for_each_active_rxport()
+		port_mask |= BIT(it.nport);
+
+	ret = ub960_rxport_wait_locks(priv, port_mask, &port_lock_mask);
+	if (ret)
+		return ret;
+
+	if (port_mask != port_lock_mask) {
+		ret = -EIO;
+		dev_err_probe(dev, ret, "Failed to lock all RX ports\n");
+		return ret;
+	}
+
+	/*
+	 * Clear any errors caused by switching the RX port settings while
+	 * probing.
+	 */
+	ub960_clear_rx_errors(priv);
 
 	return 0;
 }
@@ -3861,29 +3912,6 @@ static const struct regmap_config ub960_regmap_config = {
 	.disable_locking = true,
 };
 
-static void ub960_reset(struct ub960_data *priv, bool reset_regs)
-{
-	struct device *dev = &priv->client->dev;
-	unsigned int v;
-	int ret;
-	u8 bit;
-
-	bit = reset_regs ? UB960_SR_RESET_DIGITAL_RESET1 :
-			   UB960_SR_RESET_DIGITAL_RESET0;
-
-	ub960_write(priv, UB960_SR_RESET, bit);
-
-	mutex_lock(&priv->reg_lock);
-
-	ret = regmap_read_poll_timeout(priv->regmap, UB960_SR_RESET, v,
-				       (v & bit) == 0, 2000, 100000);
-
-	mutex_unlock(&priv->reg_lock);
-
-	if (ret)
-		dev_err(dev, "reset failed: %d\n", ret);
-}
-
 static int ub960_get_hw_resources(struct ub960_data *priv)
 {
 	struct device *dev = &priv->client->dev;
@@ -4003,8 +4031,6 @@ static int ub960_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct ub960_data *priv;
-	unsigned int port_lock_mask;
-	unsigned int port_mask;
 	int ret;
 
 	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
@@ -4050,29 +4076,6 @@ static int ub960_probe(struct i2c_client *client)
 	ret = ub960_init_rx_ports(priv);
 	if (ret)
 		goto err_disable_vpocs;
-
-	ub960_reset(priv, false);
-
-	port_mask = 0;
-
-	for_each_active_rxport()
-		port_mask |= BIT(it.nport);
-
-	ret = ub960_rxport_wait_locks(priv, port_mask, &port_lock_mask);
-	if (ret)
-		goto err_disable_vpocs;
-
-	if (port_mask != port_lock_mask) {
-		ret = -EIO;
-		dev_err_probe(dev, ret, "Failed to lock all RX ports\n");
-		goto err_disable_vpocs;
-	}
-
-	/*
-	 * Clear any errors caused by switching the RX port settings while
-	 * probing.
-	 */
-	ub960_clear_rx_errors(priv);
 
 	ret = ub960_init_atr(priv);
 	if (ret)

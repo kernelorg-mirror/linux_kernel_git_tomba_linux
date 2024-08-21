@@ -38,7 +38,7 @@ struct imx390_priv {
 	struct v4l2_subdev		subdev;
 	struct media_pad		pads[3];
 
-	bool				streaming;
+	uint32_t			streaming;
 };
 
 static const struct v4l2_area imx390_framesizes[] = {
@@ -55,6 +55,11 @@ static const u32 imx390_mbus_formats[] = {
 static inline struct imx390_priv *to_imx390(struct v4l2_subdev *sd)
 {
 	return container_of(sd, struct imx390_priv, subdev);
+}
+
+static bool imx390_embedded_enabled(struct v4l2_subdev_state *state)
+{
+	return state->routing.routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE;
 }
 
 /* -----------------------------------------------------------------------------
@@ -167,11 +172,15 @@ static int imx390_configure(struct imx390_priv *priv)
  * V4L2 Subdev Operations
  */
 
-static int imx390_start_stream(struct imx390_priv *priv)
+static int imx390_enable_streams(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state, u32 pad,
+				 u64 streams_mask)
 {
+	struct imx390_priv *priv = to_imx390(sd);
 	int ret;
 
-	priv->streaming = true;
+	if (priv->streaming++)
+		return 0;
 
 	ret = pm_runtime_get_sync(priv->dev);
 	if (ret < 0)
@@ -197,13 +206,20 @@ err:
 	 * device likely has no other chance to recover.
 	 */
 	pm_runtime_put_sync(priv->dev);
-	priv->streaming = false;
+	priv->streaming--;
 
 	return ret;
 }
 
-static void imx390_stop_stream(struct imx390_priv *priv)
+static int imx390_disable_streams(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *state, u32 pad,
+				  u64 streams_mask)
 {
+	struct imx390_priv *priv = to_imx390(sd);
+
+	if (--priv->streaming)
+		return 0;
+
 	/* set standby */
 	imx390_write(priv, IMX390_REG_CAT0_STANDBY, 1, NULL);
 	/* No communication is possible for a while after entering standby */
@@ -211,18 +227,6 @@ static void imx390_stop_stream(struct imx390_priv *priv)
 
 	pm_runtime_mark_last_busy(priv->dev);
 	pm_runtime_put_autosuspend(priv->dev);
-
-	priv->streaming = false;
-}
-
-static int imx390_s_stream(struct v4l2_subdev *sd, int enable)
-{
-	struct imx390_priv *priv = to_imx390(sd);
-
-	if (enable)
-		return imx390_start_stream(priv);
-
-	imx390_stop_stream(priv);
 
 	return 0;
 }
@@ -259,7 +263,7 @@ static void imx390_init_formats(struct v4l2_subdev_state *state)
 	format = v4l2_subdev_state_get_format(state, IMX390_PAD_SOURCE, 0);
 	*format = imx390_default_format;
 
-	if (state->routing.routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE) {
+	if (imx390_embedded_enabled(state)) {
 		format = v4l2_subdev_state_get_format(state, IMX390_PAD_EMBEDDED, 0);
 		*format = imx390_default_embedded_format;
 
@@ -420,7 +424,7 @@ static int imx390_set_fmt(struct v4l2_subdev *sd,
 
 	*format = pix_format;
 
-	if (state->routing.routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE) {
+	if (imx390_embedded_enabled(state)) {
 		/* Update internal embedded data source (only width can change) */
 		format = v4l2_subdev_state_get_format(state, IMX390_PAD_EMBEDDED, 0);
 		if (!format)
@@ -479,7 +483,7 @@ static int imx390_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 	fd->num_entries++;
 
 	/* meta stream */
-	if (state->routing.routes[1].flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE) {
+	if (imx390_embedded_enabled(state)) {
 		fd->entry[fd->num_entries].stream = 1;
 
 		fd->entry[fd->num_entries].flags =
@@ -523,10 +527,6 @@ static int imx390_set_routing(struct v4l2_subdev *sd,
 	return ret;
 }
 
-static const struct v4l2_subdev_video_ops imx390_subdev_video_ops = {
-	.s_stream	= imx390_s_stream,
-};
-
 static const struct v4l2_subdev_pad_ops imx390_subdev_pad_ops = {
 	.enum_mbus_code		= imx390_enum_mbus_code,
 	.enum_frame_size	= imx390_enum_frame_sizes,
@@ -534,10 +534,11 @@ static const struct v4l2_subdev_pad_ops imx390_subdev_pad_ops = {
 	.set_fmt		= imx390_set_fmt,
 	.set_routing		= imx390_set_routing,
 	.get_frame_desc		= imx390_get_frame_desc,
+	.enable_streams		= imx390_enable_streams,
+	.disable_streams	= imx390_disable_streams,
 };
 
 static const struct v4l2_subdev_ops imx390_subdev_ops = {
-	.video	= &imx390_subdev_video_ops,
 	.pad	= &imx390_subdev_pad_ops,
 };
 

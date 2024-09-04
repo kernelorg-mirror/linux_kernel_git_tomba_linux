@@ -786,7 +786,7 @@ static int cfe_get_vc_dt_fallback(struct cfe_device *cfe, u8 *vc, u8 *dt)
 
 	state = v4l2_subdev_get_locked_active_state(&cfe->csi2.sd);
 
-	fmt = v4l2_subdev_state_get_format(state, CSI2_PAD_SINK, 0);
+	fmt = v4l2_subdev_state_get_stream_format(state, CSI2_PAD_SINK, 0);
 	if (!fmt)
 		return -EINVAL;
 
@@ -876,8 +876,8 @@ static int cfe_start_channel(struct cfe_node *node)
 		if (ret)
 			return ret;
 
-		source_fmt = v4l2_subdev_state_get_format(state,
-			node_desc[cfe->fe_csi2_channel].link_pad);
+		source_fmt = v4l2_subdev_state_get_stream_format(state,
+			node_desc[cfe->fe_csi2_channel].link_pad, 0);
 		fmt = find_format_by_code(source_fmt->code);
 
 		width = source_fmt->width;
@@ -916,8 +916,8 @@ static int cfe_start_channel(struct cfe_node *node)
 
 		u32 mode = CSI2_MODE_NORMAL;
 
-		source_fmt = v4l2_subdev_state_get_format(state,
-			node_desc[node->id].link_pad);
+		source_fmt = v4l2_subdev_state_get_stream_format(state,
+			node_desc[node->id].link_pad, 0);
 		fmt = find_format_by_code(source_fmt->code);
 
 		/* Must have a valid CSI2 datatype. */
@@ -1021,8 +1021,8 @@ static int cfe_queue_setup(struct vb2_queue *vq, unsigned int *nbuffers,
 	cfe_dbg("%s: [%s] type:%u\n", __func__, node_desc[node->id].name,
 		node->buffer_queue.type);
 
-	if (vq->max_num_buffers + *nbuffers < 3)
-		*nbuffers = 3 - vq->max_num_buffers;
+	if (vq->num_buffers + *nbuffers < 3)
+		*nbuffers = 3 - vq->num_buffers;
 
 	if (*nplanes) {
 		if (sizes[0] < size) {
@@ -1119,7 +1119,7 @@ static s64 cfe_get_source_link_freq(struct cfe_device *cfe)
 		struct v4l2_mbus_framefmt *source_fmt;
 		const struct cfe_fmt *fmt;
 
-		source_fmt = v4l2_subdev_state_get_format(state,
+		source_fmt = v4l2_subdev_state_get_stream_format(state,
 			route->sink_pad, route->sink_stream);
 
 		fmt = find_format_by_code(source_fmt->code);
@@ -1800,7 +1800,7 @@ static int cfe_video_link_validate(struct media_link *link)
 
 	state = v4l2_subdev_lock_and_get_active_state(source_sd);
 
-	source_fmt = v4l2_subdev_state_get_format(state, link->source->index);
+	source_fmt = v4l2_subdev_state_get_stream_format(state, link->source->index, 0);
 	if (!source_fmt) {
 		ret = -EINVAL;
 		goto out;
@@ -2004,7 +2004,7 @@ static int cfe_register_node(struct cfe_device *cfe, int id)
 					     : sizeof(struct cfe_buffer);
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	q->lock = &node->lock;
-	q->min_queued_buffers = 1;
+	q->min_buffers_needed = 1;
 	q->dev = &cfe->pdev->dev;
 
 	ret = vb2_queue_init(q);
@@ -2445,7 +2445,7 @@ err_cfe_put:
 	return ret;
 }
 
-static void cfe_remove(struct platform_device *pdev)
+static int cfe_remove(struct platform_device *pdev)
 {
 	struct cfe_device *cfe = platform_get_drvdata(pdev);
 
@@ -2467,6 +2467,8 @@ static void cfe_remove(struct platform_device *pdev)
 	v4l2_device_unregister(&cfe->v4l2_dev);
 
 	cfe_put(cfe);
+
+	return 0;
 }
 
 static int cfe_runtime_suspend(struct device *dev)

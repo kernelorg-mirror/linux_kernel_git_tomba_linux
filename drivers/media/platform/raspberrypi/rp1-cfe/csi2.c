@@ -419,7 +419,7 @@ static int csi2_pad_set_fmt(struct v4l2_subdev *sd,
 
 		struct v4l2_mbus_framefmt *fmt;
 
-		fmt = v4l2_subdev_state_get_format(state, format->pad,
+		fmt = v4l2_subdev_state_get_stream_format(state, format->pad,
 						   format->stream);
 		if (!fmt)
 			return -EINVAL;
@@ -446,7 +446,7 @@ static int csi2_pad_set_fmt(struct v4l2_subdev *sd,
 		if (!sink_fmt)
 			return -EINVAL;
 
-		source_fmt = v4l2_subdev_state_get_format(state, format->pad,
+		source_fmt = v4l2_subdev_state_get_stream_format(state, format->pad,
 							  format->stream);
 		if (!source_fmt)
 			return -EINVAL;
@@ -501,6 +501,7 @@ static int csi2_set_routing(struct v4l2_subdev *sd,
 }
 
 static const struct v4l2_subdev_pad_ops csi2_subdev_pad_ops = {
+	.init_cfg = csi2_init_state,
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = csi2_pad_set_fmt,
 	.set_routing = csi2_set_routing,
@@ -517,7 +518,6 @@ static const struct v4l2_subdev_ops csi2_subdev_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops csi2_internal_ops = {
-	.init_state = csi2_init_state,
 };
 
 int csi2_init(struct csi2_device *csi2, struct dentry *debugfs)

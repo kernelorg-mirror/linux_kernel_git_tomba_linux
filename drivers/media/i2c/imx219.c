@@ -167,7 +167,6 @@
 
 enum pad_types {
 	IMAGE_PAD,
-	METADATA_PAD,
 	NUM_PADS
 };
 
@@ -714,13 +713,6 @@ static int imx219_init_cfg(struct v4l2_subdev *sd,
 	crop->left = IMX219_PIXEL_ARRAY_LEFT;
 	crop->width = IMX219_PIXEL_ARRAY_WIDTH;
 	crop->height = IMX219_PIXEL_ARRAY_HEIGHT;
-
-	/* Initialize try_fmt for the embedded metadata pad */
-	format = v4l2_subdev_get_pad_format(sd, state, 1);
-	format->code = MEDIA_BUS_FMT_SENSOR_DATA;
-	format->width = IMX219_EMBEDDED_LINE_WIDTH;
-	format->height = IMX219_NUM_EMBEDDED_LINES;
-	format->field = V4L2_FIELD_NONE;
 
 	return 0;
 }
@@ -1469,7 +1461,6 @@ static int imx219_probe(struct i2c_client *client)
 
 	/* Initialize source pad */
 	imx219->pad[IMAGE_PAD].flags = MEDIA_PAD_FL_SOURCE;
-	imx219->pad[METADATA_PAD].flags = MEDIA_PAD_FL_SOURCE;
 
 	ret = media_entity_pads_init(&imx219->sd.entity, NUM_PADS, imx219->pad);
 	if (ret) {

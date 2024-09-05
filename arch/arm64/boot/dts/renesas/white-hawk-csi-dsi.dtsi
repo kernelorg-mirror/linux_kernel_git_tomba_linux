@@ -74,7 +74,7 @@
 	gmsl0: gmsl-deserializer@49 {
 		compatible = "maxim,max96712";
 		reg = <0x49>;
-		enable-gpios = <&pca9654_a 0 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&pca9654_a 0 GPIO_ACTIVE_LOW>;
 
 		ports {
 			#address-cells = <1>;
@@ -95,7 +95,7 @@
 	gmsl1: gmsl-deserializer@4b {
 		compatible = "maxim,max96712";
 		reg = <0x4b>;
-		enable-gpios = <&pca9654_b 0 GPIO_ACTIVE_HIGH>;
+		pwdn-gpios = <&pca9654_b 0 GPIO_ACTIVE_LOW>;
 
 		ports {
 			#address-cells = <1>;

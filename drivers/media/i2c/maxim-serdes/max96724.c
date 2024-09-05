@@ -681,7 +681,6 @@ static int max96724_probe(struct i2c_client *client)
 
 	priv->dev = dev;
 	priv->client = client;
-	i2c_set_clientdata(client, priv);
 
 	priv->regmap = devm_regmap_init_i2c(client, &max_des_i2c_regmap);
 	if (IS_ERR(priv->regmap))
@@ -710,7 +709,14 @@ static int max96724_probe(struct i2c_client *client)
 	if (ret)
 		return ret;
 
-	return max_des_probe(client, &priv->des);
+	ret = max_des_probe(client, &priv->des);
+	if (ret)
+		return ret;
+
+	/* XXX set clientdata last as v4l2_i2c_subdev_init() would overwrite it. */
+	i2c_set_clientdata(client, priv);
+
+	return 0;
 }
 
 static void max96724_remove(struct i2c_client *client)

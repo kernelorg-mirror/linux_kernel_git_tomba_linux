@@ -28,7 +28,8 @@
 };
 
 &csi41 {
-	status = "okay";
+	/* status = "okay"; */
+	status = "disabled";
 
 	ports {
 		#address-cells = <1>;
@@ -96,6 +97,8 @@
 		compatible = "maxim,max96712";
 		reg = <0x4b>;
 		pwdn-gpios = <&pca9654_b 0 GPIO_ACTIVE_LOW>;
+
+		status = "disabled";
 
 		ports {
 			#address-cells = <1>;

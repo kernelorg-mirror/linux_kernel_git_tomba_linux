@@ -13,3 +13,164 @@
 	model = "Renesas White Hawk CPU and Breakout boards based on r8a779g0";
 	compatible = "renesas,white-hawk-breakout", "renesas,white-hawk-cpu", "renesas,r8a779g0";
 };
+
+&csi40_in {
+	remote-endpoint = <&des0_out>;
+};
+
+/*
+ * Deserializer
+ */
+
+&gmsl0 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* Serializer addresses */
+	i2c-alias-pool = <0x41 0x42 0x43 0x44>;
+
+	i2c-atr {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		des_i2c_0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			reg = <0>;
+		};
+	};
+
+	channel@0 {
+		reg = <0>;
+
+		label = "des0";
+
+		maxim,phy-id = <1>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				des0_out: endpoint {
+					remote-endpoint = <&csi40_in>;
+					bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
+					clock-lanes = <0>;
+					data-lanes = <1 2 3>;
+					link-frequencies = /bits/ 64 <500000000>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+
+				des0_in0: endpoint {
+					remote-endpoint = <&ser0_out>;
+				};
+			};
+		};
+	};
+};
+
+/*
+ * Serializer
+ */
+
+&des_i2c_0 {
+	ser0: gmsl-serializer@40 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		compatible = "maxim,max9295a";
+		reg = <0x40>;
+
+		gpio-controller;
+		#gpio-cells = <2>;
+		gpio-ranges = <&ser0 0 0 11>;
+
+		i2c-alias-pool = <0x37 0x38>; /* cam address? */
+
+		i2c-atr {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			ser0_i2c: i2c@0 {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				reg = <0>;
+			};
+		};
+
+		channel@0 {
+			reg = <0>;
+
+			label = "ser0";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+
+					ser0_out: endpoint {
+						remote-endpoint = <&des0_in0>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+
+					ser0_in: endpoint {
+						remote-endpoint = <&sensor_out>;
+					};
+				};
+			};
+		};
+	};
+};
+
+/*
+ * Camera
+ */
+
+/ {
+	imx219_clk: clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+};
+
+&ser0_i2c {
+	sensor@50 {
+		compatible = "sony,imx219";
+		reg = <0x50>;
+
+            	clocks = <&imx219_clk>;
+
+/*
+		clocks = <&clk_cam_27M>;
+		clock-names = "inck";
+
+		xclr-gpios = <&serializer 0 GPIO_ACTIVE_LOW>;
+		error0-gpios = <&serializer 1 GPIO_ACTIVE_HIGH>;
+		error1-gpios = <&serializer 2 GPIO_ACTIVE_HIGH>;
+		comready-gpios = <&serializer 3 GPIO_ACTIVE_HIGH>;
+*/
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port {
+			sensor_out: endpoint {
+				remote-endpoint = <&ser0_in>;
+                    		data-lanes = <1 2>;
+		                    link-frequencies = /bits/ 64 <456000000>;
+			};
+		};
+	};
+};

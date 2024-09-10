@@ -1136,16 +1136,17 @@ static int imx219_probe(struct i2c_client *client)
 	ret = imx219_power_on(dev);
 	if (ret)
 		return ret;
-
+/*
 	ret = imx219_identify_module(imx219);
 	if (ret)
 		goto error_power_off;
-
+*/
 	/*
 	 * Sensor doesn't enter LP-11 state upon power up until and unless
 	 * streaming is started, so upon power up switch the modes to:
 	 * streaming -> standby
 	 */
+	#if 0
 	ret = cci_write(imx219->regmap, IMX219_REG_MODE_SELECT,
 			IMX219_MODE_STREAMING, NULL);
 	if (ret < 0)
@@ -1160,7 +1161,7 @@ static int imx219_probe(struct i2c_client *client)
 		goto error_power_off;
 
 	usleep_range(100, 110);
-
+#endif
 	ret = imx219_init_controls(imx219);
 	if (ret)
 		goto error_power_off;
@@ -1197,6 +1198,8 @@ static int imx219_probe(struct i2c_client *client)
 	pm_runtime_set_active(dev);
 	pm_runtime_enable(dev);
 	pm_runtime_idle(dev);
+
+	printk("IMX219: PROBE DONE\n");
 
 	return 0;
 

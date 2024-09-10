@@ -21,14 +21,13 @@
 				bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
 				clock-lanes = <0>;
 				data-lanes = <1 2 3>;
-				remote-endpoint = <&max96712_out0>;
+				/*remote-endpoint = <&max96712_out0>;*/
 			};
 		};
 	};
 };
 
 &csi41 {
-	/* status = "okay"; */
 	status = "disabled";
 
 	ports {
@@ -76,7 +75,7 @@
 		compatible = "maxim,max96712";
 		reg = <0x49>;
 		pwdn-gpios = <&pca9654_a 0 GPIO_ACTIVE_LOW>;
-
+#if 0
 		ports {
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -91,6 +90,7 @@
 				};
 			};
 		};
+#endif
 	};
 
 	gmsl1: gmsl-deserializer@4b {
@@ -122,7 +122,7 @@
 };
 
 &isp1 {
-	status = "okay";
+	status = "disabled";
 };
 
 &vin00 {

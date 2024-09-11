@@ -43,6 +43,13 @@ struct max_des_channel {
 	unsigned int phy_id;
 	unsigned int src_vc_id;
 	unsigned int dst_vc_id;
+
+	struct v4l2_async_notifier notifier;
+	struct {
+		struct v4l2_subdev *sd;
+		unsigned int pad;
+		struct fwnode_handle *ep_fwnode;
+	} source;
 };
 
 struct max_des_priv {
@@ -769,6 +776,91 @@ static const struct media_entity_operations max_des_media_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };
 
+static int max_des_notify_bound(struct v4l2_async_notifier *notifier,
+			      struct v4l2_subdev *subdev,
+			      struct v4l2_async_connection *asd)
+{
+	struct max_des_channel *channel = container_of(notifier, struct max_des_channel, notifier);
+	struct max_des_priv *priv = channel->priv;
+	struct device *dev = &priv->client->dev;
+	int ret;
+
+	ret = media_entity_get_fwnode_pad(&subdev->entity,
+					  channel->source.ep_fwnode,
+					  MEDIA_PAD_FL_SOURCE);
+	if (ret < 0) {
+		dev_err(dev, "Failed to find pad for %s\n", subdev->name);
+		return ret;
+	}
+
+	channel->source.sd = subdev;
+	channel->source.pad = ret;
+
+	ret = media_create_pad_link(&channel->source.sd->entity, channel->source.pad,
+				    &channel->sd.entity, MAX_DES_SINK_PAD,
+				    MEDIA_LNK_FL_ENABLED |
+					    MEDIA_LNK_FL_IMMUTABLE);
+	if (ret) {
+		dev_err(dev, "Unable to link %s:%u -> %s:%u\n",
+			channel->source.sd->name, channel->source.pad,
+			channel->sd.name, MAX_DES_SINK_PAD);
+		return ret;
+	}
+
+	return 0;
+}
+
+static void max_des_notify_unbind(struct v4l2_async_notifier *notifier,
+				struct v4l2_subdev *subdev,
+				struct v4l2_async_connection *asd)
+{
+	struct max_des_channel *channel = container_of(notifier, struct max_des_channel, notifier);
+
+	channel->source.sd = NULL;
+}
+
+static const struct v4l2_async_notifier_operations max_des_notify_ops = {
+	.bound = max_des_notify_bound,
+	.unbind = max_des_notify_unbind,
+};
+
+static int max_des_v4l2_notifier_register(struct max_des_channel *channel)
+{
+	struct max_des_priv *priv = channel->priv;
+	struct device *dev = &priv->client->dev;
+	int ret;
+	struct v4l2_async_connection *asc;
+
+	v4l2_async_subdev_nf_init(&channel->notifier, &channel->sd);
+
+	asc = v4l2_async_nf_add_fwnode(&channel->notifier,
+				       channel->source.ep_fwnode,
+				       struct v4l2_async_connection);
+	if (IS_ERR(asc)) {
+		dev_err(dev, "Failed to add subdev for source %u: %pe",
+			channel->index, asc);
+		v4l2_async_nf_cleanup(&channel->notifier);
+		return PTR_ERR(asc);
+	}
+
+	channel->notifier.ops = &max_des_notify_ops;
+
+	ret = v4l2_async_nf_register(&channel->notifier);
+	if (ret) {
+		dev_err(dev, "Failed to register subdev_notifier");
+		v4l2_async_nf_cleanup(&channel->notifier);
+		return ret;
+	}
+
+	return 0;
+}
+
+static void max_des_v4l2_notifier_unregister(struct max_des_channel *channel)
+{
+	v4l2_async_nf_unregister(&channel->notifier);
+	v4l2_async_nf_cleanup(&channel->notifier);
+}
+
 static void max_des_set_sd_name(struct max_des_channel *channel)
 {
 	struct max_des_priv *priv = channel->priv;
@@ -820,6 +912,12 @@ static int max_des_v4l2_register_sd(struct max_des_channel *channel)
 	if (ret)
 		goto error;
 
+	ret = max_des_v4l2_notifier_register(channel);
+	if (ret) {
+		dev_err(priv->dev, "v4l2 subdev notifier register failed: %d\n", ret);
+		goto error;
+	}
+
 	ret = v4l2_async_register_subdev(&channel->sd);
 	if (ret)
 		goto error;
@@ -836,6 +934,7 @@ error:
 
 static void max_des_v4l2_unregister_sd(struct max_des_channel *channel)
 {
+	max_des_v4l2_notifier_unregister(channel);
 	v4l2_async_unregister_subdev(&channel->sd);
 	media_entity_cleanup(&channel->sd.entity);
 	v4l2_ctrl_handler_free(&channel->ctrl_handler);
@@ -966,6 +1065,12 @@ static int max_des_parse_sink_dt_endpoint(struct max_des_channel *channel,
 	if (!ep) {
 		dev_err(priv->dev, "Not connected to subdevice\n");
 		return -EINVAL;
+	}
+
+	channel->source.ep_fwnode = fwnode_graph_get_remote_endpoint(ep);
+	if (!channel->source.ep_fwnode) {
+		dev_err(priv->dev, "no remote endpoint\n");
+		return -ENODEV;
 	}
 
 	channel_fwnode = fwnode_graph_get_remote_port_parent(ep);

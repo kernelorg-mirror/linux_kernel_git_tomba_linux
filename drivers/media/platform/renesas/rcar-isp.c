@@ -76,6 +76,10 @@ static const struct rcar_isp_format rcar_isp_formats[] = {
 		.code = MEDIA_BUS_FMT_YUYV10_2X10,
 		.datatype = MIPI_CSI2_DT_YUV422_8B,
 		.procmode = 0x0c,
+	}, {
+		.code = MEDIA_BUS_FMT_SRGGB8_1X8,
+		.datatype = MIPI_CSI2_DT_RAW8,
+		.procmode = 0x00,
 	},
 };
 

@@ -55,7 +55,7 @@ static int max96717_read(struct max96717_priv *priv, int reg)
 	int ret, val;
 
 	ret = regmap_read(priv->regmap, reg, &val);
-	dev_dbg(priv->dev, "read %d 0x%x = 0x%02x\n", ret, reg, val);
+	/*dev_dbg(priv->dev, "read %d 0x%x = 0x%02x\n", ret, reg, val);*/
 	if (ret) {
 		dev_err(priv->dev, "read 0x%04x failed\n", reg);
 		return ret;

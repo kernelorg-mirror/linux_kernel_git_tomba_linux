@@ -63,6 +63,31 @@ static int max96724_write(struct max96724_priv *priv, unsigned int reg, u8 val)
 	return ret;
 }
 
+static int max96724_write_bulk(struct max96724_priv *priv, unsigned int reg,
+			       const void *val, size_t val_count)
+{
+	int ret;
+
+	ret = regmap_bulk_write(priv->regmap, reg, val, val_count);
+	if (ret)
+		dev_err(&priv->client->dev, "bulk write 0x%04x failed\n", reg);
+
+	return ret;
+}
+
+static int max96724_write_bulk_value(struct max96724_priv *priv,
+				     unsigned int reg, unsigned int val,
+				     size_t val_count)
+{
+	unsigned int i;
+	u8 values[4];
+
+	for (i = 1; i <= val_count; i++)
+		values[i - 1] = (val >> ((val_count - i) * 8)) & 0xff;
+
+	return max96724_write_bulk(priv, reg, &values, val_count);
+}
+
 static int max96724_update_bits(struct max96724_priv *priv, unsigned int reg,
 			        u8 mask, u8 val)
 {
@@ -212,11 +237,84 @@ static int max96724_log_phy_status(struct max_des *des,
 	return 0;
 }
 
+static void max96712_pattern_enable(struct max96724_priv *priv, bool enable)
+{
+	const u32 h_active = 1920;
+	const u32 h_fp = 88;
+	const u32 h_sw = 44;
+	const u32 h_bp = 148;
+	const u32 h_tot = h_active + h_fp + h_sw + h_bp;
+
+	const u32 v_active = 1080;
+	const u32 v_fp = 4;
+	const u32 v_sw = 5;
+	const u32 v_bp = 36;
+	const u32 v_tot = v_active + v_fp + v_sw + v_bp;
+
+	const u32 vs_dly = 0;
+	const u32 vs_high = v_sw * h_tot;
+	const u32 vs_low = (v_active + v_fp + + v_bp) * h_tot;
+	const u32 v2h = 0;
+
+	const u32 hs_high = h_sw;
+	const u32 hs_low = h_active + h_fp + h_bp;
+	const u32 hs_cnt = v_tot;
+	const u32 v2d = h_tot * (v_sw + v_bp) + (h_sw + h_bp);
+
+	if (!enable) {
+		max96724_write(priv, 0x1051, 0x00);
+		return;
+	}
+
+	/* PCLK 75MHz. */
+	max96724_write(priv, 0x0009, 0x01);
+
+	/* Configure Video Timing Generator for 1920x1080 @ 30 fps. */
+	max96724_write_bulk_value(priv, 0x1052, vs_dly, 3);
+	max96724_write_bulk_value(priv, 0x1055, vs_high, 3);
+	max96724_write_bulk_value(priv, 0x1058, vs_low, 3);
+	max96724_write_bulk_value(priv, 0x105b, v2h, 3);
+	max96724_write_bulk_value(priv, 0x105e, hs_high, 2);
+	max96724_write_bulk_value(priv, 0x1060, hs_low, 2);
+	max96724_write_bulk_value(priv, 0x1062, hs_cnt, 2);
+	max96724_write_bulk_value(priv, 0x1064, v2d, 3);
+	max96724_write_bulk_value(priv, 0x1067, h_active, 2);
+	max96724_write_bulk_value(priv, 0x1069, h_fp + h_sw + h_bp, 2);
+	max96724_write_bulk_value(priv, 0x106b, v_active, 2);
+
+	/* Generate VS, HS and DE in free-running mode. */
+	max96724_write(priv, 0x1050, 0xfb);
+
+	/* Configure Video Pattern Generator. */
+	if (true) { //priv->pattern == MAX96712_PATTERN_CHECKERBOARD) {
+		/* Set checkerboard pattern size. */
+		max96724_write(priv, 0x1074, 0x3c);
+		max96724_write(priv, 0x1075, 0x3c);
+		max96724_write(priv, 0x1076, 0x3c);
+
+		/* Set checkerboard pattern colors. */
+		max96724_write_bulk_value(priv, 0x106e, 0xfecc00, 3);
+		max96724_write_bulk_value(priv, 0x1071, 0x006aa7, 3);
+
+		/* Generate checkerboard pattern. */
+		max96724_write(priv, 0x1051, 0x10);
+	} else {
+		/* Set gradient increment. */
+		max96724_write(priv, 0x106d, 0x4);
+
+		/* Generate gradient pattern. */
+		max96724_write(priv, 0x1051, 0x20);
+	}
+}
+
 static int max96724_set_enable(struct max_des *des, bool enable)
 {
 	struct max96724_priv *priv = des_to_priv(des);
 	unsigned int mask;
 	int ret;
+
+	/* HACK, always enable TPG */
+	max96712_pattern_enable(priv, enable);
 
 	mask = BIT(1);
 	ret = max96724_update_bits(priv, 0x40b, mask, enable ? mask : 0);
@@ -506,6 +604,8 @@ static int max96724_set_pipe_remap_enable(struct max_des *des,
 	struct max96724_priv *priv = des_to_priv(des);
 	unsigned int index = pipe->index;
 	unsigned int reg, mask;
+
+	return 0; // XXX remaps break TPG
 
 	reg = 0x90b + 0x40 * index + i / 8;
 	mask = BIT(i % 8);

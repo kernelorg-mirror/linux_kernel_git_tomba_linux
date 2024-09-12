@@ -46,7 +46,7 @@
 
 		label = "des0";
 
-		maxim,phy-id = <0>; /* XXX ??? */
+		maxim,phy-id = <1>;
 
 		ports {
 			#address-cells = <1>;

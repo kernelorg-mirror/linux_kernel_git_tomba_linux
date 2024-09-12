@@ -115,6 +115,8 @@ struct max_des {
 
 	unsigned int phys_config;
 	bool active;
+
+	bool cphy;
 };
 
 int max_des_probe(struct i2c_client *client, struct max_des *des);

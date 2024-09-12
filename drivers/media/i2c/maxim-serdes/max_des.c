@@ -1105,7 +1105,7 @@ static int max_des_parse_src_dt_endpoint(struct max_des_channel *channel,
 	struct max_des *des = priv->des;
 	struct max_des_phy *phy = &des->phys[channel->phy_id];
 	struct v4l2_fwnode_endpoint v4l2_ep = {
-		.bus_type = V4L2_MBUS_CSI2_DPHY
+		.bus_type = V4L2_MBUS_UNKNOWN
 	};
 	struct v4l2_mbus_config_mipi_csi2 *mipi = &v4l2_ep.bus.mipi_csi2;
 	struct fwnode_handle *ep;
@@ -1124,6 +1124,19 @@ static int max_des_parse_src_dt_endpoint(struct max_des_channel *channel,
 	if (ret) {
 		dev_err(priv->dev, "Could not parse v4l2 endpoint\n");
 		return ret;
+	}
+
+	switch (v4l2_ep.bus_type) {
+	case V4L2_MBUS_CSI2_DPHY:
+		des->cphy = false;
+		break;
+	case V4L2_MBUS_CSI2_CPHY:
+		des->cphy = true;
+		break;
+	default:
+		dev_err(&priv->client->dev, "Unsupported bus-type %u\n",
+			v4l2_ep.bus_type);
+		return -EINVAL;
 	}
 
 	ret = 0;

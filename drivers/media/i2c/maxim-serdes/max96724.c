@@ -255,8 +255,8 @@ static void max96712_pattern_enable(struct max96724_priv *priv, bool enable)
 		max96724_write(priv, 0x1076, 0x3c);
 
 		/* Set checkerboard pattern colors. */
-		max96724_write_bulk_value(priv, 0x106e, 0xfecc00, 3);
-		max96724_write_bulk_value(priv, 0x1071, 0x006aa7, 3);
+		max96724_write_bulk_value(priv, 0x106e, 0xff0000, 3);
+		max96724_write_bulk_value(priv, 0x1071, 0x00ff00, 3);
 
 		/* Generate checkerboard pattern. */
 		max96724_write(priv, 0x1051, 0x10);
@@ -294,6 +294,7 @@ static const unsigned int max96724_phys_configs_reg_val[] = {
 	BIT(2),
 	BIT(3),
 	BIT(4),
+	BIT(2),
 };
 
 static const struct max_phy_configs max96724_phys_configs[] = {
@@ -310,6 +311,8 @@ static const struct max_phy_configs max96724_phys_configs[] = {
 	{ { 0, 4, 4, 0 } },
 	{ { 0, 4, 2, 2 } },
 	{ { 2, 2, 4, 0 } },
+
+	{ { 0, 3, 3, 0 } },
 };
 
 static int max96724_init(struct max_des *des)
@@ -343,6 +346,8 @@ static unsigned int max96724_phy_hw_data_lanes(struct max_des_phy *phy)
 	if (phy->index == 1 && phy->mipi.clock_lane == MAX96724_PHY1_ALT_CLOCK &&
 	    phy->mipi.num_data_lanes == 2)
 		return 4;
+	else if (phy->mipi.num_data_lanes == 3)
+		return 4; // XXX
 	else
 		return phy->mipi.num_data_lanes;
 }
@@ -366,6 +371,10 @@ static int max96724_init_phy(struct max_des *des, struct max_des_phy *phy)
 	mask = GENMASK(1, 0);
 	val = num_data_lanes - 1;
 	ret = max96724_update_bits(priv, reg, mask << shift, val << shift);
+	if (ret)
+		return ret;
+
+	ret = max96724_update_bits(priv, reg, BIT(5), des->cphy << 5);
 	if (ret)
 		return ret;
 
@@ -418,26 +427,34 @@ static int max96724_init_phy(struct max_des *des, struct max_des_phy *phy)
 	if (ret)
 		return ret;
 
-	if (dpll_freq > 1500000000ull) {
-		/* Enable initial deskew with 2 x 32k UI. */
-		ret = max96724_write(priv, 0x903 + 0x40 * index, 0x81);
-		if (ret)
-			return ret;
 
-		/* Enable periodic deskew with 2 x 1k UI.. */
-		ret = max96724_write(priv, 0x904 + 0x40 * index, 0x81);
-		if (ret)
-			return ret;
+	if (des->cphy) {
+		/* Configure C-PHY timings. */
+		max96724_write(priv, 0x8ad, 0x3f);
+		max96724_write(priv, 0x8ae, 0x7d);
 	} else {
-		/* Disable initial deskew. */
-		ret = max96724_write(priv, 0x903 + 0x40 * index, 0x07);
-		if (ret)
-			return ret;
+		/* Configure D-PHY timings. */
+		if (dpll_freq > 1500000000ull) {
+			/* Enable initial deskew with 2 x 32k UI. */
+			ret = max96724_write(priv, 0x903 + 0x40 * index, 0x81);
+			if (ret)
+				return ret;
 
-		/* Disable periodic deskew. */
-		ret = max96724_write(priv, 0x904 + 0x40 * index, 0x01);
-		if (ret)
-			return ret;
+			/* Enable periodic deskew with 2 x 1k UI.. */
+			ret = max96724_write(priv, 0x904 + 0x40 * index, 0x81);
+			if (ret)
+				return ret;
+		} else {
+			/* Disable initial deskew. */
+			ret = max96724_write(priv, 0x903 + 0x40 * index, 0x07);
+			if (ret)
+				return ret;
+
+			/* Disable periodic deskew. */
+			ret = max96724_write(priv, 0x904 + 0x40 * index, 0x01);
+			if (ret)
+				return ret;
+		}
 	}
 
 	/* Put DPLL block into reset. */

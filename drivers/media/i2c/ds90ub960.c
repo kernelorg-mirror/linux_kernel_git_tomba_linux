@@ -2518,6 +2518,15 @@ static int ub960_init_rx_ports_ub9702(struct ub960_data *priv)
 	bool have_fpd4 = false;
 	int ret;
 
+	for_each_active_rxport() {
+		/* BC_ALWAYS_ON */
+		ret = ub960_rxport_update_bits(priv, it.nport,
+					       UB960_RR_BCC_CONFIG, BIT(4),
+					       BIT(4));
+		if (ret)
+			return ret;
+	}
+
 	/* Disable FPD4 Auto Recovery */
 	ub960_write(priv, UB9702_SR_CSI_EXCLUSIVE_FWD2, 0x0f);
 

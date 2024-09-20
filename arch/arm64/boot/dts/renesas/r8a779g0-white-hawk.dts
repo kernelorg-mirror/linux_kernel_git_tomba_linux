@@ -26,7 +26,7 @@
 	#address-cells = <1>;
 	#size-cells = <0>;
 
-	/* Serializer addresses */
+	/* Serializer addresses on the ATR */
 	i2c-alias-pool = <0x41 0x42 0x43 0x44>;
 
 	i2c-atr {
@@ -91,7 +91,8 @@
 		#gpio-cells = <2>;
 		gpio-ranges = <&ser0 0 0 11>;
 
-		i2c-alias-pool = <0x37 0x38>; /* cam address? */
+		/* Sensor addresses on the ATR */
+		i2c-alias-pool = <0x37 0x38>;
 
 		i2c-atr {
 			#address-cells = <1>;
@@ -147,9 +148,9 @@
 };
 
 &ser0_i2c {
-	sensor@50 {
+	sensor@5d {
 		compatible = "sony,imx219";
-		reg = <0x50>;
+		reg = <0x5d>;
 
             	clocks = <&imx219_clk>;
 

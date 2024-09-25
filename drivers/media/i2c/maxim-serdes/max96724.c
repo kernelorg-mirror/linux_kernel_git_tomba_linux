@@ -602,6 +602,9 @@ static int max96724_set_pipe_enable(struct max_des *des, struct max_des_pipe *pi
 	unsigned int index = pipe->index;
 	unsigned int mask = BIT(index);
 
+	//printk("XXX route all from %u to 2\n", index);
+	max96724_update_bits(priv, 0x8ca, GENMASK(1, 0) << (index * 2), 2);
+
 	return max96724_update_bits(priv, 0xf4, mask, enable ? mask : 0);
 }
 

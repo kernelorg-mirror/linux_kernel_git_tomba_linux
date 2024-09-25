@@ -5,6 +5,7 @@
  * Copyright (C) 2023 Analog Devices Inc.
  */
 
+#include "media/v4l2-cci.h"
 #include <linux/gpio/driver.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinmux.h>
@@ -13,6 +14,8 @@
 
 #include "max_ser.h"
 #include "max_serdes.h"
+
+static bool HACK_TPG = false;
 
 #define MAX96717_NAME				"max96717"
 #define MAX96717_PINCTRL_NAME			MAX96717_NAME "-pinctrl"
@@ -610,6 +613,131 @@ static unsigned int max96717_pipe_id(struct max96717_priv *priv,
 	return priv->info->pipe_hw_ids[pipe->index];
 }
 
+/* VTG */
+#define VIDEO_TX0(i)	CCI_REG8(0x100 + 0x8 * (i))
+#define VIDEO_TX1(i)	CCI_REG8(0x101 + 0x8 * (i))
+
+#define VTX_OFFSET(i) (0x43 * (i))
+
+#define VTX0(i)		CCI_REG8(0x1C8 + VTX_OFFSET(i))
+#define VTX1(i)		CCI_REG8(0x1C9 + VTX_OFFSET(i))
+#define VTX2(i)		CCI_REG24(0x1CA + VTX_OFFSET(i)) // vs_dly
+#define VTX5(i)		CCI_REG24(0x1CD + VTX_OFFSET(i)) // vs_high
+#define VTX8(i)		CCI_REG24(0x1D0 + VTX_OFFSET(i)) // vs_low
+#define VTX11(i)	CCI_REG24(0x1D3 + VTX_OFFSET(i)) // v2h
+#define VTX14(i)	CCI_REG16(0x1D6 + VTX_OFFSET(i)) // hs_high
+#define VTX16(i)	CCI_REG16(0x1D8 + VTX_OFFSET(i)) // hs_low
+#define VTX18(i)	CCI_REG16(0x1DA + VTX_OFFSET(i)) // hs_cnt
+#define VTX20(i)	CCI_REG24(0x1DC + VTX_OFFSET(i)) // v2d
+#define VTX23(i)	CCI_REG16(0x1DF + VTX_OFFSET(i)) // de_high
+#define VTX25(i)	CCI_REG16(0x1E1 + VTX_OFFSET(i)) // de_low
+#define VTX27(i)	CCI_REG16(0x1E3 + VTX_OFFSET(i)) // de_cnt
+#define VTX29(i)	CCI_REG8(0x1E5 + VTX_OFFSET(i))
+#define VTX30(i)	CCI_REG8(0x1E6 + VTX_OFFSET(i))
+
+#define VTX31(i)	CCI_REG24(0x1E7 + VTX_OFFSET(i))
+#define VTX34(i)	CCI_REG24(0x1EA + VTX_OFFSET(i))
+
+#define VTX37(i)	CCI_REG8(0x1ed + VTX_OFFSET(i))
+#define VTX38(i)	CCI_REG8(0x1ee + VTX_OFFSET(i))
+#define VTX39(i)	CCI_REG8(0x1ef + VTX_OFFSET(i))
+
+static void max96717_pattern_enable(struct max96717_priv *priv,
+				    struct max_ser_pipe *pipe, bool enable)
+{
+	unsigned int index = max96717_pipe_id(priv, pipe);
+
+	const u32 h_active = 1920;
+	const u32 h_fp = 88;
+	const u32 h_sw = 44;
+	const u32 h_bp = 148;
+	const u32 h_tot = h_active + h_fp + h_sw + h_bp;
+
+	const u32 v_active = 1080;
+	const u32 v_fp = 4;
+	const u32 v_sw = 5;
+	const u32 v_bp = 36;
+	const u32 v_tot = v_active + v_fp + v_sw + v_bp;
+
+	const u32 vs_dly = 0;
+	const u32 vs_high = v_sw * h_tot;
+	const u32 vs_low = (v_active + v_fp + + v_bp) * h_tot;
+	const u32 v2h = 0;
+
+	const u32 hs_high = h_sw;
+	const u32 hs_low = h_active + h_fp + h_bp;
+	const u32 hs_cnt = v_tot;
+	const u32 v2d = h_tot * (v_sw + v_bp) + (h_sw + h_bp);
+
+	const u32 de_high = h_active;
+	const u32 de_low = h_fp + h_sw + h_bp;
+	const u32 de_cnt = v_active;
+
+	printk("SER PAT GEN ENABLE %u, pipe %u\n", enable, index);
+
+	if (!enable) {
+		cci_update_bits(priv->regmap, VTX29(index), GENMASK(1, 0), 0, NULL);
+		//cci_write(priv->regmap, VTX29(index), 0, NULL);
+		return;
+	}
+
+	/* VTG */
+	//cci_write(priv->regmap, VTX0(index), (3 << 0) | BIT(5) | BIT(6) | BIT(7) | BIT(4), NULL);
+	//cci_write(priv->regmap, VTX1(index), (5 << 1) | 1, NULL); // PATGEN_CLK_SRC
+
+	// PATGEN_CLK_SRC
+	cci_update_bits(priv->regmap, VTX1(index), GENMASK(3, 1), 0b101 << 1, NULL);
+
+	// Sync polarities
+	cci_update_bits(priv->regmap, VTX0(index), BIT(4), BIT(4), NULL);	// VS_INV
+	cci_update_bits(priv->regmap, VTX0(index), BIT(3), 0, NULL);	// HS_INV
+	cci_update_bits(priv->regmap, VTX0(index), BIT(2), 0, NULL); // DE_INV
+
+	cci_write(priv->regmap, VTX2(index), vs_dly, NULL);
+	cci_write(priv->regmap, VTX5(index), vs_high, NULL);
+	cci_write(priv->regmap, VTX8(index), vs_low, NULL);
+	cci_write(priv->regmap, VTX11(index), v2h, NULL);
+
+	cci_write(priv->regmap, VTX14(index), hs_high, NULL);
+	cci_write(priv->regmap, VTX16(index), hs_low, NULL);
+	cci_write(priv->regmap, VTX18(index), hs_cnt, NULL);
+	cci_write(priv->regmap, VTX20(index), v2d, NULL);
+
+	cci_write(priv->regmap, VTX23(index), de_high, NULL);
+	cci_write(priv->regmap, VTX25(index), de_low, NULL);
+	cci_write(priv->regmap, VTX27(index), de_cnt, NULL);
+
+	// Use BPP from BPP register
+	cci_update_bits(priv->regmap, VIDEO_TX0(index), BIT(3), 0, NULL);
+	// BPP
+	cci_update_bits(priv->regmap, VIDEO_TX1(index), GENMASK(5, 0), 24, NULL);
+
+	/* VPG pattern */
+
+	/* Set checkerboard pattern colors A and B. */
+	cci_write(priv->regmap, VTX31(index), 0xff0000, NULL);
+	cci_write(priv->regmap, VTX34(index), 0x00ff00, NULL);
+
+	/* Set checkerboard pattern size. */
+	cci_write(priv->regmap, VTX37(index), 0x3c, NULL);
+	cci_write(priv->regmap, VTX38(index), 0x3c, NULL);
+	cci_write(priv->regmap, VTX39(index), 0x3c, NULL);
+
+	cci_update_bits(priv->regmap, VTX29(index), GENMASK(1, 0), 1, NULL);
+
+	// PAR_VID_EN = 0
+	//max96717_update_bits(priv, 0x07, 0x01, 0x00);
+
+	// auto_bpp = 0
+	//cci_update_bits(priv->regmap, VIDEO_TX0(index), BIT(3), 0x0, NULL);
+
+	// EXT11.TUN_MODE = 0 (pixel mode)
+	//max96717_update_bits(priv, 0x383, BIT(7), 0x0);
+
+	// enable sync generation
+	cci_update_bits(priv->regmap, VTX0(index), 0xE3, 0xE3, NULL);
+}
+
 static unsigned int max96717_phy_id(struct max96717_priv *priv,
 				    struct max_ser_phy *phy)
 {
@@ -622,6 +750,10 @@ static int max96717_set_pipe_enable(struct max_ser *ser,
 	struct max96717_priv *priv = ser_to_priv(ser);
 	unsigned int index = max96717_pipe_id(priv, pipe);
 	unsigned int mask = BIT(index + 4);
+
+	// XXX
+	if (HACK_TPG)
+		max96717_pattern_enable(priv, pipe, enable);
 
 	return max96717_update_bits(priv, 0x2, mask, enable ? mask : 0);
 }
@@ -786,7 +918,8 @@ static int max96717_set_phy_enable(struct max_ser *ser, struct max_ser_phy *phy,
 	unsigned int mask = BIT(index) << 4;
 
 	// XXX
-	enable = false;
+	if (HACK_TPG)
+		enable = false;
 
 	return max96717_update_bits(priv, 0x308, mask, enable ? mask : 0);
 }

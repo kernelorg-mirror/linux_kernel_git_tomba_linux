@@ -181,9 +181,6 @@ static unsigned int max_des_code_num_remaps(u32 code)
 {
 	u8 dt = max_format_dt_by_code(code);
 
-	/* XXX: Disable all remaps for now */
-	return 0;
-
 	if (dt == 0 || dt == MIPI_CSI2_DT_EMBEDDED_8B)
 		return 1;
 

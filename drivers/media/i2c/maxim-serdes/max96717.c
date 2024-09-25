@@ -785,6 +785,9 @@ static int max96717_set_phy_enable(struct max_ser *ser, struct max_ser_phy *phy,
 	unsigned int index = max96717_phy_id(priv, phy);
 	unsigned int mask = BIT(index) << 4;
 
+	// XXX
+	enable = false;
+
 	return max96717_update_bits(priv, 0x308, mask, enable ? mask : 0);
 }
 

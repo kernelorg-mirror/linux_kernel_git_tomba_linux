@@ -505,6 +505,7 @@ static const struct v4l2_subdev_pad_ops csi2_subdev_pad_ops = {
 	.set_fmt = csi2_pad_set_fmt,
 	.set_routing = csi2_set_routing,
 	.link_validate = v4l2_subdev_link_validate_default,
+	.init_cfg = csi2_init_state,
 };
 
 static const struct media_entity_operations csi2_entity_ops = {
@@ -514,10 +515,6 @@ static const struct media_entity_operations csi2_entity_ops = {
 
 static const struct v4l2_subdev_ops csi2_subdev_ops = {
 	.pad = &csi2_subdev_pad_ops,
-};
-
-static const struct v4l2_subdev_internal_ops csi2_internal_ops = {
-	.init_state = csi2_init_state,
 };
 
 int csi2_init(struct csi2_device *csi2, struct dentry *debugfs)
@@ -548,7 +545,6 @@ int csi2_init(struct csi2_device *csi2, struct dentry *debugfs)
 
 	/* Initialize subdev */
 	v4l2_subdev_init(&csi2->sd, &csi2_subdev_ops);
-	csi2->sd.internal_ops = &csi2_internal_ops;
 	csi2->sd.entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
 	csi2->sd.entity.ops = &csi2_entity_ops;
 	csi2->sd.flags = V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_STREAMS;

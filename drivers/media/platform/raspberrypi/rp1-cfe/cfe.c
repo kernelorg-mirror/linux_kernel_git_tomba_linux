@@ -1021,8 +1021,8 @@ static int cfe_queue_setup(struct vb2_queue *vq, unsigned int *nbuffers,
 	cfe_dbg(cfe, "%s: [%s] type:%u\n", __func__, node_desc[node->id].name,
 		node->buffer_queue.type);
 
-	if (vq->max_num_buffers + *nbuffers < 3)
-		*nbuffers = 3 - vq->max_num_buffers;
+	if (vq->num_buffers + *nbuffers < 3)
+		*nbuffers = 3 - vq->num_buffers;
 
 	if (*nplanes) {
 		if (sizes[0] < size) {
@@ -1987,7 +1987,7 @@ static int cfe_register_node(struct cfe_device *cfe, int id)
 					     : sizeof(struct cfe_buffer);
 	q->timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC;
 	q->lock = &node->lock;
-	q->min_queued_buffers = 1;
+	q->min_buffers_needed = 1;
 	q->dev = &cfe->pdev->dev;
 
 	ret = vb2_queue_init(q);
@@ -2410,7 +2410,7 @@ err_cfe_put:
 	return ret;
 }
 
-static void cfe_remove(struct platform_device *pdev)
+static int cfe_remove(struct platform_device *pdev)
 {
 	struct cfe_device *cfe = platform_get_drvdata(pdev);
 
@@ -2430,6 +2430,8 @@ static void cfe_remove(struct platform_device *pdev)
 	v4l2_device_unregister(&cfe->v4l2_dev);
 
 	cfe_put(cfe);
+
+	return 0;
 }
 
 static int cfe_runtime_suspend(struct device *dev)

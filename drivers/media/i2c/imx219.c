@@ -937,16 +937,13 @@ static const struct v4l2_subdev_pad_ops imx219_pad_ops = {
 	.set_fmt = imx219_set_pad_format,
 	.get_selection = imx219_get_selection,
 	.enum_frame_size = imx219_enum_frame_size,
+	.init_cfg = imx219_init_state,
 };
 
 static const struct v4l2_subdev_ops imx219_subdev_ops = {
 	.core = &imx219_core_ops,
 	.video = &imx219_video_ops,
 	.pad = &imx219_pad_ops,
-};
-
-static const struct v4l2_subdev_internal_ops imx219_internal_ops = {
-	.init_state = imx219_init_state,
 };
 
 /* -----------------------------------------------------------------------------
@@ -1098,7 +1095,6 @@ static int imx219_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	v4l2_i2c_subdev_init(&imx219->sd, client, &imx219_subdev_ops);
-	imx219->sd.internal_ops = &imx219_internal_ops;
 
 	/* Check the hardware configuration in device tree */
 	if (imx219_check_hwcfg(dev, imx219))

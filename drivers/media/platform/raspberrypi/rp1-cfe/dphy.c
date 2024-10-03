@@ -11,8 +11,8 @@
 
 #include "dphy.h"
 
-#define dphy_dbg(dphy, fmt, arg...) dev_dbg(dphy->dev, fmt, ##arg)
-#define dphy_err(dphy, fmt, arg...) dev_err(dphy->dev, fmt, ##arg)
+#define dphy_dbg(dphy, fmt, arg...) dev_dbg((dphy)->dev, fmt, ##arg)
+#define dphy_err(dphy, fmt, arg...) dev_err((dphy)->dev, fmt, ##arg)
 
 /* DW dphy Host registers */
 #define DPHY_VERSION		0x000

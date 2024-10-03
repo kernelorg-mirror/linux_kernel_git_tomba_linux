@@ -22,8 +22,8 @@ static bool csi2_track_errors;
 module_param_named(track_csi2_errors, csi2_track_errors, bool, 0);
 MODULE_PARM_DESC(track_csi2_errors, "track csi-2 errors");
 
-#define csi2_dbg(csi2, fmt, arg...) dev_dbg(csi2->v4l2_dev->dev, fmt, ##arg)
-#define csi2_err(csi2, fmt, arg...) dev_err(csi2->v4l2_dev->dev, fmt, ##arg)
+#define csi2_dbg(csi2, fmt, arg...) dev_dbg((csi2)->v4l2_dev->dev, fmt, ##arg)
+#define csi2_err(csi2, fmt, arg...) dev_err((csi2)->v4l2_dev->dev, fmt, ##arg)
 
 /* CSI2-DMA registers */
 #define CSI2_STATUS		0x000

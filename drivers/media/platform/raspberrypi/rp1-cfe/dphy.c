@@ -176,5 +176,6 @@ void dphy_probe(struct dphy_data *dphy)
 	host_ver_minor = host_ver_minor * 10;
 	host_ver_minor += (u8)((host_ver >> 8) - '0');
 
-	dphy_dbg(dphy, "DW dphy Host HW v%u.%u\n", host_ver_major, host_ver_minor);
+	dphy_dbg(dphy, "DW dphy Host HW v%u.%u\n", host_ver_major,
+		 host_ver_minor);
 }

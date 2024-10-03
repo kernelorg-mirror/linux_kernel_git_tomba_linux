@@ -135,7 +135,8 @@ static int csi2_regs_show(struct seq_file *s, void *data)
 		return ret;
 
 #define DUMP(reg) seq_printf(s, #reg " \t0x%08x\n", csi2_reg_read(csi2, reg))
-#define DUMP_CH(idx, reg) seq_printf(s, #reg "(%u) \t0x%08x\n", idx, csi2_reg_read(csi2, reg(idx)))
+#define DUMP_CH(idx, reg) seq_printf(s, #reg "(%u) \t0x%08x\n", idx, \
+				     csi2_reg_read(csi2, reg(idx)))
 
 	DUMP(CSI2_STATUS);
 	DUMP(CSI2_DISCARDS_OVERFLOW);
@@ -426,7 +427,8 @@ static int csi2_pad_set_fmt(struct v4l2_subdev *sd,
 
 		*fmt = format->format;
 
-		fmt = v4l2_subdev_state_get_opposite_stream_format(state, format->pad,
+		fmt = v4l2_subdev_state_get_opposite_stream_format(state,
+								   format->pad,
 								   format->stream);
 		if (!fmt)
 			return -EINVAL;
@@ -441,7 +443,8 @@ static int csi2_pad_set_fmt(struct v4l2_subdev *sd,
 		u32 sink_code;
 		u32 code;
 
-		sink_fmt = v4l2_subdev_state_get_opposite_stream_format(state, format->pad,
+		sink_fmt = v4l2_subdev_state_get_opposite_stream_format(state,
+									format->pad,
 									format->stream);
 		if (!sink_fmt)
 			return -EINVAL;

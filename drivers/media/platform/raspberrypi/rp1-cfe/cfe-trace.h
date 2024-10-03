@@ -154,11 +154,16 @@ TRACE_EVENT(csi2_irq,
 	),
 	TP_printk("ch=%u flags=[ %s%s%s%s%s] frame=%u line=%u\n",
 		  __entry->channel,
-		  (__entry->status & CSI2_STATUS_IRQ_FS(__entry->channel)) ? "FS " : "",
-		  (__entry->status & CSI2_STATUS_IRQ_FE(__entry->channel)) ? "FE " : "",
-		  (__entry->status & CSI2_STATUS_IRQ_FE_ACK(__entry->channel)) ? "FE_ACK " : "",
-		  (__entry->status & CSI2_STATUS_IRQ_LE(__entry->channel)) ? "LE " : "",
-		  (__entry->status & CSI2_STATUS_IRQ_LE_ACK(__entry->channel)) ? "LE_ACK " : "",
+		  (__entry->status & CSI2_STATUS_IRQ_FS(__entry->channel)) ?
+			"FS " : "",
+		  (__entry->status & CSI2_STATUS_IRQ_FE(__entry->channel)) ?
+			"FE " : "",
+		  (__entry->status & CSI2_STATUS_IRQ_FE_ACK(__entry->channel)) ?
+			"FE_ACK " : "",
+		  (__entry->status & CSI2_STATUS_IRQ_LE(__entry->channel)) ?
+			"LE " : "",
+		  (__entry->status & CSI2_STATUS_IRQ_LE_ACK(__entry->channel)) ?
+			"LE_ACK " : "",
 		  __entry->dbg >> 16, __entry->dbg & 0xffff)
 );
 

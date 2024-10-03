@@ -116,9 +116,9 @@ static const struct pisp_fe_config_param pisp_fe_config_map[] = {
 					sizeof(struct pisp_fe_output_config)         },
 };
 
-#define pisp_fe_dbg(fe, fmt, arg...) dev_dbg(fe->v4l2_dev->dev, fmt, ##arg)
-#define pisp_fe_info(fe, fmt, arg...) dev_info(fe->v4l2_dev->dev, fmt, ##arg)
-#define pisp_fe_err(fe, fmt, arg...) dev_err(fe->v4l2_dev->dev, fmt, ##arg)
+#define pisp_fe_dbg(fe, fmt, arg...) dev_dbg((fe)->v4l2_dev->dev, fmt, ##arg)
+#define pisp_fe_info(fe, fmt, arg...) dev_info((fe)->v4l2_dev->dev, fmt, ##arg)
+#define pisp_fe_err(fe, fmt, arg...) dev_err((fe)->v4l2_dev->dev, fmt, ##arg)
 
 static inline u32 pisp_fe_reg_read(struct pisp_fe_device *fe, u32 offset)
 {

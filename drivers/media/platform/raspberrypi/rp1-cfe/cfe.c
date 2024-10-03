@@ -428,7 +428,8 @@ const struct cfe_fmt *find_format_by_pix(u32 pixelformat)
 	return NULL;
 }
 
-static const struct cfe_fmt *find_format_by_code_and_fourcc(u32 code, u32 fourcc)
+static const struct cfe_fmt *find_format_by_code_and_fourcc(u32 code,
+							    u32 fourcc)
 {
 	for (unsigned int i = 0; i < ARRAY_SIZE(formats); i++) {
 		if (formats[i].code == code && formats[i].fourcc == fourcc)
@@ -509,8 +510,8 @@ static void cfe_calc_meta_format_size_bpl(struct cfe_device *cfe,
 					  struct v4l2_format *f)
 {
 	v4l_bound_align_image(&f->fmt.meta.width, MIN_META_WIDTH, MAX_WIDTH, 2,
-			      &f->fmt.meta.height, MIN_META_HEIGHT, MAX_HEIGHT, 0,
-			      0);
+			      &f->fmt.meta.height, MIN_META_HEIGHT, MAX_HEIGHT,
+			      0, 0);
 
 	f->fmt.meta.bytesperline = (f->fmt.meta.width * fmt->depth) >> 3;
 	f->fmt.meta.buffersize = f->fmt.meta.height * f->fmt.pix.bytesperline;
@@ -907,7 +908,8 @@ static int cfe_start_channel(struct cfe_node *node)
 		ret = cfe_get_vc_dt(cfe, node->id, &vc, &dt);
 		if (ret) {
 			if (start_fe) {
-				csi2_stop_channel(&cfe->csi2, cfe->fe_csi2_channel);
+				csi2_stop_channel(&cfe->csi2,
+						  cfe->fe_csi2_channel);
 				pisp_fe_stop(&cfe->fe);
 			}
 
@@ -962,8 +964,8 @@ static void cfe_stop_channel(struct cfe_node *node, bool fe_stop)
 {
 	struct cfe_device *cfe = node->cfe;
 
-	cfe_dbg(cfe, "%s: [%s] fe_stop %u\n", __func__, node_desc[node->id].name,
-		fe_stop);
+	cfe_dbg(cfe, "%s: [%s] fe_stop %u\n", __func__,
+		node_desc[node->id].name, fe_stop);
 
 	if (fe_stop) {
 		csi2_stop_channel(&cfe->csi2, cfe->fe_csi2_channel);
@@ -991,11 +993,13 @@ static void cfe_return_buffers(struct cfe_node *node,
 	}
 
 	if (node->cur_frm) {
-		trace_cfe_return_buffer(node->id, node->cur_frm->vb.vb2_buf.index, 0);
+		trace_cfe_return_buffer(node->id,
+					node->cur_frm->vb.vb2_buf.index, 0);
 		vb2_buffer_done(&node->cur_frm->vb.vb2_buf, state);
 	}
 	if (node->next_frm && node->cur_frm != node->next_frm) {
-		trace_cfe_return_buffer(node->id, node->next_frm->vb.vb2_buf.index, 1);
+		trace_cfe_return_buffer(node->id,
+					node->next_frm->vb.vb2_buf.index, 1);
 		vb2_buffer_done(&node->next_frm->vb.vb2_buf, state);
 	}
 
@@ -1196,7 +1200,8 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 	}
 
 	cfg_reg_write(cfe, MIPICFG_CFG, MIPICFG_CFG_SEL_CSI);
-	cfg_reg_write(cfe, MIPICFG_INTE, MIPICFG_INT_CSI_DMA | MIPICFG_INT_PISP_FE);
+	cfg_reg_write(cfe, MIPICFG_INTE,
+		      MIPICFG_INT_CSI_DMA | MIPICFG_INT_PISP_FE);
 
 	ret = v4l2_subdev_call(cfe->source_sd, pad, get_mbus_config, 0,
 			       &mbus_config);
@@ -1227,7 +1232,8 @@ static int cfe_start_streaming(struct vb2_queue *vq, unsigned int count)
 	for_each_active_route(&state->routing, route)
 		cfe->streams_mask |= BIT_ULL(route->sink_stream);
 
-	ret = v4l2_subdev_enable_streams(cfe->source_sd, cfe->source_pad, cfe->streams_mask);
+	ret = v4l2_subdev_enable_streams(cfe->source_sd, cfe->source_pad,
+					 cfe->streams_mask);
 	if (ret) {
 		cfe_err(cfe, "stream on failed in subdev\n");
 		goto err_disable_cfe;
@@ -1379,7 +1385,8 @@ static int cfe_g_fmt(struct file *file, void *priv, struct v4l2_format *f)
 	return 0;
 }
 
-static int cfe_validate_fmt_vid_cap(struct cfe_node *node, struct v4l2_format *f)
+static int cfe_validate_fmt_vid_cap(struct cfe_node *node,
+				    struct v4l2_format *f)
 {
 	struct cfe_device *cfe = node->cfe;
 	const struct cfe_fmt *fmt;
@@ -1502,8 +1509,8 @@ static int cfe_validate_fmt_meta(struct cfe_node *node, struct v4l2_format *f)
 	switch (node->id) {
 	case CSI2_CH0...CSI2_CH3:
 		cfe_dbg(cfe, "%s: [%s] %ux%u, V4L2 meta %p4cc\n", __func__,
-			node_desc[node->id].name, f->fmt.meta.width, f->fmt.meta.height,
-			&f->fmt.meta.dataformat);
+			node_desc[node->id].name, f->fmt.meta.width,
+			f->fmt.meta.height, &f->fmt.meta.dataformat);
 		break;
 	case FE_STATS:
 	case FE_CONFIG:
@@ -1897,7 +1904,8 @@ static int cfe_video_link_notify(struct media_link *link, u32 flags,
 		cfe_dbg(cfe, "%s: Found CSI2:%d -> FE:0 link\n", __func__,
 			cfe->fe_csi2_channel);
 	else
-		cfe_dbg(cfe, "%s: Unable to find CSI2:x -> FE:0 link\n", __func__);
+		cfe_dbg(cfe, "%s: Unable to find CSI2:x -> FE:0 link\n",
+			__func__);
 
 	return 0;
 }
@@ -1956,7 +1964,8 @@ static int cfe_register_node(struct cfe_device *cfe, int id)
 		}
 
 		node->vid_fmt.fmt.pix.pixelformat = fmt->fourcc;
-		v4l2_fill_pix_format(&node->vid_fmt.fmt.pix, &cfe_default_format);
+		v4l2_fill_pix_format(&node->vid_fmt.fmt.pix,
+				     &cfe_default_format);
 
 		ret = cfe_validate_fmt_vid_cap(node, &node->vid_fmt);
 		if (ret)
@@ -2029,7 +2038,8 @@ static int cfe_register_node(struct cfe_device *cfe, int id)
 
 	ret = video_register_device(vdev, VFL_TYPE_VIDEO, -1);
 	if (ret) {
-		cfe_err(cfe, "Unable to register video device %s\n", vdev->name);
+		cfe_err(cfe, "Unable to register video device %s\n",
+			vdev->name);
 		return ret;
 	}
 
@@ -2078,7 +2088,8 @@ static int cfe_link_node_pads(struct cfe_device *cfe)
 	remote_pad = media_pad_remote_pad_unique(&cfe->csi2.pad[CSI2_PAD_SINK]);
 	if (IS_ERR(remote_pad)) {
 		ret = PTR_ERR(remote_pad);
-		cfe_err(cfe, "Failed to get unique remote source pad: %d\n", ret);
+		cfe_err(cfe, "Failed to get unique remote source pad: %d\n",
+			ret);
 		return ret;
 	}
 
@@ -2175,7 +2186,8 @@ static int cfe_async_bound(struct v4l2_async_notifier *notifier,
 	struct cfe_device *cfe = to_cfe_device(notifier->v4l2_dev);
 
 	if (cfe->source_sd) {
-		cfe_err(cfe, "Rejecting subdev %s (Already set!!)", subdev->name);
+		cfe_err(cfe, "Rejecting subdev %s (Already set!!)",
+			subdev->name);
 		return 0;
 	}
 
@@ -2206,7 +2218,8 @@ static int cfe_register_async_nf(struct cfe_device *cfe)
 	struct v4l2_async_connection *asd;
 	int ret;
 
-	local_ep_fwnode = fwnode_graph_get_endpoint_by_id(pdev->dev.fwnode, 0, 0, 0);
+	local_ep_fwnode = fwnode_graph_get_endpoint_by_id(pdev->dev.fwnode, 0,
+							  0, 0);
 	if (!local_ep_fwnode) {
 		cfe_err(cfe, "Failed to find local endpoint fwnode\n");
 		return -ENODEV;
@@ -2219,7 +2232,8 @@ static int cfe_register_async_nf(struct cfe_device *cfe)
 		goto err_put_local_fwnode;
 	}
 
-	for (unsigned int lane = 0; lane < ep.bus.mipi_csi2.num_data_lanes; lane++) {
+	for (unsigned int lane = 0; lane < ep.bus.mipi_csi2.num_data_lanes;
+	     lane++) {
 		if (ep.bus.mipi_csi2.data_lanes[lane] != lane + 1) {
 			cfe_err(cfe, "Data lanes reordering not supported\n");
 			ret = -EINVAL;
@@ -2459,7 +2473,8 @@ static int cfe_runtime_resume(struct device *dev)
 
 static const struct dev_pm_ops cfe_pm_ops = {
 	SET_RUNTIME_PM_OPS(cfe_runtime_suspend, cfe_runtime_resume, NULL)
-	SET_LATE_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
+	SET_LATE_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend,
+				     pm_runtime_force_resume)
 };
 
 static const struct of_device_id cfe_of_match[] = {

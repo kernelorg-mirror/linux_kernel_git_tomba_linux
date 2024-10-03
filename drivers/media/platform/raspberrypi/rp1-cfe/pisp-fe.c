@@ -384,7 +384,8 @@ void pisp_fe_start(struct pisp_fe_device *fe)
 {
 	pisp_fe_reg_write(fe, FE_CONTROL, FE_CONTROL_RESET);
 	pisp_fe_reg_write(fe, FE_INT_STATUS, ~0);
-	pisp_fe_reg_write(fe, FE_INT_EN, FE_INT_EOF | FE_INT_SOF | FE_INT_LINES0 | FE_INT_LINES1);
+	pisp_fe_reg_write(fe, FE_INT_EN, FE_INT_EOF | FE_INT_SOF |
+					 FE_INT_LINES0 | FE_INT_LINES1);
 	fe->inframe_count = 0;
 }
 

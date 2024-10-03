@@ -52,9 +52,9 @@
 #define CFE_MODULE_NAME	"rp1-cfe"
 #define CFE_VERSION	"1.0"
 
-#define cfe_dbg(cfe, fmt, arg...) dev_dbg(&cfe->pdev->dev, fmt, ##arg)
-#define cfe_info(cfe, fmt, arg...) dev_info(&cfe->pdev->dev, fmt, ##arg)
-#define cfe_err(cfe, fmt, arg...) dev_err(&cfe->pdev->dev, fmt, ##arg)
+#define cfe_dbg(cfe, fmt, arg...) dev_dbg(&(cfe)->pdev->dev, fmt, ##arg)
+#define cfe_info(cfe, fmt, arg...) dev_info(&(cfe)->pdev->dev, fmt, ##arg)
+#define cfe_err(cfe, fmt, arg...) dev_err(&(cfe)->pdev->dev, fmt, ##arg)
 
 /* MIPICFG registers */
 #define MIPICFG_CFG		0x004
@@ -2235,7 +2235,7 @@ static int cfe_register_async_nf(struct cfe_device *cfe)
 	cfe->notifier.ops = &cfe_async_ops;
 
 	asd = v4l2_async_nf_add_fwnode_remote(&cfe->notifier, local_ep_fwnode,
-				       struct v4l2_async_connection);
+					      struct v4l2_async_connection);
 	if (IS_ERR(asd)) {
 		ret = PTR_ERR(asd);
 		cfe_err(cfe, "Error adding subdevice: %d\n", ret);

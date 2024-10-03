@@ -26,7 +26,8 @@ TRACE_EVENT(cfe_return_buffer,
 		__entry->buf_idx = buf_idx;
 		__entry->queue_id = queue_id;
 	),
-	TP_printk("node=%u buf=%u, queue=%u", __entry->node_id, __entry->buf_idx, __entry->queue_id)
+	TP_printk("node=%u buf=%u, queue=%u", __entry->node_id,
+		  __entry->buf_idx, __entry->queue_id)
 );
 
 DECLARE_EVENT_CLASS(cfe_buffer_template,
@@ -87,9 +88,8 @@ TRACE_EVENT(cfe_buffer_complete,
 		__entry->seq = buf->sequence;
 		__entry->ts = buf->vb2_buf.timestamp;
 	),
-	TP_printk("node=%u buf=%u seq=%u ts=%llu", __entry->node_id, __entry->buf_idx,
-		  __entry->seq,
-		  __entry->ts)
+	TP_printk("node=%u buf=%u seq=%u ts=%llu", __entry->node_id,
+		  __entry->buf_idx, __entry->seq, __entry->ts)
 );
 
 TRACE_EVENT(cfe_frame_start,
@@ -163,7 +163,8 @@ TRACE_EVENT(csi2_irq,
 );
 
 TRACE_EVENT(fe_irq,
-	TP_PROTO(u32 status, u32 output_status, u32 frame_status, u32 error_status, u32 int_status),
+	TP_PROTO(u32 status, u32 output_status, u32 frame_status,
+		 u32 error_status, u32 int_status),
 	TP_ARGS(status, output_status, frame_status, error_status, int_status),
 	TP_STRUCT__entry(
 		__field(u32, status)

@@ -626,7 +626,7 @@ static void cfe_queue_event_sof(struct cfe_node *node)
 	v4l2_event_queue(&node->video_dev, &event);
 }
 
-static void cfe_sof_isr_handler(struct cfe_node *node)
+static void cfe_sof_isr(struct cfe_node *node)
 {
 	struct cfe_device *cfe = node->cfe;
 	bool matching_fs = true;
@@ -679,7 +679,7 @@ static void cfe_sof_isr_handler(struct cfe_node *node)
 		cfe_queue_event_sof(node);
 }
 
-static void cfe_eof_isr_handler(struct cfe_node *node)
+static void cfe_eof_isr(struct cfe_node *node)
 {
 	struct cfe_device *cfe = node->cfe;
 
@@ -739,11 +739,11 @@ static irqreturn_t cfe_isr(int irq, void *dev)
 			 * frame.
 			 */
 			if (sof[i] && !check_state(cfe, FS_INT, i)) {
-				cfe_sof_isr_handler(node);
+				cfe_sof_isr(node);
 				sof[i] = false;
 			}
 
-			cfe_eof_isr_handler(node);
+			cfe_eof_isr(node);
 		}
 
 		if (sof[i]) {
@@ -751,7 +751,7 @@ static irqreturn_t cfe_isr(int irq, void *dev)
 			 * The condition below tests for (3). In such cases, we
 			 * come in here with FS flag set in the node state from
 			 * the previous frame since it only gets cleared in
-			 * eof_isr_handler(). Handle the FE for the previous
+			 * cfe_eof_isr(). Handle the FE for the previous
 			 * frame first before the FS handler for the current
 			 * frame.
 			 */
@@ -759,10 +759,10 @@ static irqreturn_t cfe_isr(int irq, void *dev)
 			    !check_state(cfe, FE_INT, node->id)) {
 				cfe_dbg(cfe, "%s: [%s] Handling missing previous FE interrupt\n",
 					__func__, node_desc[node->id].name);
-				cfe_eof_isr_handler(node);
+				cfe_eof_isr(node);
 			}
 
-			cfe_sof_isr_handler(node);
+			cfe_sof_isr(node);
 		}
 
 		if (!cfe->job_queued && cfe->job_ready)

@@ -428,8 +428,7 @@ static int csi2_pad_set_fmt(struct v4l2_subdev *sd,
 		*fmt = format->format;
 
 		fmt = v4l2_subdev_state_get_opposite_stream_format(state,
-								   format->pad,
-								   format->stream);
+			format->pad, format->stream);
 		if (!fmt)
 			return -EINVAL;
 
@@ -444,8 +443,7 @@ static int csi2_pad_set_fmt(struct v4l2_subdev *sd,
 		u32 code;
 
 		sink_fmt = v4l2_subdev_state_get_opposite_stream_format(state,
-									format->pad,
-									format->stream);
+			format->pad, format->stream);
 		if (!sink_fmt)
 			return -EINVAL;
 
@@ -482,8 +480,8 @@ static int csi2_set_routing(struct v4l2_subdev *sd,
 	int ret;
 
 	ret = v4l2_subdev_routing_validate(sd, routing,
-					   V4L2_SUBDEV_ROUTING_ONLY_1_TO_1 |
-					   V4L2_SUBDEV_ROUTING_NO_SOURCE_MULTIPLEXING);
+		V4L2_SUBDEV_ROUTING_ONLY_1_TO_1 |
+		V4L2_SUBDEV_ROUTING_NO_SOURCE_MULTIPLEXING);
 	if (ret)
 		return ret;
 

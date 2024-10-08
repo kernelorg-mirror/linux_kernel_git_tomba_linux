@@ -305,6 +305,17 @@ extern "C" {
 #define DRM_FORMAT_BGR565_A8	fourcc_code('B', '5', 'A', '8')
 
 /*
+ * 2 plane 10 bit per component YCbCr
+ * index 0 = Y plane, [31:0] x:Y2:Y1:Y0 2:10:10:10 little endian
+ * index 1 = Cb:Cr plane, [63:0] x:Cb2:Cr2:Cb1:x:Cr1:Cb0:Cr0 2:10:10:10:2:10:10:10 little endian
+ */
+/* GST_VIDEO_FORMAT_NV12_10LE32 */
+/* similar to DRM_FORMAT_P030 */
+#define DRM_FORMAT_XV15		fourcc_code('X', 'V', '1', '5') /* 2x2 subsampled Cb:Cr plane 2:10:10:10 */
+/* GST_VIDEO_FORMAT_NV16_10LE32 */
+#define DRM_FORMAT_XV20		fourcc_code('X', 'V', '2', '0') /* 2x1 subsampled Cb:Cr plane 2:10:10:10 */
+
+/*
  * 2 plane YCbCr
  * index 0 = Y plane, [7:0] Y
  * index 1 = Cr:Cb plane, [15:0] Cr:Cb little endian

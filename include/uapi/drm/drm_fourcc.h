@@ -408,6 +408,12 @@ extern "C" {
 #define DRM_FORMAT_YUV444	fourcc_code('Y', 'U', '2', '4') /* non-subsampled Cb (1) and Cr (2) planes */
 #define DRM_FORMAT_YVU444	fourcc_code('Y', 'V', '2', '4') /* non-subsampled Cr (1) and Cb (2) planes */
 
+/* Greyscale formats */
+
+//#define DRM_FORMAT_Y8		fourcc_code('G', 'R', 'E', 'Y') /* 8  Greyscale	*/
+
+/* 10-bit grayscale, packed into 32bit words (2 bits padding) */
+#define DRM_FORMAT_Y10_LE32	fourcc_code('Y', '1', '0', ' ') /* 10 Greyscale */
 
 /*
  * Format Modifiers:

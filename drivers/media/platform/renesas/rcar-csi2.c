@@ -749,7 +749,7 @@ static int rcsi2_calc_mbps(struct rcar_csi2 *priv, unsigned int bpp,
 
 	freq = v4l2_get_link_freq(source->ctrl_handler, bpp, 2 * lanes);
 
-	mbps = freq;
+	mbps = freq * 2;
 	do_div(mbps, 1000000);
 
 #if 0

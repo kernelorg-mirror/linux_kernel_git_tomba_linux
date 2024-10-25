@@ -1187,15 +1187,6 @@ static const struct v4l2_subdev_core_ops max_des_core_ops = {
 #endif
 };
 
-static int foo_v4l2_subdev_link_validate_default(struct v4l2_subdev *sd,
-				      struct media_link *link,
-				      struct v4l2_subdev_format *source_fmt,
-				      struct v4l2_subdev_format *sink_fmt)
-{
-	return 0;
-}
-
-
 static const struct v4l2_subdev_pad_ops max_des_pad_ops = {
 	.enable_streams = max_des_enable_streams,
 	.disable_streams = max_des_disable_streams,
@@ -1205,8 +1196,6 @@ static const struct v4l2_subdev_pad_ops max_des_pad_ops = {
 
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = max_des_set_fmt,
-
-	.link_validate = foo_v4l2_subdev_link_validate_default,
 };
 
 static const struct v4l2_subdev_ops max_des_subdev_ops = {

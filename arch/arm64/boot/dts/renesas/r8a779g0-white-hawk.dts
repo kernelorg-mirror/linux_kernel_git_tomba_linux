@@ -93,7 +93,7 @@
 		gpio-ranges = <&ser0 0 0 11>;
 
 		/* Sensor addresses on the ATR */
-		i2c-alias-pool = <0x37 0x38>;
+		i2c-alias-pool = <0x37>;
 
 		i2c-atr {
 			#address-cells = <1>;
@@ -116,6 +116,11 @@
 
 				ser0_in: endpoint {
 					remote-endpoint = <&sensor_out>;
+
+					clock-lanes = <0>;
+					data-lanes = <1 2>;
+					/*clock-noncontinuous;*/
+					link-frequencies = /bits/ 64 <456000000>;
 				};
 			};
 
@@ -147,7 +152,6 @@
 	imx219@10 {
 		compatible = "sony,imx219";
 		reg = <0x10>;
-		status = "enabled";
 
 		clocks = <&cam0_clk>;
 		clock-names = "xclk";
@@ -161,37 +165,9 @@
 				remote-endpoint = <&ser0_in>;
 				clock-lanes = <0>;
 				data-lanes = <1 2>;
-				clock-noncontinuous;
+				/*clock-noncontinuous;*/
 				link-frequencies = /bits/ 64 <456000000>;
 			};
 		};
 	};
-#if 0
-	sensor@5d {
-		compatible = "sony,imx219";
-		reg = <0x5d>;
-
-            	clocks = <&imx219_clk>;
-
-/*
-		clocks = <&clk_cam_27M>;
-		clock-names = "inck";
-
-		xclr-gpios = <&serializer 0 GPIO_ACTIVE_LOW>;
-		error0-gpios = <&serializer 1 GPIO_ACTIVE_HIGH>;
-		error1-gpios = <&serializer 2 GPIO_ACTIVE_HIGH>;
-		comready-gpios = <&serializer 3 GPIO_ACTIVE_HIGH>;
-*/
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		port {
-			sensor_out: endpoint {
-				remote-endpoint = <&ser0_in>;
-                    		data-lanes = <1 2>;
-		                    link-frequencies = /bits/ 64 <456000000>;
-			};
-		};
-	};
-#endif
 };

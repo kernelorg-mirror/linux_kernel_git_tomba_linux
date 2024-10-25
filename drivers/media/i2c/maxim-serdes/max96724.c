@@ -655,7 +655,7 @@ static const struct max96724_chip_info max96724_info = {
 };
 
 static const struct max96724_chip_info max96712_info = {
-	.num_pipes = 8,
+	.num_pipes = 4, // XXX should be 8
 };
 
 static int max96724_probe(struct i2c_client *client)

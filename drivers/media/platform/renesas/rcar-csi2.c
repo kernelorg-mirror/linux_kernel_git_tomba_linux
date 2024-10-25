@@ -1155,7 +1155,10 @@ static int rcsi2_start(struct rcar_csi2 *priv, struct v4l2_subdev_state *state)
 		return ret;
 	}
 
-	ret = v4l2_subdev_call(priv->remote, video, s_stream, 1);
+	printk("rcsi2_start\n");
+
+	ret = v4l2_subdev_enable_streams(priv->remote, 5, BIT_ULL(0));
+	//ret = v4l2_subdev_call(priv->remote, video, s_stream, 1);
 	if (ret) {
 		rcsi2_enter_standby(priv);
 		return ret;
@@ -1167,7 +1170,8 @@ static int rcsi2_start(struct rcar_csi2 *priv, struct v4l2_subdev_state *state)
 static void rcsi2_stop(struct rcar_csi2 *priv)
 {
 	rcsi2_enter_standby(priv);
-	v4l2_subdev_call(priv->remote, video, s_stream, 0);
+	v4l2_subdev_disable_streams(priv->remote, 5, BIT_ULL(0));
+	//v4l2_subdev_call(priv->remote, video, s_stream, 0);
 }
 
 static int rcsi2_s_stream(struct v4l2_subdev *sd, int enable)

@@ -41,37 +41,38 @@
 		};
 	};
 
+#if 0
 	channel@0 {
 		reg = <0>;
 
 		label = "des0";
 
-		maxim,phy-id = <1>;
+		maxim,phy-id = <1>; // XXX?
+#endif
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
 
-		ports {
-			#address-cells = <1>;
-			#size-cells = <0>;
+		port@0 {
+			reg = <0>;
 
-			port@0 {
-				reg = <0>;
-
-				des0_out: endpoint {
-					remote-endpoint = <&csi40_in>;
-					bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
-					clock-lanes = <0>;
-					data-lanes = <1 2 3>;
-					link-frequencies = /bits/ 64 <500000000>;
-				};
-			};
-
-			port@1 {
-				reg = <1>;
-
-				des0_in0: endpoint {
-					remote-endpoint = <&ser0_out>;
-				};
+			des0_in0: endpoint {
+				remote-endpoint = <&ser0_out>;
 			};
 		};
+
+		port@6 {
+			reg = <6>;
+
+			des0_out: endpoint {
+				remote-endpoint = <&csi40_in>;
+				bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
+				clock-lanes = <0>;
+				data-lanes = <1 2 3>;
+				link-frequencies = /bits/ 64 <500000000>;
+			};
+		};
+
 	};
 };
 
@@ -106,31 +107,26 @@
 			};
 		};
 
-		channel@0 {
-			reg = <0>;
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
 
-			label = "ser0";
+			port@0 {
+				reg = <0>;
 
-			ports {
-				#address-cells = <1>;
-				#size-cells = <0>;
-
-				port@0 {
-					reg = <0>;
-
-					ser0_out: endpoint {
-						remote-endpoint = <&des0_in0>;
-					};
-				};
-
-				port@1 {
-					reg = <1>;
-
-					ser0_in: endpoint {
-						remote-endpoint = <&sensor_out>;
-					};
+				ser0_in: endpoint {
+					remote-endpoint = <&sensor_out>;
 				};
 			};
+
+			port@1 {
+				reg = <1>;
+
+				ser0_out: endpoint {
+					remote-endpoint = <&des0_in0>;
+				};
+			};
+
 		};
 	};
 };
@@ -140,7 +136,7 @@
  */
 
 / {
-	imx219_clk: clock {
+	cam0_clk: clock {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency = <24000000>;
@@ -148,6 +144,29 @@
 };
 
 &ser0_i2c {
+	imx219@10 {
+		compatible = "sony,imx219";
+		reg = <0x10>;
+		status = "enabled";
+
+		clocks = <&cam0_clk>;
+		clock-names = "xclk";
+#if 0
+		VANA-supply = <&cam0_reg>;	/* 2.8v */
+		VDIG-supply = <&cam_dummy_reg>;	/* 1.8v */
+		VDDL-supply = <&cam_dummy_reg>;	/* 1.2v */
+#endif
+		port {
+			sensor_out: endpoint {
+				remote-endpoint = <&ser0_in>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+				clock-noncontinuous;
+				link-frequencies = /bits/ 64 <456000000>;
+			};
+		};
+	};
+#if 0
 	sensor@5d {
 		compatible = "sony,imx219";
 		reg = <0x5d>;
@@ -174,4 +193,5 @@
 			};
 		};
 	};
+#endif
 };

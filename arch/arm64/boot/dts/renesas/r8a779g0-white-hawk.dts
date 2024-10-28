@@ -85,7 +85,7 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		compatible = "maxim,max9295a";
+		compatible = "maxim,max96717";
 		reg = <0x40>;
 
 		gpio-controller;
@@ -119,7 +119,7 @@
 
 					clock-lanes = <0>;
 					data-lanes = <1 2>;
-					/*clock-noncontinuous;*/
+					clock-noncontinuous;
 					link-frequencies = /bits/ 64 <456000000>;
 				};
 			};
@@ -165,7 +165,7 @@
 				remote-endpoint = <&ser0_in>;
 				clock-lanes = <0>;
 				data-lanes = <1 2>;
-				/*clock-noncontinuous;*/
+				clock-noncontinuous;
 				link-frequencies = /bits/ 64 <456000000>;
 			};
 		};

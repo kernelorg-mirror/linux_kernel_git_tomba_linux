@@ -17,22 +17,6 @@
                         "name": "imx219"
                     }
                 ]
-            },
-            {
-                "name": "max96717",
-                "cameras": [
-                    {
-                        "name": "imx219"
-                    }
-                ]
-            },
-            {
-                "name": "max96717",
-                "cameras": [
-                    {
-                        "name": "imx219"
-                    }
-                ]
             }
         ]
     }

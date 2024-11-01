@@ -772,7 +772,7 @@ spi10_cs_pins: &spi10_cs_gpio1 {};
 };
 
 #define i2c_bus i2c_csi_dsi0
-#include "cfg.dtsi"
+#include "cfg-tomi.dtsi"
 #undef i2c_bus
 
 &max_des_0 {

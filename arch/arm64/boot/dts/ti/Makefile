@@ -13,6 +13,7 @@ dtb-$(CONFIG_ARCH_K3) += k3-am625-beagleplay.dtb
 dtb-$(CONFIG_ARCH_K3) += k3-am625-beagleplay-csi2-imx219.dtbo
 dtb-$(CONFIG_ARCH_K3) += k3-am625-beagleplay-csi2-ov5640.dtbo
 dtb-$(CONFIG_ARCH_K3) += k3-am625-beagleplay-csi2-tevi-ov5640.dtbo
+dtb-$(CONFIG_ARCH_K3) += k3-am625-beagleplay-csi2-v3link-fusion.dtbo
 dtb-$(CONFIG_ARCH_K3) += k3-am625-phyboard-lyra-rdk.dtb
 dtb-$(CONFIG_ARCH_K3) += k3-am625-sk.dtb
 dtb-$(CONFIG_ARCH_K3) += k3-am625-verdin-nonwifi-dahlia.dtb
@@ -239,6 +240,7 @@ dtb-$(CONFIG_ARCH_K3) += k3-v3link-imx219-0-0.dtbo \
 
 # Enable support for device-tree overlays
 DTC_FLAGS_k3-am625-beagleplay += -@
+DTC_FLAGS_k3-am625-beagleplay-csi2-v3link-fusion += -@
 DTC_FLAGS_k3-am625-phyboard-lyra-rdk += -@
 DTC_FLAGS_k3-am62a7-phyboard-lyra-rdk += -@
 DTC_FLAGS_k3-am625-sk += -@

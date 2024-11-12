@@ -12,6 +12,8 @@
 #include <linux/of_graph.h>
 #include <linux/regmap.h>
 
+#include <video/videomode.h>
+
 #include "max_des.h"
 
 #define MAX96724_REG0				0x0
@@ -136,6 +138,44 @@
 #define MAX96724_MIPI_TX51_ALT_MEM_MAP_10	BIT(2)
 #define MAX96724_MIPI_TX51_ALT2_MEM_MAP_8	BIT(4)
 
+#define MAX96724_PATGEN_0			0x1050
+#define MAX96724_PATGEN_0_VTG_MODE		GENMASK(1, 0)
+#define MAX96724_PATGEN_0_VTG_MODE_VS_TRACK	0b00
+#define MAX96724_PATGEN_0_VTG_MODE_VS_ONE_TRIG	0b01
+#define MAX96724_PATGEN_0_VTG_MODE_AUTO_REPEAT	0b10
+#define MAX96724_PATGEN_0_VTG_MODE_FREE_RUNNING	0b11
+#define MAX96724_PATGEN_0_DE_INV		BIT(2)
+#define MAX96724_PATGEN_0_HS_INV		BIT(3)
+#define MAX96724_PATGEN_0_VS_INV		BIT(4)
+#define MAX96724_PATGEN_0_GEN_DE		BIT(5)
+#define MAX96724_PATGEN_0_GEN_HS		BIT(6)
+#define MAX96724_PATGEN_0_GEN_VS		BIT(7)
+
+#define MAX96724_PATGEN_1			0x1051
+#define MAX96724_PATGEN_1_VS_TRIG		BIT(0)
+#define MAX96724_PATGEN_1_MODE			GENMASK(5, 4)
+#define MAX96724_PATGEN_1_MODE_CHECKER		0b01
+#define MAX96724_PATGEN_1_MODE_GRADIENT		0b10
+#define MAX96724_PATGEN_1_GRAD_MODE		BIT(7)
+
+#define MAX96724_VS_DLY_2			0x1052
+#define MAX96724_VS_HIGH_2			0x1055
+#define MAX96724_VS_LOW_2			0x1058
+#define MAX96724_V2H_2				0x105b
+#define MAX96724_HS_HIGH_1			0x105e
+#define MAX96724_HS_LOW_1			0x1060
+#define MAX96724_HS_CNT_1			0x1062
+#define MAX96724_V2D_2				0x1064
+#define MAX96724_DE_HIGH_1			0x1067
+#define MAX96724_DE_LOW_1			0x1069
+#define MAX96724_DE_CNT_1			0x106b
+#define MAX96724_GRAD_INCR			0x106d
+#define MAX96724_CHKR_COLOR_A_L			0x106e
+#define MAX96724_CHKR_COLOR_B_L			0x1071
+#define MAX96724_CHKR_RPT_A			0x1074
+#define MAX96724_CHKR_RPT_B			0x1075
+#define MAX96724_CHKR_RPT_ALT			0x1076
+
 #define MAX96724_DE_DET				0x11f0
 #define MAX96724_HS_DET				0x11f1
 #define MAX96724_VS_DET				0x11f2
@@ -170,11 +210,40 @@ struct max96724_priv {
 
 struct max96724_chip_info {
 	bool supports_pipe_stream_autoselect;
+	bool supports_tpg;
 	unsigned int num_pipes;
 };
 
 #define des_to_priv(des) \
 	container_of(des, struct max96724_priv, des)
+
+static int max96724_write_bulk_value(struct max96724_priv *priv,
+				     unsigned int reg, u32 val,
+				     size_t val_size)
+{
+	u8 values[4];
+
+	for (unsigned int i = 1; i <= val_size; i++)
+		values[i - 1] = (val >> ((val_size - i) * 8)) & 0xff;
+
+	return regmap_bulk_write(priv->regmap, reg, &values, val_size);
+}
+
+static int max96724_write_bulk_sequence(struct max96724_priv *priv,
+					const struct max_serdes_reg_sequence *seq,
+					unsigned int seq_size)
+{
+	for (unsigned int i = 0; i < seq_size; ++i) {
+		const struct max_serdes_reg_sequence *s = &seq[i];
+
+		int ret = max96724_write_bulk_value(priv, s->reg, s->val,
+						    s->val_size);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
 
 static int max96724_wait_for_device(struct max96724_priv *priv)
 {
@@ -716,6 +785,154 @@ static int max96724_select_links(struct max_des *des, unsigned int mask)
 	return 0;
 }
 
+static int max96724_tpg_disable(struct max96724_priv *priv,
+				struct max_des_pipe *pipe)
+{
+	/* Restore default values */
+
+	regmap_write(priv->regmap, MAX96724_PATGEN_1, 0x0);
+	regmap_write(priv->regmap, MAX96724_PATGEN_0, 0x3);
+
+	return 0;
+}
+
+static int max96724_tpg_write_timings(struct max96724_priv *priv,
+				      const struct videomode *vm)
+{
+	const u32 h_tot = vm->hactive + vm->hfront_porch + vm->hsync_len +
+			  vm->hback_porch;
+	const u32 v_tot = vm->vactive + vm->vfront_porch + vm->vsync_len +
+			  vm->vback_porch;
+
+	const u32 vs_dly = 0;
+	const u32 vs_high = vm->vsync_len * h_tot;
+	const u32 vs_low =
+		(vm->vactive + vm->vfront_porch + vm->vback_porch) * h_tot;
+	const u32 v2h = 0;
+
+	const u32 hs_high = vm->hsync_len;
+	const u32 hs_low = vm->hactive + vm->hfront_porch + vm->hback_porch;
+	const u32 hs_cnt = v_tot;
+	const u32 v2d = h_tot * (vm->vsync_len + vm->vback_porch) +
+			(vm->hsync_len + vm->hback_porch);
+
+	const u32 de_high = vm->hactive;
+	const u32 de_low = vm->hfront_porch + vm->hsync_len + vm->hback_porch;
+	const u32 de_cnt = vm->vactive;
+
+	const struct max_serdes_reg_sequence seq[] = {
+		{ MAX96724_VS_DLY_2, 3, vs_dly},
+		{ MAX96724_VS_HIGH_2, 3, vs_high},
+		{ MAX96724_VS_LOW_2, 3, vs_low},
+		{ MAX96724_V2H_2, 3, v2h},
+		{ MAX96724_HS_HIGH_1, 2, hs_high},
+		{ MAX96724_HS_LOW_1, 2, hs_low},
+		{ MAX96724_HS_CNT_1, 2, hs_cnt},
+		{ MAX96724_V2D_2, 3, v2d},
+		{ MAX96724_DE_HIGH_1, 2, de_high},
+		{ MAX96724_DE_LOW_1, 2, de_low},
+		{ MAX96724_DE_CNT_1, 2, de_cnt},
+	};
+
+	return max96724_write_bulk_sequence(priv, seq, ARRAY_SIZE(seq));
+}
+
+static int max96724_tpg_enable(struct max96724_priv *priv,
+			       struct max_des_pipe *pipe, unsigned int width,
+			       unsigned int height)
+{
+	const struct videomode *vm;
+	u8 pipe_patgen_clk_src;
+	u8 pclk_src;
+	int ret;
+
+	vm = max_serdes_find_tpg_videomode(width, height);
+	if (!vm)
+		return -EINVAL;
+
+	ret = max96724_tpg_write_timings(priv, vm);
+	if (ret)
+		return ret;
+
+	switch (vm->pixelclock) {
+	case 25000000:
+		pclk_src = 0;
+		pipe_patgen_clk_src = 0;
+		break;
+	case 75000000:
+		pclk_src = 1;
+		pipe_patgen_clk_src = 0;
+		break;
+	case 150000000:
+		pclk_src = 2;
+		pipe_patgen_clk_src = 0;
+		break;
+	case 375000000:
+		pclk_src = 2;
+		pipe_patgen_clk_src = 1;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	ret = regmap_update_bits(priv->regmap, MAX96724_VPRBS(pipe->index), BIT(7),
+				   pipe_patgen_clk_src << 7);
+	if (ret)
+		return ret;
+
+	// XXX what register is this?
+	ret = regmap_update_bits(priv->regmap, 0x0009, GENMASK(1, 0), pclk_src << 0);
+	if (ret)
+		return ret;
+
+	/* Configure checkerboard */
+
+	const struct max_serdes_reg_sequence seq[] = {
+		{ MAX96724_CHKR_RPT_A, 1, 60 },
+		{ MAX96724_CHKR_RPT_B, 1, 60 },
+		{ MAX96724_CHKR_RPT_ALT, 1, 60 },
+		{ MAX96724_CHKR_COLOR_A_L, 3, 0xff0000 }, /* Red */
+		{ MAX96724_CHKR_COLOR_B_L, 3, 0x0000ff }, /* Blue */
+	};
+
+	ret = max96724_write_bulk_sequence(priv, seq, ARRAY_SIZE(seq));
+	if (ret)
+		return ret;
+
+	ret = regmap_update_bits(priv->regmap, MAX96724_PATGEN_1,
+		MAX96724_PATGEN_1_MODE,
+		FIELD_PREP(MAX96724_PATGEN_1_MODE,
+			   MAX96724_PATGEN_1_MODE_CHECKER));
+	if (ret)
+		goto err;
+
+	ret = regmap_write(priv->regmap, MAX96724_PATGEN_0,
+		MAX96724_PATGEN_0_VS_INV | MAX96724_PATGEN_0_GEN_DE |
+		MAX96724_PATGEN_0_GEN_VS | MAX96724_PATGEN_0_GEN_HS |
+		FIELD_PREP(MAX96724_PATGEN_0_VTG_MODE,
+			   MAX96724_PATGEN_0_VTG_MODE_FREE_RUNNING));
+	if (ret)
+		goto err;
+
+	return 0;
+
+err:
+	max96724_tpg_disable(priv, pipe);
+	return ret;
+}
+
+static int max96724_set_tpg_enable(struct max_des *des,
+				   struct max_des_pipe *pipe, bool enable,
+				   unsigned int width, unsigned int height)
+{
+	struct max96724_priv *priv = des_to_priv(des);
+
+	if (enable)
+		return max96724_tpg_enable(priv, pipe, width, height);
+	else
+		return max96724_tpg_disable(priv, pipe);
+}
+
 static const struct max_des_ops max96724_ops = {
 	.num_phys = 4,
 	.num_links = 4,
@@ -739,14 +956,17 @@ static const struct max_des_ops max96724_ops = {
 	.set_pipe_remap = max96724_set_pipe_remap,
 	.set_pipe_remap_enable = max96724_set_pipe_remap_enable,
 	.select_links = max96724_select_links,
+	.set_tpg_enable = max96724_set_tpg_enable,
 };
 
 static const struct max96724_chip_info max96724_info = {
 	.supports_pipe_stream_autoselect = true,
+	.supports_tpg = true,
 	.num_pipes = 4,
 };
 
 static const struct max96724_chip_info max96712_info = {
+	.supports_tpg = true,
 	.num_pipes = 8,
 };
 
@@ -795,6 +1015,7 @@ static int max96724_probe(struct i2c_client *client)
 
 	*ops = max96724_ops;
 	ops->num_pipes = priv->info->num_pipes;
+	ops->supports_tpg = priv->info->supports_tpg;
 	priv->des.ops = ops;
 
 	ret = max96724_reset(priv);

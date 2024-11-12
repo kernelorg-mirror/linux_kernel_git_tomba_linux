@@ -93,7 +93,13 @@ static inline bool max_des_pad_is_sink(struct max_des *des, u32 pad)
 
 static inline bool max_des_pad_is_source(struct max_des *des, u32 pad)
 {
-	return pad >= des->ops->num_links;
+	return pad >= des->ops->num_links &&
+	       pad < des->ops->num_links + des->ops->num_phys;
+}
+
+static inline bool max_des_pad_is_internal(struct max_des *des, u32 pad)
+{
+	return pad >= des->ops->num_links + des->ops->num_phys;
 }
 
 static inline unsigned int max_des_link_to_pad(struct max_des *des,
@@ -110,7 +116,8 @@ static inline unsigned int max_des_phy_to_pad(struct max_des *des,
 
 static inline unsigned int max_des_num_pads(struct max_des *des)
 {
-	return des->ops->num_links + des->ops->num_phys;
+	return des->ops->num_links + des->ops->num_phys +
+	       (des->ops->supports_tpg ? 1 : 0);
 }
 
 static struct max_des_phy *max_des_pad_to_phy(struct max_des *des, u32 pad)
@@ -127,6 +134,15 @@ static struct max_des_link *max_des_pad_to_link(struct max_des *des, u32 pad)
 		return NULL;
 
 	return &des->links[pad];
+}
+
+static bool max_des_tpg_selected(struct max_des *des,
+				 struct v4l2_subdev_state *state)
+{
+	const struct v4l2_subdev_krouting *routing = &state->routing;
+
+	return routing->num_routes == 1 &&
+	       max_des_pad_is_internal(des, routing->routes[0].sink_pad);
 }
 
 static struct max_des_pipe *
@@ -799,6 +815,38 @@ static int max_des_log_status(struct v4l2_subdev *sd)
 	return 0;
 }
 
+static int max_des_tpg_get_frame_desc_state(struct v4l2_subdev *sd,
+					    struct v4l2_subdev_state *state,
+					    struct v4l2_mbus_frame_desc *fd,
+					    unsigned int pad)
+{
+	struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_subdev_route *route;
+	u32 bitspp = 24;
+
+	memset(fd, 0, sizeof(*fd));
+
+	/* There is exactly one route for TPG */
+	route = &state->routing.routes[0];
+
+	fmt = v4l2_subdev_state_get_format(state, route->sink_pad, 0);
+	if (!fmt)
+		return -EINVAL;
+
+	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_CSI2;
+	fd->entry[fd->num_entries].stream = route->source_stream;
+	fd->entry[fd->num_entries].flags = V4L2_MBUS_FRAME_DESC_FL_LEN_MAX;
+	fd->entry[fd->num_entries].length =
+		fmt->width * fmt->height * bitspp / 8;
+	fd->entry[fd->num_entries].pixelcode = fmt->code;
+	fd->entry[fd->num_entries].bus.csi2.vc = 0;
+	fd->entry[fd->num_entries].bus.csi2.dt = MIPI_CSI2_DT_RGB888;
+
+	fd->num_entries = 1;
+
+	return 0;
+}
+
 static int max_des_get_frame_desc_state(struct v4l2_subdev *sd,
 					struct v4l2_subdev_state *state,
 					struct v4l2_mbus_frame_desc *fd,
@@ -810,6 +858,9 @@ static int max_des_get_frame_desc_state(struct v4l2_subdev *sd,
 	struct max_des_remap_context context = { 0 };
 	struct v4l2_subdev_route *route;
 	int ret;
+
+	if (max_des_tpg_selected(des, state))
+		return max_des_tpg_get_frame_desc_state(sd, state, fd, pad);
 
 	phy = max_des_pad_to_phy(des, pad);
 	if (!phy) {
@@ -887,6 +938,46 @@ static int max_des_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 	return ret;
 }
 
+static const struct v4l2_mbus_framefmt max_des_default_format = {
+	.width = 640,
+	.height = 480,
+	.code = MEDIA_BUS_FMT_RGB888_1X24,
+	.field = V4L2_FIELD_NONE,
+	.colorspace = V4L2_COLORSPACE_SRGB,
+	.ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT,
+	.quantization = V4L2_QUANTIZATION_DEFAULT,
+	.xfer_func = V4L2_XFER_FUNC_SRGB,
+};
+
+static int max_des_tpg_set_routing(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_state *state,
+				   struct v4l2_subdev_krouting *routing)
+{
+	const struct v4l2_subdev_route *route;
+	int ret;
+
+	/* Only a single stream allowed for TPG */
+	if (routing->num_routes != 1)
+		return -EINVAL;
+
+	route = &routing->routes[0];
+
+	/* The route must be active */
+	if (!(route->flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE))
+		return -EINVAL;
+
+	/* Stream ID must be 0 */
+	if (route->sink_stream != 0)
+		return -EINVAL;
+
+	ret = v4l2_subdev_set_routing_with_fmt(sd, state, routing,
+					       &max_des_default_format);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
 static int max_des_set_routing(struct v4l2_subdev *sd,
 			       struct v4l2_subdev_state *state,
 			       enum v4l2_subdev_format_whence which,
@@ -895,6 +986,8 @@ static int max_des_set_routing(struct v4l2_subdev *sd,
 	struct max_des_priv *priv = sd_to_priv(sd);
 	struct max_des *des = priv->des;
 	int ret;
+	struct v4l2_subdev_route *route;
+	bool is_tpg = false;
 
 	if (which == V4L2_SUBDEV_FORMAT_ACTIVE && des->active)
 		return -EBUSY;
@@ -906,6 +999,16 @@ static int max_des_set_routing(struct v4l2_subdev *sd,
 
 	if (routing->num_routes > V4L2_FRAME_DESC_ENTRY_MAX)
 		return -E2BIG;
+
+	for_each_active_route(routing, route) {
+		if (max_des_pad_is_internal(des, route->sink_pad)) {
+			is_tpg = true;
+			break;
+		}
+	}
+
+	if (is_tpg)
+		return max_des_tpg_set_routing(sd, state, routing);
 
 	ret = v4l2_subdev_routing_validate(sd, routing,
 					   V4L2_SUBDEV_ROUTING_ONLY_1_TO_1 |
@@ -1020,6 +1123,70 @@ static int max_des_update_active(struct max_des_priv *priv,
 	return 0;
 }
 
+static int max_des_tpg_update_streams(struct v4l2_subdev *sd,
+				      struct v4l2_subdev_state *state, u32 pad,
+				      u64 updated_streams_mask, bool enable)
+{
+	struct max_des_priv *priv = v4l2_get_subdevdata(sd);
+	struct max_des *des = priv->des;
+	int ret;
+	struct max_des_pipe *pipe;
+	struct max_des_remap *remaps;
+	unsigned int num_remaps;
+	const u32 src_vc_id = 0;
+	const u32 dst_vc_id = 0;
+	struct max_des_phy *phy;
+	struct v4l2_mbus_framefmt *fmt;
+
+	fmt = v4l2_subdev_state_get_format(state, pad);
+	if (!fmt)
+		return -EINVAL;
+
+	phy = max_des_pad_to_phy(des, pad);
+	if (!phy) {
+		dev_err(priv->dev, "Failed to find PHY for pad %u\n", pad);
+		return -ENOENT;
+	}
+
+	/* Always use pipe 0 */
+	pipe = &des->pipes[0];
+
+	ret = max_des_set_pipe_enable(des, pipe, enable);
+	if (ret)
+		return -EINVAL;
+
+	remaps = devm_kcalloc(priv->dev, des->ops->num_remaps_per_pipe,
+			      sizeof(*remaps), GFP_KERNEL);
+	if (!remaps)
+		return -ENOMEM;
+
+	/* Set up three hardcoded remaps for TPG: RGB888, FS and FE on VC0 */
+
+	num_remaps = 0;
+
+	ret = max_des_add_remap(remaps, &num_remaps, phy->index, src_vc_id,
+				dst_vc_id, MIPI_CSI2_DT_RGB888);
+	if (ret)
+		return ret;
+
+	ret = max_des_add_remap(remaps, &num_remaps, phy->index, src_vc_id,
+				dst_vc_id, MIPI_CSI2_DT_FS);
+	if (ret)
+		return ret;
+
+	ret = max_des_add_remap(remaps, &num_remaps, phy->index, src_vc_id,
+				dst_vc_id, MIPI_CSI2_DT_FE);
+	if (ret)
+		return ret;
+
+	ret = max_des_set_pipe_remaps(priv, pipe, remaps, num_remaps);
+	if (ret)
+		return ret;
+
+	return des->ops->set_tpg_enable(des, pipe, enable, fmt->width,
+					fmt->height);
+}
+
 static int max_des_update_streams(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *state,
 				  u32 pad, u64 updated_streams_mask, bool enable)
@@ -1059,6 +1226,10 @@ static int max_des_update_streams(struct v4l2_subdev *sd,
 			goto revert_update_active;
 		}
 	}
+
+	if (max_des_tpg_selected(des, state))
+		return max_des_tpg_update_streams(sd, state, pad,
+						  updated_streams_mask, enable);
 
 	ret = max_des_populate_remap_context(priv, &context);
 	if (ret)
@@ -1331,8 +1502,12 @@ static int max_des_v4l2_register(struct max_des_priv *priv)
 	for (i = 0; i < num_pads; i++) {
 		if (max_des_pad_is_sink(des, i))
 			priv->pads[i].flags = MEDIA_PAD_FL_SINK;
-		else
+		else if (max_des_pad_is_source(des, i))
 			priv->pads[i].flags = MEDIA_PAD_FL_SOURCE;
+		else if (max_des_pad_is_internal(des, i))
+			priv->pads[i].flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_INTERNAL;
+		else
+			goto err_ctrl_handler_free;
 	}
 
 	v4l2_set_subdevdata(sd, priv);

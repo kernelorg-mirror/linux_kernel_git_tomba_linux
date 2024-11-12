@@ -63,6 +63,7 @@ struct max_des_ops {
 	unsigned int num_links;
 	unsigned int num_remaps_per_pipe;
 	bool fix_tx_ids;
+	bool supports_tpg;
 
 	struct max_phys_configs phys_configs;
 
@@ -91,6 +92,9 @@ struct max_des_ops {
 				     unsigned int i, bool enable);
 	int (*init_link)(struct max_des *des, struct max_des_link *link);
 	int (*select_links)(struct max_des *des, unsigned int mask);
+	int (*set_tpg_enable)(struct max_des *des, struct max_des_pipe *pipe,
+			      bool enable, unsigned int width,
+			      unsigned int height);
 };
 
 struct max_des_priv;

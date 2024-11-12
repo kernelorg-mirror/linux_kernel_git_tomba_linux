@@ -74,7 +74,13 @@ static inline bool max_ser_pad_is_sink(struct max_ser *ser, u32 pad)
 
 static inline bool max_ser_pad_is_source(struct max_ser *ser, u32 pad)
 {
-	return pad >= ser->ops->num_phys;
+	return pad >= ser->ops->num_phys &&
+		pad < ser->ops->num_phys + MAX_SER_NUM_LINKS;
+}
+
+static inline bool max_ser_pad_is_internal(struct max_ser *ser, u32 pad)
+{
+	return pad >= ser->ops->num_phys + MAX_SER_NUM_LINKS;
 }
 
 static inline unsigned int max_ser_phy_to_pad(struct max_ser *ser,
@@ -85,7 +91,8 @@ static inline unsigned int max_ser_phy_to_pad(struct max_ser *ser,
 
 static inline unsigned int max_ser_num_pads(struct max_ser *ser)
 {
-	return ser->ops->num_phys + MAX_SER_NUM_LINKS;
+	return ser->ops->num_phys + MAX_SER_NUM_LINKS +
+		(ser->ops->supports_tpg ? 1 : 0);
 }
 
 static struct max_ser_phy *max_ser_pad_to_phy(struct max_ser *ser, u32 pad)
@@ -94,6 +101,15 @@ static struct max_ser_phy *max_ser_pad_to_phy(struct max_ser *ser, u32 pad)
 		return NULL;
 
 	return &ser->phys[pad];
+}
+
+static bool max_ser_tpg_selected(struct max_ser *ser,
+				 struct v4l2_subdev_state *state)
+{
+	const struct v4l2_subdev_krouting *routing = &state->routing;
+
+	return routing->num_routes == 1 &&
+	       max_ser_pad_is_internal(ser, routing->routes[0].sink_pad);
 }
 
 static struct max_ser_pipe *
@@ -380,6 +396,38 @@ static int max_ser_log_status(struct v4l2_subdev *sd)
 	return 0;
 }
 
+static int max_ser_tpg_get_frame_desc_state(struct v4l2_subdev *sd,
+					    struct v4l2_subdev_state *state,
+					    struct v4l2_mbus_frame_desc *fd,
+					    unsigned int pad)
+{
+	struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_subdev_route *route;
+	u32 bitspp = 24;
+
+	memset(fd, 0, sizeof(*fd));
+
+	/* There is exactly one route for TPG */
+	route = &state->routing.routes[0];
+
+	fmt = v4l2_subdev_state_get_format(state, route->sink_pad, 0);
+	if (!fmt)
+		return -EINVAL;
+
+	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_CSI2;
+	fd->entry[fd->num_entries].stream = route->source_stream;
+	fd->entry[fd->num_entries].flags = V4L2_MBUS_FRAME_DESC_FL_LEN_MAX;
+	fd->entry[fd->num_entries].length =
+		fmt->width * fmt->height * bitspp / 8;
+	fd->entry[fd->num_entries].pixelcode = MEDIA_BUS_FMT_RGB888_1X24;
+	fd->entry[fd->num_entries].bus.csi2.vc = 0;
+	fd->entry[fd->num_entries].bus.csi2.dt = MIPI_CSI2_DT_RGB888;
+
+	fd->num_entries = 1;
+
+	return 0;
+}
+
 static int max_ser_get_frame_desc_state(struct v4l2_subdev *sd,
 					struct v4l2_subdev_state *state,
 					struct v4l2_mbus_frame_desc *fd,
@@ -389,6 +437,9 @@ static int max_ser_get_frame_desc_state(struct v4l2_subdev *sd,
 	struct max_ser *ser = priv->ser;
 	struct v4l2_subdev_route *route;
 	int ret;
+
+	if (max_ser_tpg_selected(ser, state))
+		return max_ser_tpg_get_frame_desc_state(sd, state, fd, pad);
 
 	if (!max_ser_pad_is_source(ser, pad))
 		return -ENOENT;
@@ -451,6 +502,45 @@ static int max_ser_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 	return ret;
 }
 
+static const struct v4l2_mbus_framefmt max_ser_default_format = {
+	.width = 640,
+	.height = 480,
+	.code = MEDIA_BUS_FMT_RGB888_1X24,
+	.field = V4L2_FIELD_NONE,
+	.colorspace = V4L2_COLORSPACE_SRGB,
+	.ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT,
+	.quantization = V4L2_QUANTIZATION_DEFAULT,
+	.xfer_func = V4L2_XFER_FUNC_SRGB,
+};
+
+static int max_ser_tpg_set_routing(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state,
+				 struct v4l2_subdev_krouting *routing)
+{
+	const struct v4l2_subdev_route *route;
+	int ret;
+
+	/* Only a single stream allowed for TPG */
+	if (routing->num_routes != 1)
+		return -EINVAL;
+
+	route = &routing->routes[0];
+
+	/* The route must be active */
+	if (!(route->flags & V4L2_SUBDEV_ROUTE_FL_ACTIVE))
+		return -EINVAL;
+
+	/* Stream ID must be 0 */
+	if (route->sink_stream != 0)
+		return -EINVAL;
+
+	ret = v4l2_subdev_set_routing_with_fmt(sd, state, routing, &max_ser_default_format);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
 static int max_ser_set_routing(struct v4l2_subdev *sd,
 			       struct v4l2_subdev_state *state,
 			       enum v4l2_subdev_format_whence which,
@@ -458,10 +548,22 @@ static int max_ser_set_routing(struct v4l2_subdev *sd,
 {
 	struct max_ser_priv *priv = sd_to_priv(sd);
 	struct max_ser *ser = priv->ser;
+	struct v4l2_subdev_route *route;
+	bool is_tpg = false;
 	int ret;
 
 	if (which == V4L2_SUBDEV_FORMAT_ACTIVE && ser->active)
 		return -EBUSY;
+
+	for_each_active_route(routing, route) {
+		if (max_ser_pad_is_internal(ser, route->sink_pad)) {
+			is_tpg = true;
+			break;
+		}
+	}
+
+	if (is_tpg)
+		return max_ser_tpg_set_routing(sd, state, routing);
 
 	/*
 	 * Note: we can only support up to V4L2_FRAME_DESC_ENTRY_MAX, until
@@ -696,6 +798,47 @@ err_revert_streams_mask:
 	return ret;
 }
 
+static int max_ser_tpg_update_streams(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *state,
+				  u32 pad, u64 updated_streams_mask, bool enable)
+{
+	struct max_ser_priv *priv = v4l2_get_subdevdata(sd);
+	struct max_ser *ser = priv->ser;
+	int ret;
+	struct max_ser_pipe *pipe;
+	unsigned int vcs;
+	unsigned int *dts;
+	struct v4l2_mbus_framefmt *fmt;
+
+	pipe = &ser->pipes[0]; // XXX
+
+	fmt = v4l2_subdev_state_get_format(state, pad);
+	if (!fmt)
+		return -EINVAL;
+
+	ret = ser->ops->set_tpg_enable(ser, pipe, enable, fmt->width, fmt->height);
+	if (ret)
+		return ret;
+
+	ret = max_ser_set_pipe_enable(ser, pipe, enable);
+	if (ret)
+		return ret;
+
+	vcs = BIT(0);
+	ret = max_ser_set_pipe_vcs(ser, pipe, vcs);
+	if (ret)
+		return ret;
+
+	dts = devm_kcalloc(priv->dev, 1,
+			      sizeof(*dts), GFP_KERNEL);
+	*dts = MIPI_CSI2_DT_RGB888;
+	ret = max_ser_set_pipe_dts(priv, pipe, dts, 1);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
 static int max_ser_update_streams(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *state,
 				  u32 pad, u64 updated_streams_mask, bool enable)
@@ -714,6 +857,13 @@ static int max_ser_update_streams(struct v4l2_subdev *sd,
 		priv->streams_mask[pad] &= ~updated_streams_mask;
 
 	ser->active = !!priv->streams_mask[pad];
+
+	if (max_ser_tpg_selected(ser, state)) {
+		ret = max_ser_tpg_update_streams(sd, state, pad,
+						 updated_streams_mask, enable);
+		if (ret)
+			goto err_revert_streams;
+	}
 
 	for (i = 0; i < ser->ops->num_phys; i++) {
 		struct max_ser_phy *phy = &ser->phys[i];
@@ -758,6 +908,7 @@ err_revert_phy_update:
 				   !enable);
 	}
 
+err_revert_streams:
 	ser->active = !!streams_mask;
 
 	priv->streams_mask[pad] = streams_mask;
@@ -1019,8 +1170,12 @@ static int max_ser_v4l2_register(struct max_ser_priv *priv)
 	for (i = 0; i < num_pads; i++) {
 		if (max_ser_pad_is_sink(ser, i))
 			priv->pads[i].flags = MEDIA_PAD_FL_SINK;
-		else
+		else if (max_ser_pad_is_source(ser, i))
 			priv->pads[i].flags = MEDIA_PAD_FL_SOURCE;
+		else if (max_ser_pad_is_internal(ser, i))
+			priv->pads[i].flags = MEDIA_PAD_FL_SINK | MEDIA_PAD_FL_INTERNAL;
+		else
+			return -EINVAL;
 	}
 
 	v4l2_set_subdevdata(sd, priv);

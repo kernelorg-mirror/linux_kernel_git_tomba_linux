@@ -60,6 +60,7 @@ struct max_ser_ops {
 	unsigned int num_phys;
 	unsigned int num_i2c_xlates;
 	bool supports_noncontinuous_clock;
+	bool supports_tpg;
 
 	struct max_phys_configs phys_configs;
 
@@ -89,6 +90,9 @@ struct max_ser_ops {
 	int (*set_pipe_phy)(struct max_ser *ser, struct max_ser_pipe *pipe,
 			    struct max_ser_phy *phy);
 	int (*post_init)(struct max_ser *ser);
+	int (*set_tpg_enable)(struct max_ser *ser, struct max_ser_pipe *pipe,
+			      bool enable, unsigned int width,
+			      unsigned int height);
 };
 
 struct max_ser_priv;

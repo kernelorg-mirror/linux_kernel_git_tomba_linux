@@ -10,6 +10,9 @@
 #include <linux/pinctrl/pinmux.h>
 #include <linux/pinctrl/pinconf.h>
 #include <linux/pinctrl/pinconf-generic.h>
+#include <linux/units.h>
+
+#include <video/videomode.h>
 
 #include "max_ser.h"
 
@@ -41,6 +44,47 @@
 
 #define MAX96717_VIDEO_TX2(p)			(0x102 + (p) * 0x8)
 #define MAX96717_VIDEO_TX2CLKDET		BIT(7)
+
+#define MAX96717_VTX0(p)			(0x1c8 + (p) * 0x43)
+#define MAX96717_VTX0_VTG_MODE			GENMASK(1, 0)
+#define MAX96717_VTX0_VTG_MODE_VS_TRACK		0b00
+#define MAX96717_VTX0_VTG_MODE_VS_ONE_TRIG	0b01
+#define MAX96717_VTX0_VTG_MODE_AUTO_REPEAT	0b10
+#define MAX96717_VTX0_VTG_MODE_FREE_RUNNING	0b11
+#define MAX96717_VTX0_VS_INV			BIT(4)
+#define MAX96717_VTX0_GEN_DE			BIT(5)
+#define MAX96717_VTX0_GEN_HS			BIT(6)
+#define MAX96717_VTX0_GEN_VS			BIT(7)
+
+#define MAX96717_VTX1(p)			(0x1c9 + (p) * 0x43)
+#define MAX96717_VTX1_PATGEN_CLK_SRC		GENMASK(3, 1)
+#define MAX96717_VTX1_PATGEN_CLK_SRC_EXT	0b000
+#define MAX96717_VTX1_PATGEN_CLK_SRC_25		0b100
+#define MAX96717_VTX1_PATGEN_CLK_SRC_75		0b101
+#define MAX96717_VTX1_PATGEN_CLK_SRC_150	0b110
+#define MAX96717_VTX1_PATGEN_CLK_SRC_375	0b111
+
+#define MAX96717_VTX2(p)			(0x1ca + (p) * 0x43)
+#define MAX96717_VTX5(p)			(0x1cd + (p) * 0x43)
+#define MAX96717_VTX8(p)			(0x1d0 + (p) * 0x43)
+#define MAX96717_VTX11(p)			(0x1d3 + (p) * 0x43)
+#define MAX96717_VTX14(p)			(0x1d6 + (p) * 0x43)
+#define MAX96717_VTX16(p)			(0x1d8 + (p) * 0x43)
+#define MAX96717_VTX18(p)			(0x1da + (p) * 0x43)
+#define MAX96717_VTX20(p)			(0x1dc + (p) * 0x43)
+#define MAX96717_VTX23(p)			(0x1df + (p) * 0x43)
+#define MAX96717_VTX25(p)			(0x1e1 + (p) * 0x43)
+#define MAX96717_VTX27(p)			(0x1e3 + (p) * 0x43)
+#define MAX96717_VTX29(p)			(0x1e5 + (p) * 0x43)
+#define MAX96717_VTX31(p)			(0x1e7 + (p) * 0x43)
+#define MAX96717_VTX32(p)			(0x1e8 + (p) * 0x43)
+#define MAX96717_VTX33(p)			(0x1e9 + (p) * 0x43)
+#define MAX96717_VTX34(p)			(0x1ea + (p) * 0x43)
+#define MAX96717_VTX35(p)			(0x1eb + (p) * 0x43)
+#define MAX96717_VTX36(p)			(0x1ec + (p) * 0x43)
+#define MAX96717_VTX37(p)			(0x1ed + (p) * 0x43)
+#define MAX96717_VTX38(p)			(0x1ee + (p) * 0x43)
+#define MAX96717_VTX39(p)			(0x1ef + (p) * 0x43)
 
 #define MAX96717_GPIO_A(x)			(0x2be + (x) * 0x3)
 #define MAX96717_GPIO_A_GPIO_OUT_DIS		BIT(0)
@@ -165,6 +209,7 @@ struct max96717_chip_info {
 	bool supports_tunnel_mode;
 	bool supports_noncontinuous_clock;
 	bool supports_pkt_cnt;
+	bool supports_tpg;
 	unsigned int num_pipes;
 	unsigned int num_dts_per_pipe;
 	unsigned int pipe_hw_ids[MAX96717_PIPES_NUM];
@@ -180,6 +225,34 @@ static const struct regmap_config max96717_i2c_regmap = {
 	.val_bits = 8,
 	.max_register = 0x1f00,
 };
+
+static int max96717_write_bulk_value(struct max96717_priv *priv,
+				     unsigned int reg, u32 val,
+				     size_t val_size)
+{
+	u8 values[4];
+
+	for (unsigned int i = 1; i <= val_size; i++)
+		values[i - 1] = (val >> ((val_size - i) * 8)) & 0xff;
+
+	return regmap_bulk_write(priv->regmap, reg, &values, val_size);
+}
+
+static int max96717_write_bulk_sequence(struct max96717_priv *priv,
+					const struct max_serdes_reg_sequence *seq,
+					unsigned int seq_size)
+{
+	for (unsigned int i = 0; i < seq_size; ++i) {
+		const struct max_serdes_reg_sequence *s = &seq[i];
+
+		int ret = max96717_write_bulk_value(priv, s->reg, s->val,
+						    s->val_size);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
 
 static int max96717_wait_for_device(struct max96717_priv *priv)
 {
@@ -709,6 +782,165 @@ static unsigned int max96717_pipe_id(struct max96717_priv *priv,
 	return priv->info->pipe_hw_ids[pipe->index];
 }
 
+static int max96717_tpg_write_timings(struct max96717_priv *priv,
+				      struct max_ser_pipe *pipe,
+				      const struct videomode *vm)
+{
+	unsigned int index = max96717_pipe_id(priv, pipe);
+
+	const u32 h_tot = vm->hactive + vm->hfront_porch + vm->hsync_len +
+			  vm->hback_porch;
+	const u32 v_tot = vm->vactive + vm->vfront_porch + vm->vsync_len +
+			  vm->vback_porch;
+
+	const u32 vs_dly = 0;
+	const u32 vs_high = vm->vsync_len * h_tot;
+	const u32 vs_low =
+		(vm->vactive + vm->vfront_porch + vm->vback_porch) * h_tot;
+	const u32 v2h = 0;
+
+	const u32 hs_high = vm->hsync_len;
+	const u32 hs_low = vm->hactive + vm->hfront_porch + vm->hback_porch;
+	const u32 hs_cnt = v_tot;
+	const u32 v2d = h_tot * (vm->vsync_len + vm->vback_porch) +
+			(vm->hsync_len + vm->hback_porch);
+
+	const u32 de_high = vm->hactive;
+	const u32 de_low = vm->hfront_porch + vm->hsync_len + vm->hback_porch;
+	const u32 de_cnt = vm->vactive;
+
+	u8 clk_src;
+
+	switch (vm->pixelclock) {
+	case 25000000:
+		clk_src = MAX96717_VTX1_PATGEN_CLK_SRC_25;
+		break;
+	case 75000000:
+		clk_src = MAX96717_VTX1_PATGEN_CLK_SRC_75;
+		break;
+	case 150000000:
+		clk_src = MAX96717_VTX1_PATGEN_CLK_SRC_150;
+		break;
+	case 375000000:
+		clk_src = MAX96717_VTX1_PATGEN_CLK_SRC_375;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	const struct max_serdes_reg_sequence seq[] = {
+		{ MAX96717_VTX0(index), 1,
+		  FIELD_PREP(MAX96717_VTX0_VTG_MODE,
+			     MAX96717_VTX0_VTG_MODE_FREE_RUNNING) |
+			  MAX96717_VTX0_VS_INV | MAX96717_VTX0_GEN_DE |
+			  MAX96717_VTX0_GEN_HS | MAX96717_VTX0_GEN_VS },
+		{ MAX96717_VTX1(index), 1,
+		  FIELD_PREP(MAX96717_VTX1_PATGEN_CLK_SRC, clk_src) },
+		{ MAX96717_VTX2(index), 3, vs_dly },
+		{ MAX96717_VTX5(index), 3, vs_high },
+		{ MAX96717_VTX8(index), 3, vs_low },
+		{ MAX96717_VTX11(index), 3, v2h },
+		{ MAX96717_VTX14(index), 2, hs_high },
+		{ MAX96717_VTX16(index), 2, hs_low },
+		{ MAX96717_VTX18(index), 2, hs_cnt },
+		{ MAX96717_VTX20(index), 3, v2d },
+		{ MAX96717_VTX23(index), 2, de_high },
+		{ MAX96717_VTX25(index), 2, de_low },
+		{ MAX96717_VTX27(index), 2, de_cnt },
+	};
+
+	return max96717_write_bulk_sequence(priv, seq, ARRAY_SIZE(seq));
+}
+
+static int max96717_tpg_disable(struct max96717_priv *priv, struct max_ser_pipe *pipe)
+{
+	unsigned int index = max96717_pipe_id(priv, pipe);
+	int ret;
+
+	/* Restore defaults */
+	ret = regmap_write(priv->regmap, MAX96717_VTX29(index), 0);
+	if (ret)
+		return ret;
+
+	ret = regmap_write(priv->regmap, MAX96717_VTX0(index), 3);
+	if (ret)
+		return ret;
+
+	ret = regmap_update_bits(priv->regmap, MAX96717_VIDEO_TX0(index),
+			MAX96717_VIDEO_TX0_AUTO_BPP,
+			MAX96717_VIDEO_TX0_AUTO_BPP);
+	if (ret)
+		return ret;
+
+	return ret;
+}
+
+static int max96717_tpg_enable(struct max96717_priv *priv,
+			       struct max_ser_pipe *pipe, unsigned int width,
+			       unsigned int height)
+{
+	unsigned int index = max96717_pipe_id(priv, pipe);
+	const struct videomode *vm;
+	int ret;
+
+	vm = max_serdes_find_tpg_videomode(width, height);
+	if (!vm)
+		return -EINVAL;
+
+	ret = max96717_tpg_write_timings(priv, pipe, vm);
+	if (ret)
+		goto err;
+
+	/* Force BPP to 24 */
+	ret = regmap_update_bits(priv->regmap, MAX96717_VIDEO_TX0(index),
+			MAX96717_VIDEO_TX0_AUTO_BPP, 0);
+	if (ret)
+		goto err;
+
+	ret = regmap_update_bits(priv->regmap, MAX96717_VIDEO_TX1(index),
+			MAX96717_VIDEO_TX1_BPP,
+			FIELD_PREP(MAX96717_VIDEO_TX1_BPP, 24));
+	if (ret)
+		goto err;
+
+	/* Configure checkerboard */
+
+	const struct max_serdes_reg_sequence seq[] = {
+		{ MAX96717_VTX37(index), 1, 60 },
+		{ MAX96717_VTX38(index), 1, 60 },
+		{ MAX96717_VTX39(index), 1, 60 },
+		{ MAX96717_VTX31(index), 3, 0xff0000 }, /* Red */
+		{ MAX96717_VTX34(index), 3, 0x0000ff }, /* Blue */
+	};
+
+	ret = max96717_write_bulk_sequence(priv, seq, ARRAY_SIZE(seq));
+	if (ret)
+		return ret;
+
+
+	ret = regmap_write(priv->regmap, MAX96717_VTX29(index), 1);
+	if (ret)
+		goto err;
+
+	return ret;
+
+err:
+	max96717_tpg_disable(priv, pipe);
+	return ret;
+}
+
+static int max96717_tpg_set_enable(struct max_ser *ser,
+				   struct max_ser_pipe *pipe, bool enable,
+				   unsigned int width, unsigned int height)
+{
+	struct max96717_priv *priv = ser_to_priv(ser);
+
+	if (enable)
+		return max96717_tpg_enable(priv, pipe, width, height);
+	else
+		return max96717_tpg_disable(priv, pipe);
+}
+
 static unsigned int max96717_phy_id(struct max96717_priv *priv,
 				    struct max_ser_phy *phy)
 {
@@ -1156,6 +1388,7 @@ static const struct max_ser_ops max96717_ops = {
 	.set_pipe_stream_id = max96717_set_pipe_stream_id,
 	.set_pipe_phy = max96717_set_pipe_phy,
 	.post_init = max96717_post_init,
+	.set_tpg_enable = max96717_tpg_set_enable,
 };
 
 static int max96717_probe(struct i2c_client *client)
@@ -1193,6 +1426,7 @@ static int max96717_probe(struct i2c_client *client)
 	ops->num_pipes = priv->info->num_pipes;
 	ops->num_dts_per_pipe = priv->info->num_dts_per_pipe;
 	ops->num_phys = priv->info->num_phys;
+	ops->supports_tpg = priv->info->supports_tpg;
 	priv->ser.ops = ops;
 
 	ret = max96717_wait_for_device(priv);
@@ -1255,6 +1489,7 @@ static const struct max96717_chip_info max96717_info = {
 	.supports_pkt_cnt = true,
 	.supports_tunnel_mode = true,
 	.supports_noncontinuous_clock = true,
+	.supports_tpg = true,
 	.num_pipes = 1,
 	.num_dts_per_pipe = 4,
 	.pipe_hw_ids = { 2 },

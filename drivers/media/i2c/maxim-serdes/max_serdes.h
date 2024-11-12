@@ -10,6 +10,8 @@
 
 #include <media/v4l2-subdev.h>
 
+struct videomode;
+
 #define MAX_SERDES_PHYS_MAX		4
 #define MAX_SERDES_STREAMS_NUM 		4
 #define MAX_SERDES_VC_ID_NUM		4
@@ -32,5 +34,7 @@ struct max_i2c_xlate {
 int max_get_fd_stream_entry(struct v4l2_subdev *sd,
 			    unsigned int pad, unsigned int stream,
 			    struct v4l2_mbus_frame_desc_entry *entry);
+
+const struct videomode *max_serdes_find_tpg_videomode(u32 width, u32 height);
 
 #endif // MAX_SERDES_H

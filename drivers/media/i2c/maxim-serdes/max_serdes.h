@@ -37,4 +37,10 @@ int max_get_fd_stream_entry(struct v4l2_subdev *sd,
 
 const struct videomode *max_serdes_find_tpg_videomode(u32 width, u32 height);
 
+struct max_serdes_reg_sequence {
+	u16 reg;
+	u16 val_size;
+	u32 val;
+};
+
 #endif // MAX_SERDES_H

@@ -826,6 +826,12 @@ static void max96724_remove(struct i2c_client *client)
 	struct max96724_priv *priv = i2c_get_clientdata(client);
 
 	max_des_remove(&priv->des);
+
+	/* Set the device to power-down, or reset if there's no pwdn */
+	if (priv->gpiod_pwdn)
+		gpiod_set_value_cansleep(priv->gpiod_pwdn, 1);
+	else
+		max96724_reset(priv);
 }
 
 static const struct of_device_id max96724_of_table[] = {

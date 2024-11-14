@@ -14,6 +14,34 @@
 
 		compatible = "maxim,max96724";
 		reg = <0x27>;
+
+		vpoc0-supply = <&vpoc0>;
+		vpoc1-supply = <&vpoc1>;
+		vpoc2-supply = <&vpoc2>;
+		vpoc3-supply = <&vpoc3>;
+	};
+
+        regulator@28 {
+		compatible = "maxim,max20087";
+		reg = <0x28>;
+
+		regulators {
+			vpoc0: OUT1 {
+				regulator-name = "VPOC0";
+			};
+
+			vpoc1: OUT2 {
+				regulator-name = "VPOC1";
+			};
+
+			vpoc2: OUT3 {
+				regulator-name = "VPOC2";
+			};
+
+			vpoc3: OUT4 {
+				regulator-name = "VPOC3";
+			};
+		};
 	};
 };
 

@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/of_graph.h>
 #include <linux/regmap.h>
+#include <linux/regulator/consumer.h>
 
 #include "max_des.h"
 
@@ -166,6 +167,8 @@ struct max96724_priv {
 	struct regmap *regmap;
 
 	struct gpio_desc *gpiod_pwdn;
+
+	struct regulator *vpoc[4];
 };
 
 struct max96724_chip_info {
@@ -792,6 +795,10 @@ static int max96724_probe(struct i2c_client *client)
 	priv->client = client;
 	i2c_set_clientdata(client, priv);
 
+	static const char *vpoc_names[4] = {
+		"vpoc0", "vpoc1", "vpoc2", "vpoc3"
+	};
+
 	priv->regmap = devm_regmap_init_i2c(client, &max96724_i2c_regmap);
 	if (IS_ERR(priv->regmap))
 		return PTR_ERR(priv->regmap);
@@ -810,15 +817,60 @@ static int max96724_probe(struct i2c_client *client)
 		usleep_range(4000, 5000);
 	}
 
+	bool hack_wait = false;
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(priv->vpoc); ++i) {
+		struct regulator *vpoc;
+
+		vpoc = devm_regulator_get_optional(dev, vpoc_names[i]);
+		if (PTR_ERR(vpoc) == -ENODEV) {
+			vpoc = NULL;
+		} else if (IS_ERR(vpoc)) {
+			dev_err(dev, "Failed to get %s: %d\n", vpoc_names[i],
+			        (int)PTR_ERR(vpoc));
+			return PTR_ERR(vpoc);
+		}
+
+		priv->vpoc[i] = vpoc;
+
+		if (vpoc) {
+			printk("Enabling %s\n", vpoc_names[i]);
+			ret = regulator_enable(vpoc);
+			if (ret) {
+				dev_err(dev, "Failed to enable %s\n", vpoc_names[i]);
+				priv->vpoc[i] = NULL;
+			}
+
+			hack_wait = true;
+		}
+	}
+
+	if (hack_wait) {
+		printk("XXX Waiting for the serializer board to boot up\n");
+		msleep(3000);
+	}
+
 	*ops = max96724_ops;
 	ops->num_pipes = priv->info->num_pipes;
 	priv->des.ops = ops;
 
 	ret = max96724_reset(priv);
 	if (ret)
-		return ret;
+		goto err_regulator_disable;
 
-	return max_des_probe(client, &priv->des);
+	ret = max_des_probe(client, &priv->des);
+	if (ret)
+		goto err_regulator_disable;
+
+	return 0;
+
+err_regulator_disable:
+	for (unsigned int i = 0; i < ARRAY_SIZE(priv->vpoc); ++i) {
+		if (priv->vpoc[i])
+			regulator_disable(priv->vpoc[i]);
+	}
+
+	return ret;
 }
 
 static void max96724_remove(struct i2c_client *client)
@@ -826,6 +878,11 @@ static void max96724_remove(struct i2c_client *client)
 	struct max96724_priv *priv = i2c_get_clientdata(client);
 
 	max_des_remove(&priv->des);
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(priv->vpoc); ++i) {
+		if (priv->vpoc[i])
+			regulator_disable(priv->vpoc[i]);
+	}
 
 	/* Set the device to power-down, or reset if there's no pwdn */
 	if (priv->gpiod_pwdn)

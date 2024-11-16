@@ -1,0 +1,72 @@
+{% for ser in des.serializers %}
+{% set ser_name = "ser_%d_%d" % (des.idx, ser.idx) %}
+
+/* Serializer {{ser.idx}} on Deserializer {{des.idx}} */
+
+&{{des_name}} {
+	i2c-atr {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		{{des_name}}_i2c{{ser.idx}}: i2c@{{ser.idx}} {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			reg = <{{ser.idx}}>;
+		};
+	};
+
+	ports {
+		port@{{ser.idx}} {
+			reg = <{{ser.idx}}>;
+			{{des_name}}_in{{ser.idx}}: endpoint {
+				remote-endpoint = <&{{ser_name}}_out>;
+			};
+		};
+	};
+};
+
+&{{des_name}}_i2c{{ser.idx}} {
+	{{ser_name}}: gmsl-serializer@40 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		compatible = "maxim,{{ser.compatible}}";
+		reg = <0x40>;
+
+		gpio-controller;
+		#gpio-cells = <2>;
+		gpio-ranges = <&{{ser_name}} 0 0 11>;
+
+		/* Sensor addresses on the ATR */
+		i2c-alias-pool = <{{ser.i2c_alias_pool}}>;
+
+		i2c-atr {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			{{ser_name}}_i2c: i2c@0 {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				reg = <0>;
+			};
+		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@1 {
+				reg = <1>;
+
+				{{ser_name}}_out: endpoint {
+					remote-endpoint = <&{{des_name}}_in{{ser.idx}}>;
+				};
+			};
+		};
+	};
+};
+
+{% include "gmsl-cam.dtsi.in" %}
+{% endfor %}

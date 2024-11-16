@@ -1,0 +1,53 @@
+{% if "camera" in ser %}
+{% set cam_name = "cam_%d_%d" % (des.idx, ser.idx) %}
+
+/* Camera on Deserializer {{des.idx}} Serializer {{ser.idx}} */
+
+&{{ser_name}} {
+	ports {
+		port@0 {
+			reg = <0>;
+
+			{{ser_name}}_in: endpoint {
+				remote-endpoint = <&{{cam_name}}_out>;
+
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+				clock-noncontinuous;
+				link-frequencies = /bits/ 64 <456000000>;
+			};
+		};
+	};
+};
+
+&{{ser_name}}_i2c {
+	imx219@10 {
+		compatible = "sony,imx219";
+		reg = <0x10>;
+
+		clocks = <&{{cam_name}}_clk>;
+		clock-names = "xclk";
+
+		reset-gpios = <&{{ser_name}} 2 GPIO_ACTIVE_HIGH>;
+
+		port {
+			{{cam_name}}_out: endpoint {
+				remote-endpoint = <&{{ser_name}}_in>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+				clock-noncontinuous;
+				link-frequencies = /bits/ 64 <456000000>;
+			};
+		};
+	};
+};
+
+/ {
+	{{cam_name}}_clk: clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+};
+
+{% endif %}

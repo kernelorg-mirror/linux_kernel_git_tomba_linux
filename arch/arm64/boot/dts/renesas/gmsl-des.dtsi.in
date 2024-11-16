@@ -1,0 +1,19 @@
+{% for des in deserializers %}
+{% set des_name = "gmsl%d" % des.idx %}
+
+/*
+ * GENERATED FILE. DO NOT MODIFY.
+ */
+
+/* Deserializer {{des.idx}} */
+
+&{{des_name}} {
+	/* Serializer addresses on the ATR */
+	i2c-alias-pool = <{{des.i2c_alias_pool}}>;
+{% if "status" in des %}
+	status = "{{des.status}}";
+{% endif %}
+};
+
+{% include "gmsl-ser.dtsi.in" %}
+{% endfor %}

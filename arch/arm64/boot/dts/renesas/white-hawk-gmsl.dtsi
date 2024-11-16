@@ -1,0 +1,276 @@
+
+/*
+ * GENERATED FILE. DO NOT MODIFY.
+ */
+
+/* Integration for deserializer 0 */
+
+
+/*
+ * GENERATED FILE. DO NOT MODIFY.
+ */
+
+/* Integration for deserializer 1 */
+
+
+
+/*
+ * GENERATED FILE. DO NOT MODIFY.
+ */
+
+/* Deserializer 0 */
+
+&gmsl0 {
+	/* Serializer addresses on the ATR */
+	i2c-alias-pool = <>;
+	status = "disable";
+};
+
+
+/*
+ * GENERATED FILE. DO NOT MODIFY.
+ */
+
+/* Deserializer 1 */
+
+&gmsl1 {
+	/* Serializer addresses on the ATR */
+	i2c-alias-pool = <0x41 0x42 0x43 0x44>;
+};
+
+
+/* Serializer 0 on Deserializer 1 */
+
+&gmsl1 {
+	i2c-atr {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		gmsl1_i2c0: i2c@0 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			reg = <0>;
+		};
+	};
+
+	ports {
+		port@0 {
+			reg = <0>;
+			gmsl1_in0: endpoint {
+				remote-endpoint = <&ser_1_0_out>;
+			};
+		};
+	};
+};
+
+&gmsl1_i2c0 {
+	ser_1_0: gmsl-serializer@40 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		compatible = "maxim,max96717";
+		reg = <0x40>;
+
+		gpio-controller;
+		#gpio-cells = <2>;
+		gpio-ranges = <&ser_1_0 0 0 11>;
+
+		/* Sensor addresses on the ATR */
+		i2c-alias-pool = <0x37>;
+
+		i2c-atr {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			ser_1_0_i2c: i2c@0 {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				reg = <0>;
+			};
+		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@1 {
+				reg = <1>;
+
+				ser_1_0_out: endpoint {
+					remote-endpoint = <&gmsl1_in0>;
+				};
+			};
+		};
+	};
+};
+
+
+/* Camera on Deserializer 1 Serializer 0 */
+
+&ser_1_0 {
+	ports {
+		port@0 {
+			reg = <0>;
+
+			ser_1_0_in: endpoint {
+				remote-endpoint = <&cam_1_0_out>;
+
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+				clock-noncontinuous;
+				link-frequencies = /bits/ 64 <456000000>;
+			};
+		};
+	};
+};
+
+&ser_1_0_i2c {
+	imx219@10 {
+		compatible = "sony,imx219";
+		reg = <0x10>;
+
+		clocks = <&cam_1_0_clk>;
+		clock-names = "xclk";
+
+		reset-gpios = <&ser_1_0 2 GPIO_ACTIVE_HIGH>;
+
+		port {
+			cam_1_0_out: endpoint {
+				remote-endpoint = <&ser_1_0_in>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+				clock-noncontinuous;
+				link-frequencies = /bits/ 64 <456000000>;
+			};
+		};
+	};
+};
+
+/ {
+	cam_1_0_clk: clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+};
+
+
+/* Serializer 1 on Deserializer 1 */
+
+&gmsl1 {
+	i2c-atr {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		gmsl1_i2c1: i2c@1 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			reg = <1>;
+		};
+	};
+
+	ports {
+		port@1 {
+			reg = <1>;
+			gmsl1_in1: endpoint {
+				remote-endpoint = <&ser_1_1_out>;
+			};
+		};
+	};
+};
+
+&gmsl1_i2c1 {
+	ser_1_1: gmsl-serializer@40 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		compatible = "maxim,max96717";
+		reg = <0x40>;
+
+		gpio-controller;
+		#gpio-cells = <2>;
+		gpio-ranges = <&ser_1_1 0 0 11>;
+
+		/* Sensor addresses on the ATR */
+		i2c-alias-pool = <0x38>;
+
+		i2c-atr {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			ser_1_1_i2c: i2c@0 {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				reg = <0>;
+			};
+		};
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@1 {
+				reg = <1>;
+
+				ser_1_1_out: endpoint {
+					remote-endpoint = <&gmsl1_in1>;
+				};
+			};
+		};
+	};
+};
+
+
+/* Camera on Deserializer 1 Serializer 1 */
+
+&ser_1_1 {
+	ports {
+		port@0 {
+			reg = <0>;
+
+			ser_1_1_in: endpoint {
+				remote-endpoint = <&cam_1_1_out>;
+
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+				clock-noncontinuous;
+				link-frequencies = /bits/ 64 <456000000>;
+			};
+		};
+	};
+};
+
+&ser_1_1_i2c {
+	imx219@10 {
+		compatible = "sony,imx219";
+		reg = <0x10>;
+
+		clocks = <&cam_1_1_clk>;
+		clock-names = "xclk";
+
+		reset-gpios = <&ser_1_1 2 GPIO_ACTIVE_HIGH>;
+
+		port {
+			cam_1_1_out: endpoint {
+				remote-endpoint = <&ser_1_1_in>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+				clock-noncontinuous;
+				link-frequencies = /bits/ 64 <456000000>;
+			};
+		};
+	};
+};
+
+/ {
+	cam_1_1_clk: clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+	};
+};
+

@@ -1,0 +1,13 @@
+{% for des in deserializers %}
+{% set des_name = "gmsl%d" % des.idx %}
+{% set rx_name = "csi4%d" % des.idx %}
+
+/*
+ * GENERATED FILE. DO NOT MODIFY.
+ */
+
+/* Integration for deserializer {{des.idx}} */
+
+{% endfor %}
+
+{% include "gmsl-des.dtsi.in" %}

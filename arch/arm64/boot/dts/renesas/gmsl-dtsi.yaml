@@ -1,0 +1,37 @@
+{
+    'template': 'gmsl-rcar.dtsi.in',
+
+    'deserializers': [
+        {
+            'idx': 0,
+            'compatible': 'max96712',
+
+            # Note: deser 0 unreliable due to max20087 access
+            'status': 'disable',
+        },
+        {
+            'idx': 1,
+            'compatible': 'max96712',
+            'i2c_alias_pool': '0x41 0x42 0x43 0x44',
+
+            'serializers': [
+                {
+                    'idx': 0,
+                    'compatible': 'max96717',
+                    'i2c_alias_pool': '0x37',
+
+                    'camera': {
+                    }
+                },
+                {
+                    'idx': 1,
+                    'compatible': 'max96717',
+                    'i2c_alias_pool': '0x38',
+
+                    'camera': {
+                    }
+                },
+            ],
+        }
+    ]
+}

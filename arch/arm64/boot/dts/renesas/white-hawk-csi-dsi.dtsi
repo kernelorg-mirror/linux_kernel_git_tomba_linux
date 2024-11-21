@@ -71,10 +71,63 @@
 };
 
 &i2c1 {
+        regulator@28 {
+		compatible = "maxim,max20087";
+		reg = <0x28>;
+		/* This one is somehow unreliable */
+		status = "disabled";
+
+		regulators {
+			gmsl0_vpoc0: OUT1 {
+				regulator-name = "GMSL0 VPOC0";
+			};
+
+			gmsl0_vpoc1: OUT2 {
+				regulator-name = "GMSL0 VPOC1";
+			};
+
+			gmsl0_vpoc2: OUT3 {
+				regulator-name = "GMSL0 VPOC2";
+			};
+
+			gmsl0_vpoc3: OUT4 {
+				regulator-name = "GMSL0 VPOC3";
+			};
+		};
+	};
+
+        regulator@2a {
+		compatible = "maxim,max20087";
+		reg = <0x2a>;
+
+		regulators {
+			gmsl1_vpoc0: OUT1 {
+				regulator-name = "GMSL1 VPOC0";
+			};
+
+			gmsl1_vpoc1: OUT2 {
+				regulator-name = "GMSL1 VPOC1";
+			};
+
+			gmsl1_vpoc2: OUT3 {
+				regulator-name = "GMSL1 VPOC2";
+			};
+
+			gmsl1_vpoc3: OUT4 {
+				regulator-name = "GMSL1 VPOC3";
+			};
+		};
+	};
+
 	gmsl0: gmsl-deserializer@49 {
 		compatible = "maxim,max96712";
 		reg = <0x49>;
 		powerdown-gpios = <&pca9654_a 0 GPIO_ACTIVE_LOW>;
+
+		vpoc0-supply = <&gmsl0_vpoc0>;
+		vpoc1-supply = <&gmsl0_vpoc1>;
+		vpoc2-supply = <&gmsl0_vpoc2>;
+		vpoc3-supply = <&gmsl0_vpoc3>;
 
 		ports {
 			#address-cells = <1>;
@@ -97,6 +150,11 @@
 		compatible = "maxim,max96712";
 		reg = <0x4b>;
 		powerdown-gpios = <&pca9654_b 0 GPIO_ACTIVE_LOW>;
+
+		vpoc0-supply = <&gmsl1_vpoc0>;
+		vpoc1-supply = <&gmsl1_vpoc1>;
+		vpoc2-supply = <&gmsl1_vpoc2>;
+		vpoc3-supply = <&gmsl1_vpoc3>;
 
 		ports {
 			#address-cells = <1>;

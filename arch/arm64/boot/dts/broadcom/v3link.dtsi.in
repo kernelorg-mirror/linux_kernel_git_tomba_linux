@@ -33,7 +33,7 @@
 	//clock-frequency = <400000>;
 
 	deser: deser@30 {
-		compatible = "ti,ds90ub960-q1";
+		compatible = "ti,ds90ub954-q1";
 
 		reg-names = "main";
 		reg       = <0x30>;
@@ -48,12 +48,12 @@
 			#size-cells = <0>;
 
 			/* CSI-2 */
-			port@4 {
-				reg = <4>;
+			port@2 {
+				reg = <2>;
 				ds90ub960_0_csi_out: endpoint {
 					clock-lanes = <0>;
 					data-lanes = <1 2 3 4>;
-					link-frequencies = /bits/ 64 <600000000>;
+					link-frequencies = /bits/ 64 <400000000>;
 					remote-endpoint = <&csi_ep>;
 				};
 			};

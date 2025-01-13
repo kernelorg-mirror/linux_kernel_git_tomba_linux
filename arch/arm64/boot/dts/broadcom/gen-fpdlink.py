@@ -14,7 +14,7 @@ with open(path + '/v3link.dtsi.in', 'r') as f:
 with open(path + '/rpi5-fpdlink-arducam-ub953-imx219.dtsi.in', 'r') as f:
     template = f.read()
 
-for port in range(4):
+for port in range(2):
     data = template
     data = re.sub(r'\${nport}', str(port), data)
     data = re.sub(r'\${i2c-alias}', str(port + 0x44), data)

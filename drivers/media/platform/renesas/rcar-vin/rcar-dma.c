@@ -829,8 +829,13 @@ static int rvin_setup(struct rvin_dev *vin)
 		case VNMC_INF_YUV8_BT656:
 		case VNMC_INF_YUV10_BT656:
 		case VNMC_INF_YUV16:
-		case VNMC_INF_RGB666:
 			if (!rvin_remote_is_parallel(vin)) {
+				vin_err(vin, "Invalid setting in MIPI CSI2\n");
+				return -EINVAL;
+			}
+			break;
+		case VNMC_INF_RGB666:
+			if (vin->info->model == RCAR_GEN3 && !rvin_remote_is_parallel(vin)) {
 				vin_err(vin, "Invalid setting in MIPI CSI2\n");
 				return -EINVAL;
 			}
@@ -931,7 +936,7 @@ static int rvin_setup(struct rvin_dev *vin)
 	case V4L2_PIX_FMT_SGBRG10:
 	case V4L2_PIX_FMT_SGRBG10:
 	case V4L2_PIX_FMT_SRGGB10:
-		dmr = VNDMR_RMODE_RAW10 | VNDMR_YC_THR;
+		dmr = VNDMR_RMODE_RAW10;
 		break;
 	default:
 		vin_err(vin, "Invalid pixelformat (0x%x)\n",

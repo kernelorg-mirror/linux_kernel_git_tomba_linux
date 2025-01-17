@@ -187,7 +187,7 @@ static struct v4l2_subdev *rvin_remote_subdev(const struct rvin_dev *vin)
 	if (!vin->info->use_mc)
 		return vin->parallel.subdev;
 
-	pad = media_pad_remote_pad_first(&vin->pad);
+	pad = media_pad_remote_pad_unique(&vin->pad);
 	if (!pad)
 		return NULL;
 
@@ -1413,7 +1413,7 @@ static int rvin_set_stream(struct rvin_dev *vin, int on)
 		return ret == -ENOIOCTLCMD ? 0 : ret;
 	}
 
-	pad = media_pad_remote_pad_first(&vin->pad);
+	pad = media_pad_remote_pad_unique(&vin->pad);
 	if (!pad)
 		return -EPIPE;
 

@@ -985,15 +985,20 @@ static int rcsi2_calc_mbps(struct rcar_csi2 *priv,
 		bpp = 0;
 		lanes = 0;
 	} else {
+		struct v4l2_subdev_route *route = &state->routing.routes[0];
 		const struct rcar_csi2_format *format;
 		struct v4l2_mbus_framefmt *fmt;
 		int ret;
+
+		if (state->routing.num_routes > 1)
+			return -EINVAL;
 
 		ret = rcsi2_get_active_lanes(priv, &lanes);
 		if (ret)
 			return ret;
 
-		fmt = v4l2_subdev_state_get_format(state, RCAR_CSI2_SINK, 0);
+		fmt = v4l2_subdev_state_get_format(state, route->sink_pad,
+						   route->sink_stream);
 		if (!fmt)
 			return -EINVAL;
 

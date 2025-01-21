@@ -1060,9 +1060,21 @@ static int max96724_probe(struct i2c_client *client)
 
 	ret = max96724_reset(priv);
 	if (ret)
-		return ret;
+		goto err_regulator_disable;
 
-	return max_des_probe(client, &priv->des);
+	ret = max_des_probe(client, &priv->des);
+	if (ret)
+		goto err_regulator_disable;
+
+	return 0;
+
+err_regulator_disable:
+	for (unsigned int i = 0; i < ARRAY_SIZE(priv->vpoc); ++i) {
+		if (priv->vpoc[i])
+			regulator_disable(priv->vpoc[i]);
+	}
+
+	return ret;
 }
 
 static void max96724_remove(struct i2c_client *client)

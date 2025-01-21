@@ -1515,20 +1515,12 @@ static int rcsi2_start(struct rcar_csi2 *priv, struct v4l2_subdev_state *state)
 		return ret;
 	}
 
-	ret = v4l2_subdev_enable_streams(priv->remote, priv->remote_pad,
-					 BIT_ULL(0));
-	if (ret) {
-		rcsi2_enter_standby(priv);
-		return ret;
-	}
-
 	return 0;
 }
 
 static void rcsi2_stop(struct rcar_csi2 *priv)
 {
 	rcsi2_enter_standby(priv);
-	v4l2_subdev_disable_streams(priv->remote, priv->remote_pad, BIT_ULL(0));
 }
 
 static int rcsi2_enable_streams(struct v4l2_subdev *sd,
@@ -1548,6 +1540,13 @@ static int rcsi2_enable_streams(struct v4l2_subdev *sd,
 		ret = rcsi2_start(priv, state);
 		if (ret)
 			return ret;
+	}
+
+	ret = v4l2_subdev_enable_streams(priv->remote, priv->remote_pad,
+					 BIT_ULL(0));
+	if (ret) {
+		rcsi2_stop(priv);
+		return ret;
 	}
 
 	priv->stream_count += 1;
@@ -1570,6 +1569,8 @@ static int rcsi2_disable_streams(struct v4l2_subdev *sd,
 
 	if (priv->stream_count == 1)
 		rcsi2_stop(priv);
+
+	v4l2_subdev_disable_streams(priv->remote, priv->remote_pad, BIT_ULL(0));
 
 	priv->stream_count -= 1;
 

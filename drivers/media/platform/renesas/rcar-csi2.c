@@ -970,33 +970,39 @@ static int rcsi2_get_active_lanes(struct rcar_csi2 *priv,
 static int rcsi2_calc_mbps(struct rcar_csi2 *priv,
 			   struct v4l2_subdev_state *state)
 {
-	const struct rcar_csi2_format *format;
-	struct v4l2_mbus_framefmt *fmt;
 	struct v4l2_subdev *source;
 	unsigned int lanes;
 	unsigned int bpp;
 	s64 freq;
 	u64 mbps;
-	int ret;
 
 	if (!priv->remote)
 		return -ENODEV;
 
 	source = priv->remote;
 
-	ret = rcsi2_get_active_lanes(priv, &lanes);
-	if (ret)
-		return ret;
+	if (v4l2_ctrl_find(source->ctrl_handler, V4L2_CID_LINK_FREQ)) {
+		bpp = 0;
+		lanes = 0;
+	} else {
+		const struct rcar_csi2_format *format;
+		struct v4l2_mbus_framefmt *fmt;
+		int ret;
 
-	fmt = v4l2_subdev_state_get_format(state, RCAR_CSI2_SINK);
-	if (!fmt)
-		return -EINVAL;
+		ret = rcsi2_get_active_lanes(priv, &lanes);
+		if (ret)
+			return ret;
 
-	format = rcsi2_code_to_fmt(fmt->code);
-	if (!format)
-		return -EINVAL;
+		fmt = v4l2_subdev_state_get_format(state, RCAR_CSI2_SINK);
+		if (!fmt)
+			return -EINVAL;
 
-	bpp = format->bpp;
+		format = rcsi2_code_to_fmt(fmt->code);
+		if (!format)
+			return -EINVAL;
+
+		bpp = format->bpp;
+	}
 
 	freq = v4l2_get_link_freq(source->ctrl_handler, bpp, 2 * lanes);
 	if (freq < 0) {

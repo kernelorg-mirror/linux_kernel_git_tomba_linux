@@ -1099,14 +1099,8 @@ static int rcsi2_start_receiver_gen3(struct rcar_csi2 *priv,
 		if (!format)
 			return -EINVAL;
 
-		if (fmt->field == V4L2_FIELD_ALTERNATE) {
+		if (fmt->field == V4L2_FIELD_ALTERNATE)
 			fld |= FLD_FLD_EN(ch);
-
-			if (fmt->height == 240)
-				fld |= FLD_FLD_NUM(0);
-			else
-				fld |= FLD_FLD_NUM(1);
-		}
 
 		ch++;
 	}

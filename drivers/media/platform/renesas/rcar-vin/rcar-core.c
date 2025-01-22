@@ -885,8 +885,6 @@ static int __maybe_unused rvin_suspend(struct device *dev)
 
 	rvin_stop_streaming(vin);
 
-	vin->state = SUSPENDED;
-
 	return 0;
 }
 
@@ -894,7 +892,7 @@ static int __maybe_unused rvin_resume(struct device *dev)
 {
 	struct rvin_dev *vin = dev_get_drvdata(dev);
 
-	if (vin->state != SUSPENDED)
+	if (vin->state != RUNNING)
 		return 0;
 
 	/*

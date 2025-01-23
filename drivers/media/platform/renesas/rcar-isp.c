@@ -121,6 +121,18 @@ static const struct rcar_isp_format rcar_isp_formats[] = {
 		.code = MEDIA_BUS_FMT_SRGGB12_1X12,
 		.datatype = MIPI_CSI2_DT_RAW12,
 		.procmode = 0x02,
+	}, {
+		.code = MEDIA_BUS_FMT_META_8,
+		.datatype = MIPI_CSI2_DT_EMBEDDED_8B,
+		.procmode = 0x00,
+	}, {
+		.code = MEDIA_BUS_FMT_META_10,
+		.datatype = MIPI_CSI2_DT_EMBEDDED_8B,
+		.procmode = 0x01,
+	}, {
+		.code = MEDIA_BUS_FMT_META_12,
+		.datatype = MIPI_CSI2_DT_EMBEDDED_8B,
+		.procmode = 0x02,
 	},
 };
 

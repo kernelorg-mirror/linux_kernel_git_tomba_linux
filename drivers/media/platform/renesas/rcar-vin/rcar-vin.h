@@ -224,6 +224,7 @@ struct rvin_dev {
 
 	u32 mbus_code;
 	struct v4l2_pix_format format;
+	struct v4l2_meta_format meta_format;
 
 	struct v4l2_rect crop;
 	struct v4l2_rect compose;

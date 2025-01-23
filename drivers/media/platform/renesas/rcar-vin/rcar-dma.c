@@ -709,6 +709,7 @@ void rvin_crop_scale_comp(struct rvin_dev *vin)
 	case V4L2_PIX_FMT_SGBRG8:
 	case V4L2_PIX_FMT_SGRBG8:
 	case V4L2_PIX_FMT_SRGGB8:
+	case V4L2_META_FMT_GENERIC_8:
 	case V4L2_PIX_FMT_GREY:
 		stride /= 2;
 		break;
@@ -808,6 +809,7 @@ static int rvin_setup(struct rvin_dev *vin)
 	case MEDIA_BUS_FMT_SGBRG8_1X8:
 	case MEDIA_BUS_FMT_SGRBG8_1X8:
 	case MEDIA_BUS_FMT_SRGGB8_1X8:
+	case MEDIA_BUS_FMT_META_8:
 	case MEDIA_BUS_FMT_Y8_1X8:
 		vnmc |= VNMC_INF_RAW8;
 		if (vin->info->model == RCAR_GEN4)
@@ -922,6 +924,7 @@ static int rvin_setup(struct rvin_dev *vin)
 	case V4L2_PIX_FMT_SGBRG8:
 	case V4L2_PIX_FMT_SGRBG8:
 	case V4L2_PIX_FMT_SRGGB8:
+	case V4L2_META_FMT_GENERIC_8:
 		dmr = 0;
 		break;
 	case V4L2_PIX_FMT_GREY:
@@ -1357,6 +1360,39 @@ static int rvin_mc_validate_format(struct rvin_dev *vin, struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int rvin_mc_validate_format_meta(struct rvin_dev *vin,
+					struct v4l2_subdev *sd,
+					struct media_pad *pad)
+{
+	struct v4l2_subdev_format fmt = {
+		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
+	};
+
+	fmt.pad = pad->index;
+	if (v4l2_subdev_call(sd, pad, get_fmt, NULL, &fmt))
+		return -EPIPE;
+
+	switch (fmt.format.code) {
+	case MEDIA_BUS_FMT_META_8:
+		if (vin->meta_format.dataformat != V4L2_META_FMT_GENERIC_8)
+			return -EPIPE;
+		break;
+	case MEDIA_BUS_FMT_META_10:
+		if (vin->meta_format.dataformat != V4L2_META_FMT_GENERIC_CSI2_10)
+			return -EPIPE;
+		break;
+	case MEDIA_BUS_FMT_META_12:
+		if (vin->meta_format.dataformat != V4L2_META_FMT_GENERIC_CSI2_12)
+			return -EPIPE;
+		break;
+	default:
+		return -EPIPE;
+	}
+	vin->mbus_code = fmt.format.code;
+
+	return 0;
+}
+
 static int rvin_set_stream(struct rvin_dev *vin, int on)
 {
 	struct v4l2_subdev *sd = rvin_remote_subdev(vin);
@@ -1382,7 +1418,10 @@ static int rvin_set_stream(struct rvin_dev *vin, int on)
 		return v4l2_subdev_disable_streams(sd, pad->index, BIT_ULL(0));
 	}
 
-	ret = rvin_mc_validate_format(vin, sd, pad);
+	if (vin->queue.type == V4L2_BUF_TYPE_META_CAPTURE)
+		ret = rvin_mc_validate_format_meta(vin, sd, pad);
+	else
+		ret = rvin_mc_validate_format(vin, sd, pad);
 	if (ret)
 		return ret;
 

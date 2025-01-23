@@ -950,6 +950,157 @@ static int rvin_mc_s_fmt_vid_cap(struct file *file, void *priv,
 	return 0;
 }
 
+// XXX META
+
+struct rvin_meta_format {
+	u32 fourcc;
+	u32 code;
+	u32 bpp;
+};
+
+// XXX I'm not sure if rcar unpacks the 10/12 metadatas or not... Not tested.
+static const struct rvin_meta_format rvin_meta_formats[] = {
+	{
+		.fourcc		= V4L2_META_FMT_GENERIC_8,
+		.code		= MEDIA_BUS_FMT_META_8,
+		.bpp		= 8,
+	}, {
+		.fourcc		= V4L2_META_FMT_GENERIC_CSI2_10,
+		.code		= MEDIA_BUS_FMT_META_10,
+		.bpp		= 10,
+	}, {
+		.fourcc		= V4L2_META_FMT_GENERIC_CSI2_12,
+		.code		= MEDIA_BUS_FMT_META_12,
+		.bpp		= 12,
+	},
+};
+
+static int rvin_mc_enum_fmt_meta_cap(struct file *file, void *priv,
+				     struct v4l2_fmtdesc *f)
+{
+	unsigned int idx;
+
+	if (f->index >= ARRAY_SIZE(rvin_meta_formats))
+		return -EINVAL;
+
+	idx = 0;
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(rvin_meta_formats); ++i) {
+		if (f->mbus_code && rvin_meta_formats[i].code != f->mbus_code)
+			continue;
+
+		if (idx == f->index) {
+			f->pixelformat = rvin_meta_formats[i].fourcc;
+			f->type = V4L2_BUF_TYPE_META_CAPTURE;
+			return 0;
+		}
+
+		idx++;
+	}
+
+	return -EINVAL;
+}
+
+static int rvin_g_fmt_meta_cap(struct file *file, void *priv,
+			       struct v4l2_format *f)
+{
+	struct rvin_dev *vin = video_drvdata(file);
+
+	f->fmt.meta = vin->meta_format;
+
+	return 0;
+}
+
+static void rvin_mc_try_fmt_meta(struct rvin_dev *vin, struct v4l2_format *f,
+				 const struct rvin_meta_format **info)
+{
+	const struct rvin_meta_format *fmtinfo = NULL;
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(rvin_meta_formats); ++i) {
+		if (rvin_meta_formats[i].fourcc != f->fmt.meta.dataformat)
+			continue;
+
+		fmtinfo = &rvin_meta_formats[i];
+
+		break;
+	}
+
+	if (!fmtinfo)
+		fmtinfo = &rvin_meta_formats[0];
+
+	f->fmt.meta.dataformat = fmtinfo->fourcc;
+
+	v4l_bound_align_image(&f->fmt.meta.width, 5, vin->info->max_width, 2,
+			      &f->fmt.meta.height, 2, vin->info->max_height, 0,
+			      0);
+
+	f->fmt.meta.bytesperline = (f->fmt.meta.width * fmtinfo->bpp) / 8;
+	f->fmt.meta.buffersize = f->fmt.meta.height * f->fmt.pix.bytesperline;
+
+	if (info)
+		*info = fmtinfo;
+}
+
+static int rvin_mc_try_fmt_meta_cap(struct file *file, void *priv,
+				    struct v4l2_format *f)
+{
+	struct rvin_dev *vin = video_drvdata(file);
+
+	rvin_mc_try_fmt_meta(vin, f, NULL);
+
+	return 0;
+}
+
+static int rvin_mc_s_fmt_meta_cap(struct file *file, void *priv,
+				  struct v4l2_format *f)
+{
+	struct rvin_dev *vin = video_drvdata(file);
+	const struct rvin_meta_format *fmtinfo;
+
+	if (vb2_is_busy(&vin->queue))
+		return -EBUSY;
+
+	rvin_mc_try_fmt_meta(vin, f, &fmtinfo);
+
+	vin->meta_format = f->fmt.meta;
+
+	return 0;
+}
+
+static int rvin_vb2_ioctl_reqbufs(struct file *file, void *priv,
+				  struct v4l2_requestbuffers *p)
+{
+	struct rvin_dev *vin = video_drvdata(file);
+	int ret;
+
+	if (p->type != V4L2_BUF_TYPE_VIDEO_CAPTURE &&
+	    p->type != V4L2_BUF_TYPE_META_CAPTURE)
+		return -EINVAL;
+
+	ret = vb2_queue_change_type(&vin->queue, p->type);
+	if (ret)
+		return ret;
+
+	return vb2_ioctl_reqbufs(file, priv, p);
+}
+
+static int rvin_vb2_ioctl_create_bufs(struct file *file, void *priv,
+				      struct v4l2_create_buffers *p)
+{
+	struct rvin_dev *vin = video_drvdata(file);
+	int ret;
+
+	if (p->format.type != V4L2_BUF_TYPE_VIDEO_CAPTURE &&
+	    p->format.type != V4L2_BUF_TYPE_META_CAPTURE)
+		return -EINVAL;
+
+	ret = vb2_queue_change_type(&vin->queue, p->format.type);
+	if (ret)
+		return ret;
+
+	return vb2_ioctl_create_bufs(file, priv, p);
+}
+
 static const struct v4l2_ioctl_ops rvin_mc_ioctl_ops = {
 	.vidioc_querycap		= rvin_querycap,
 	.vidioc_try_fmt_vid_cap		= rvin_mc_try_fmt_vid_cap,
@@ -960,8 +1111,13 @@ static const struct v4l2_ioctl_ops rvin_mc_ioctl_ops = {
 	.vidioc_g_selection		= rvin_g_selection,
 	.vidioc_s_selection		= rvin_s_selection,
 
-	.vidioc_reqbufs			= vb2_ioctl_reqbufs,
-	.vidioc_create_bufs		= vb2_ioctl_create_bufs,
+	.vidioc_enum_fmt_meta_cap	= rvin_mc_enum_fmt_meta_cap,
+	.vidioc_g_fmt_meta_cap		= rvin_g_fmt_meta_cap,
+	.vidioc_try_fmt_meta_cap	= rvin_mc_try_fmt_meta_cap,
+	.vidioc_s_fmt_meta_cap		= rvin_mc_s_fmt_meta_cap,
+
+	.vidioc_reqbufs			= rvin_vb2_ioctl_reqbufs,
+	.vidioc_create_bufs		= rvin_vb2_ioctl_create_bufs,
 	.vidioc_querybuf		= vb2_ioctl_querybuf,
 	.vidioc_qbuf			= vb2_ioctl_qbuf,
 	.vidioc_dqbuf			= vb2_ioctl_dqbuf,
@@ -1120,8 +1276,8 @@ int rvin_v4l2_register(struct rvin_dev *vin)
 	vdev->release = video_device_release_empty;
 	vdev->lock = &vin->lock;
 	vdev->fops = &rvin_fops;
-	vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_STREAMING |
-		V4L2_CAP_READWRITE;
+	vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_META_CAPTURE |
+			    V4L2_CAP_STREAMING | V4L2_CAP_READWRITE;
 
 	/* Set a default format */
 	vin->format.pixelformat	= RVIN_DEFAULT_FORMAT;

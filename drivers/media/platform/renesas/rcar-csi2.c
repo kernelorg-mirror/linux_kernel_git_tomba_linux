@@ -689,6 +689,18 @@ static const struct rcar_csi2_format rcar_csi2_formats[] = {
 		.code = MEDIA_BUS_FMT_SRGGB12_1X12,
 		.datatype = MIPI_CSI2_DT_RAW12,
 		.bpp = 12,
+	}, {
+		.code = MEDIA_BUS_FMT_META_8,
+		.datatype = MIPI_CSI2_DT_EMBEDDED_8B,
+		.bpp = 8,
+	}, {
+		.code = MEDIA_BUS_FMT_META_10,
+		.datatype = MIPI_CSI2_DT_EMBEDDED_8B,
+		.bpp = 10,
+	}, {
+		.code = MEDIA_BUS_FMT_META_12,
+		.datatype = MIPI_CSI2_DT_EMBEDDED_8B,
+		.bpp = 12,
 	},
 };
 

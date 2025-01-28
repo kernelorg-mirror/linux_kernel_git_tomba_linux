@@ -17,11 +17,19 @@
 #define MAX9296A_REG2				0x2
 #define MAX9296A_REG2_VID_EN(p)			BIT((p) + 4)
 
+#define MAX9296A_REG4				0x4
+#define MAX9296A_REG4_GMSL3_X(x)		BIT((x) + 6)
+
 #define MAX9296A_CTRL0				0x10
 #define MAX9296A_CTRL0_LINK_CFG			GENMASK(1, 0)
 #define MAX9296A_CTRL0_AUTO_LINK		BIT(4)
 #define MAX9296A_CTRL0_RESET_ONESHOT		BIT(5)
+#define MAX9296A_CTRL0_RESET_LINK_A		BIT(6)
 #define MAX9296A_CTRL0_RESET_ALL		BIT(7)
+
+#define MAX9296A_CTRL3				0x13
+#define MAX9296A_CTRL3_RESET_LINK_B		BIT(0)
+#define MAX9296A_CTRL3_LOCKED_A			BIT(3)
 
 #define MAX9296A_RX50(p)			(0x50 + (p))
 #define MAX9296A_RX50_STR_SEL			GENMASK(1, 0)
@@ -115,6 +123,9 @@
 #define MAX9296A_DPLL_0(x)			(0x1c00 + ((x) == 0 ? 1 : 2) * 0x100)
 #define MAX9296A_DPLL_0_CONFIG_SOFT_RST_N	BIT(0)
 
+#define MAX9296A_CTRL9				0x5009
+#define MAX9296A_CTRL9_LOCKED_B			BIT(3)
+
 #define field_get(mask, val) (((val) & (mask)) >> __ffs(mask))
 #define field_prep(mask, val) (((val) << __ffs(mask)) & (mask))
 
@@ -146,6 +157,7 @@ struct max9296a_chip_info {
 	bool phy0_lanes_0_1_on_second_phy;
 	bool polarity_on_physical_lanes;
 	bool supports_tunnel_mode;
+	bool supports_gmsl3;
 	bool adjust_rlms;
 	bool fix_tx_ids;
 
@@ -696,9 +708,84 @@ static int max9296a_init_link(struct max_des *des, struct max_des_link *link)
 	return 0;
 }
 
+static int max96792a_reset_link(struct max9296a_priv *priv, unsigned int index)
+{
+	unsigned int reg, mask;
+	int ret;
+
+	if (index) {
+		reg = MAX9296A_CTRL3;
+		mask = MAX9296A_CTRL3_RESET_LINK_B;
+	} else {
+		reg = MAX9296A_CTRL0;
+		mask = MAX9296A_CTRL0_RESET_LINK_A;
+	}
+
+	ret = regmap_set_bits(priv->regmap, reg, mask);
+	if (ret)
+		return ret;
+
+	msleep(10);
+
+	ret = regmap_clear_bits(priv->regmap, reg, mask);
+	if (ret)
+		return ret;
+
+	msleep(100);
+
+	return 0;
+}
+
+static int max96792a_get_link_gmsl3(struct max9296a_priv *priv,
+				    unsigned int index, bool *en)
+{
+	unsigned int val;
+	int ret;
+
+	ret = regmap_read(priv->regmap, MAX9296A_REG4, &val);
+	if (ret)
+		return ret;
+
+	*en = !!(val & MAX9296A_REG4_GMSL3_X(index));
+
+	return 0;
+}
+
+static int max96792a_set_link_gmsl3(struct max9296a_priv *priv,
+				    unsigned int index, bool en)
+{
+	return regmap_assign_bits(priv->regmap, MAX9296A_REG4,
+				 MAX9296A_REG4_GMSL3_X(index), en);
+}
+
+static int max96792a_get_link_locked(struct max9296a_priv *priv,
+				     unsigned int index, bool *locked)
+{
+	unsigned int reg, mask, val;
+	int ret;
+
+	if (index) {
+		reg = MAX9296A_CTRL3;
+		mask = MAX9296A_CTRL3_LOCKED_A;
+	} else {
+		reg = MAX9296A_CTRL9;
+		mask = MAX9296A_CTRL9_LOCKED_B;
+	}
+
+	ret = regmap_read(priv->regmap, reg, &val);
+	if (ret)
+		return ret;
+
+	*locked = !!(val & mask);
+
+	return 0;
+}
+
 static int max9296a_select_links(struct max_des *des, unsigned int mask)
 {
 	struct max9296a_priv *priv = des_to_priv(des);
+	unsigned int i;
+	int ret;
 
 	if (priv->info->num_links == 1)
 		return 0;
@@ -708,11 +795,47 @@ static int max9296a_select_links(struct max_des *des, unsigned int mask)
 		return -EINVAL;
 	}
 
-	return regmap_update_bits(priv->regmap, MAX9296A_CTRL0,
+	ret = regmap_update_bits(priv->regmap, MAX9296A_CTRL0,
 				  MAX9296A_CTRL0_LINK_CFG |
 				  MAX9296A_CTRL0_RESET_ONESHOT,
 				  FIELD_PREP(MAX9296A_CTRL0_RESET_ONESHOT, 1) |
 				  FIELD_PREP(MAX9296A_CTRL0_LINK_CFG, mask));
+	if (ret)
+		return ret;
+
+	msleep(100);
+
+	for (i = 0; i < des->ops->num_links; i++) {
+		bool locked;
+		bool en;
+
+		if (!(mask & BIT(i)))
+			continue;
+
+		ret = max96792a_get_link_locked(priv, i, &locked);
+		if (ret)
+			return ret;
+
+		if (locked)
+			continue;
+
+		if (!priv->info->supports_gmsl3)
+			continue;
+
+		ret = max96792a_get_link_gmsl3(priv, i, &en);
+		if (ret)
+			return ret;
+
+		ret = max96792a_set_link_gmsl3(priv, i, !en);
+		if (ret)
+			return ret;
+
+		ret = max96792a_reset_link(priv, i);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
 }
 
 static const struct max_des_ops max9296a_ops = {

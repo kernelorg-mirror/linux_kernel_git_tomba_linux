@@ -39,7 +39,7 @@
 				 <&k3_clks 186 0>,
 				 <&k3_clks 186 2>;
 			display = <&dss>;
-			reg = <0x00 0xff700000 0x00 0x008ca000>;
+			memory-region = <&framebuffer>;
 			width = <1920>;
 			height = <1200>;
 			stride = <(1920 * 4)>;

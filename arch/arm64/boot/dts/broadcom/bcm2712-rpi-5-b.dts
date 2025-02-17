@@ -767,3 +767,4 @@ spi10_cs_pins: &spi10_cs_gpio1 {};
 // #include "rpi5-csi0-imx219.dtsi"
 
 #include "v3link.dtsi"
+#include "ub954.dtsi"

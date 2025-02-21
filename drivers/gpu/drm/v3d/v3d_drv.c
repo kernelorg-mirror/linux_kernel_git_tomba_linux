@@ -280,6 +280,8 @@ static int v3d_platform_drm_probe(struct platform_device *pdev)
 	u32 ident1, ident3;
 	u64 mask;
 
+	dma_set_max_seg_size(dev, dma_max_mapping_size(dev) ?: UINT_MAX);
+
 	v3d = devm_drm_dev_alloc(dev, &v3d_drm_driver, struct v3d_dev, drm);
 	if (IS_ERR(v3d))
 		return PTR_ERR(v3d);

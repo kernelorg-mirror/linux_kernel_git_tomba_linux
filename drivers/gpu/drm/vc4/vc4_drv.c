@@ -299,6 +299,8 @@ static int vc4_drm_bind(struct device *dev)
 	enum vc4_gen gen;
 	int ret = 0;
 
+	dma_set_max_seg_size(dev, UINT_MAX);
+
 	if (of_device_is_compatible(dev->of_node, "brcm,bcm2712-vc6"))
 		gen = VC4_GEN_6;
 	else if (of_device_is_compatible(dev->of_node, "brcm,bcm2711-vc5"))

@@ -20,7 +20,6 @@
 #include <drm/drm_managed.h>
 #include <drm/drm_module.h>
 #include <drm/drm_probe_helper.h>
-#include <drm/drm_fb_helper.h>
 
 #include "tidss_dispc.h"
 #include "tidss_drv.h"
@@ -214,31 +213,12 @@ static int tidss_probe(struct platform_device *pdev)
 		goto err_irq_uninstall;
 	}
 
-	{
-		const u32 size = 0x008ca000;
-		const u32 paddr = 0xff700000;
-		void __iomem *src;
+	/* Remove possible early fb before setting up the fbdev */
+	ret = aperture_remove_all_conflicting_devices(tidss_driver.name);
+	if (ret)
+		goto err_drm_dev_unreg;
 
-		/* Remove possible early fb before setting up the fbdev */
-		ret = aperture_remove_all_conflicting_devices(tidss_driver.name);
-		if (ret)
-			goto err_drm_dev_unreg;
-
-		drm_client_setup(ddev, NULL);
-
-		if (ddev->fb_helper) {
-			printk("COPY FB\n");
-
-			src = ioremap_wc(paddr, size);
-
-			memcpy_toio(ddev->fb_helper->buffer->map.vaddr_iomem,
-				    src, size);
-
-			iounmap(src);
-		} else {
-			printk("No fb\n");
-		}
-	}
+	drm_client_setup(ddev, NULL);
 
 	dev_dbg(dev, "%s done\n", __func__);
 

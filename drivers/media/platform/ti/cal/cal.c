@@ -80,6 +80,10 @@ const struct cal_format_info cal_formats[] = {
 		.code		= MEDIA_BUS_FMT_RGB565_1X16,
 		.bpp		= 16,
 	}, {
+		.fourcc		= V4L2_PIX_FMT_BGR24,
+		.code		= MEDIA_BUS_FMT_RGB888_1X24,
+		.bpp		= 24,
+	}, {
 		.fourcc		= V4L2_PIX_FMT_SBGGR8,
 		.code		= MEDIA_BUS_FMT_SBGGR8_1X8,
 		.bpp		= 8,
@@ -343,6 +347,10 @@ static void cal_ctx_pix_proc_config(struct cal_ctx *ctx)
 	case 16:
 		extract = CAL_PIX_PROC_EXTRACT_B16_LE;
 		pack = CAL_PIX_PROC_PACK_B16;
+		break;
+	case 24:
+		extract = CAL_PIX_PROC_EXTRACT_B8;
+		pack = CAL_PIX_PROC_PACK_B8;
 		break;
 	default:
 		/*

@@ -441,3 +441,4 @@ DTC_FLAGS_k3-j722s-evm-v3link-fusion += -@
 DTC_FLAGS_k3-j784s4-evm += -@
 DTC_FLAGS_k3-j742s2-evm += -@
 DTC_FLAGS_k3-j742s2-evm-ethfw += -@
+DTC_FLAGS_k3-am62p5-verdin-nonwifi-dev += -@

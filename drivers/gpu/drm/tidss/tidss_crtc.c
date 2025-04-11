@@ -104,7 +104,7 @@ static int tidss_crtc_atomic_check(struct drm_crtc *crtc,
 	ok = dispc_vp_mode_valid(dispc, hw_videoport, mode);
 	if (ok != MODE_OK) {
 		dev_dbg(ddev->dev, "%s: bad mode: %ux%u pclk %u kHz\n",
-			__func__, mode->hdisplay, mode->vdisplay, mode->clock);
+			__func__, mode->hdisplay, mode->vdisplay, drm_mode_get_clock(mode));
 		return -EINVAL;
 	}
 
@@ -228,7 +228,7 @@ static void tidss_crtc_atomic_enable(struct drm_crtc *crtc,
 	tidss_runtime_get(tidss);
 
 	r = dispc_vp_set_clk_rate(tidss->dispc, tcrtc->hw_videoport,
-				  mode->crtc_clock * 1000);
+				  drm_mode_get_crtc_clock(mode));
 	if (r != 0)
 		return;
 

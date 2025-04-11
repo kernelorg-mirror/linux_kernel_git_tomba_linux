@@ -1081,7 +1081,7 @@ void drm_display_mode_from_videomode(const struct videomode *vm,
 	dmode->vsync_end = dmode->vsync_start + vm->vsync_len;
 	dmode->vtotal = dmode->vsync_end + vm->vback_porch;
 
-	dmode->clock = vm->pixelclock / 1000;
+	drm_mode_set_clock(dmode, vm->pixelclock);
 
 	dmode->flags = 0;
 	if (vm->flags & DISPLAY_FLAGS_HSYNC_HIGH)
@@ -1122,7 +1122,7 @@ void drm_display_mode_to_videomode(const struct drm_display_mode *dmode,
 	vm->vsync_len = dmode->vsync_end - dmode->vsync_start;
 	vm->vback_porch = dmode->vtotal - dmode->vsync_end;
 
-	vm->pixelclock = dmode->clock * 1000;
+	vm->pixelclock = drm_mode_get_clock(dmode);
 
 	vm->flags = 0;
 	if (dmode->flags & DRM_MODE_FLAG_PHSYNC)
@@ -1351,6 +1351,7 @@ void drm_mode_set_crtcinfo(struct drm_display_mode *p, int adjust_flags)
 		return;
 
 	p->crtc_clock = p->clock;
+	p->crtc_clock_sub_khz = p->clock_sub_khz;
 	p->crtc_hdisplay = p->hdisplay;
 	p->crtc_hsync_start = p->hsync_start;
 	p->crtc_hsync_end = p->hsync_end;

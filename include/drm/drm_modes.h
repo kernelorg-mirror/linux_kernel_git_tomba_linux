@@ -256,6 +256,7 @@ struct drm_display_mode {
 	 * Pixel clock in kHz.
 	 */
 	int clock;		/* in kHz */
+	u16 clock_sub_khz;	/* the sub-kHz part of the clock */
 	u16 hdisplay;
 	u16 hsync_start;
 	u16 hsync_end;
@@ -318,6 +319,7 @@ struct drm_display_mode {
 	 * difference is exactly a factor of 10.
 	 */
 	int crtc_clock;
+	u16 crtc_clock_sub_khz;
 	u16 crtc_hdisplay;
 	u16 crtc_hblank_start;
 	u16 crtc_hblank_end;
@@ -571,5 +573,32 @@ drm_mode_parse_command_line_for_connector(const char *mode_option,
 struct drm_display_mode *
 drm_mode_create_from_cmdline_mode(struct drm_device *dev,
 				  struct drm_cmdline_mode *cmd);
+
+static inline unsigned long
+drm_mode_get_clock(const struct drm_display_mode *mode)
+{
+	return (unsigned long)mode->clock * 1000 + mode->clock_sub_khz;
+}
+
+static inline unsigned long
+drm_mode_get_crtc_clock(const struct drm_display_mode *mode)
+{
+	return (unsigned long)mode->crtc_clock * 1000 +
+	       mode->crtc_clock_sub_khz;
+}
+
+static inline void drm_mode_set_clock(struct drm_display_mode *mode,
+				      unsigned long clock)
+{
+	mode->clock = clock / 1000;
+	mode->clock_sub_khz = clock % 1000;
+}
+
+static inline void drm_mode_set_crtc_clock(struct drm_display_mode *mode,
+					   unsigned long clock)
+{
+	mode->crtc_clock = clock / 1000;
+	mode->crtc_clock_sub_khz = clock % 1000;
+}
 
 #endif /* __DRM_MODES_H__ */

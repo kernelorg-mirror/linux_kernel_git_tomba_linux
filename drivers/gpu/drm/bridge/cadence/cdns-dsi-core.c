@@ -962,11 +962,11 @@ static int cdns_dsi_bridge_atomic_check(struct drm_bridge *bridge,
 	 * clock, as otherwise the DPI and DSI clocks will be out of sync.
 	 */
 
-	pclk = cdns_dsi_round_pclk(dsi, adjusted_mode->clock * 1000);
+	pclk = cdns_dsi_round_pclk(dsi, drm_mode_get_clock(adjusted_mode));
 	if (pclk < 0)
 		return (int)pclk;
 
-	adjusted_mode->clock = pclk / 1000;
+	drm_mode_set_clock(adjusted_mode, pclk);
 
 	drm_display_mode_to_videomode(adjusted_mode, &vm);
 

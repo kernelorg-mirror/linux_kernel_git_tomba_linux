@@ -608,11 +608,6 @@ static void cdns_dsi_bridge_atomic_late_disable(struct drm_bridge *bridge,
 	if (dsi->platform_ops && dsi->platform_ops->disable)
 		dsi->platform_ops->disable(dsi);
 
-	// HACK: TI BSP kernel has a bug, the and these are not set
-	// in disable
-	dsi->phy_initialized = false;
-	dsi->link_initialized = false;
-
 	pm_runtime_put(dsi->base.dev);
 }
 

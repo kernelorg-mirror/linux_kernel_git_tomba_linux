@@ -133,6 +133,23 @@ static const struct drm_driver tidss_driver = {
 	.minor			= 0,
 };
 
+extern void (*KALA)(void *screen_buffer, size_t screen_size);
+
+static void my_KALA(void *screen_buffer, size_t screen_size)
+{
+	printk("KALA %p, %zu\n", screen_buffer, screen_size);
+
+	const u32 size = 0x008ca000;
+	const u32 paddr = 0xff700000;
+	void __iomem *src;
+
+	src = ioremap_wc(paddr, size);
+
+	memcpy_toio(screen_buffer, src, size);
+
+	iounmap(src);
+}
+
 static int tidss_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -213,6 +230,9 @@ static int tidss_probe(struct platform_device *pdev)
 		goto err_irq_uninstall;
 	}
 
+	printk("set KALA\n");
+	KALA = my_KALA;
+
 	/* Remove possible early fb before setting up the fbdev */
 	ret = aperture_remove_all_conflicting_devices(tidss_driver.name);
 	if (ret)
@@ -252,6 +272,7 @@ static void tidss_remove(struct platform_device *pdev)
 	struct drm_device *ddev = &tidss->ddev;
 
 	dev_dbg(dev, "%s\n", __func__);
+	KALA = 0;
 
 	drm_dev_unregister(ddev);
 

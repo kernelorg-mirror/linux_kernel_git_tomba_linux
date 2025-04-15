@@ -199,6 +199,9 @@ static const struct drm_fb_helper_funcs drm_fbdev_dma_helper_funcs = {
  * struct drm_fb_helper
  */
 
+ void (*KALA)(void *screen_buffer, size_t screen_size);
+ EXPORT_SYMBOL_GPL(KALA);
+
 static int drm_fbdev_dma_driver_fbdev_probe_tail(struct drm_fb_helper *fb_helper,
 						 struct drm_fb_helper_surface_size *sizes)
 {
@@ -208,6 +211,8 @@ static int drm_fbdev_dma_driver_fbdev_probe_tail(struct drm_fb_helper *fb_helper
 	struct drm_framebuffer *fb = fb_helper->fb;
 	struct fb_info *info = fb_helper->info;
 	struct iosys_map map = buffer->map;
+
+	printk("drm_fbdev_dma_driver_fbdev_probe_tail\n");
 
 	info->fbops = &drm_fbdev_dma_fb_ops;
 
@@ -223,6 +228,9 @@ static int drm_fbdev_dma_driver_fbdev_probe_tail(struct drm_fb_helper *fb_helper
 	}
 	info->fix.smem_len = info->screen_size;
 
+	if (KALA)
+		KALA(info->screen_buffer, info->screen_size);
+
 	return 0;
 }
 
@@ -234,6 +242,8 @@ static int drm_fbdev_dma_driver_fbdev_probe_tail_shadowed(struct drm_fb_helper *
 	size_t screen_size = buffer->gem->size;
 	void *screen_buffer;
 	int ret;
+
+	printk("drm_fbdev_dma_driver_fbdev_probe_tail_shadowed\n");
 
 	/*
 	 * Deferred I/O requires struct page for framebuffer memory,
@@ -279,6 +289,8 @@ int drm_fbdev_dma_driver_fbdev_probe(struct drm_fb_helper *fb_helper,
 	struct iosys_map map;
 	int ret;
 
+	printk("drm_fbdev_dma_driver_fbdev_probe\n");
+
 	drm_dbg_kms(dev, "surface width(%d), height(%d) and bpp(%d)\n",
 		    sizes->surface_width, sizes->surface_height,
 		    sizes->surface_bpp);
@@ -311,6 +323,8 @@ int drm_fbdev_dma_driver_fbdev_probe(struct drm_fb_helper *fb_helper,
 	}
 
 	drm_fb_helper_fill_info(info, fb_helper, sizes);
+
+	printk("has diurty %u\n", !!fb->funcs->dirty);
 
 	if (fb->funcs->dirty)
 		ret = drm_fbdev_dma_driver_fbdev_probe_tail_shadowed(fb_helper, sizes);

@@ -448,9 +448,6 @@ static int max_ser_get_frame_desc_state(struct v4l2_subdev *sd,
 		}
 
 		source = max_ser_find_phy_source(priv, phy);
-		if (!source)
-			return -ENOENT;
-
 		if (!source->sd)
 			continue;
 
@@ -754,9 +751,6 @@ static int max_ser_update_phy(struct max_ser_priv *priv,
 		return -ENOENT;
 
 	source = max_ser_find_phy_source(priv, phy);
-	if (!source)
-		return -ENOENT;
-
 	if (!source->sd)
 		return 0;
 
@@ -1110,9 +1104,6 @@ static int max_ser_v4l2_notifier_register(struct max_ser_priv *priv)
 		struct max_asc *asc;
 
 		source = max_ser_find_phy_source(priv, phy);
-		if (!source)
-			return -ENOENT;
-
 		if (!source->ep_fwnode)
 			continue;
 
@@ -1318,9 +1309,6 @@ static int max_ser_parse_dt(struct max_ser_priv *priv)
 		struct max_source *source;
 
 		source = max_ser_find_phy_source(priv, phy);
-		if (!source)
-			return -ENOENT;
-
 		source->index = i;
 
 		ret = max_ser_parse_sink_dt_endpoint(priv, phy, source, fwnode);

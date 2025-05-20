@@ -138,7 +138,7 @@ max_des_find_link_pipe(struct max_des *des, struct max_des_link *link)
 }
 
 static struct max_source *
-max_des_find_link_source(struct max_des_priv *priv, struct max_des_link *link)
+max_des_get_link_source(struct max_des_priv *priv, struct max_des_link *link)
 {
 	return &priv->sources[link->index];
 }
@@ -285,7 +285,7 @@ static int max_des_get_supported_modes(struct max_des_priv *priv,
 		if (!context->pipe_in_use[pipe->index])
 			continue;
 
-		source = max_des_find_link_source(priv, link);
+		source = max_des_get_link_source(priv, link);
 		if (!source->sd)
 			continue;
 
@@ -333,7 +333,7 @@ static int max_des_populate_remap_context_mode(struct max_des_priv *priv,
 		if (!context->pipe_in_use[pipe->index])
 			continue;
 
-		source = max_des_find_link_source(priv, link);
+		source = max_des_get_link_source(priv, link);
 		if (!source->sd)
 			continue;
 
@@ -409,7 +409,7 @@ static int max_des_populate_remap_context(struct max_des_priv *priv,
 		if (!pipe)
 			return -ENOENT;
 
-		source = max_des_find_link_source(priv, link);
+		source = max_des_get_link_source(priv, link);
 		if (!source->sd)
 			continue;
 
@@ -699,7 +699,7 @@ static int max_des_set_modes(struct max_des_priv *priv,
 		if (!link->enabled)
 			continue;
 
-		source = max_des_find_link_source(priv, link);
+		source = max_des_get_link_source(priv, link);
 		if (!source->sd)
 			continue;
 
@@ -750,7 +750,7 @@ static int max_des_set_tunnel(struct max_des_priv *priv,
 		if (!context->pipe_in_use[pipe->index])
 			continue;
 
-		source = max_des_find_link_source(priv, link);
+		source = max_des_get_link_source(priv, link);
 		if (!source->sd)
 			continue;
 
@@ -784,7 +784,7 @@ static int max_des_set_vc_remaps(struct max_des_priv *priv,
 		if (!link->enabled)
 			continue;
 
-		source = max_des_find_link_source(priv, link);
+		source = max_des_get_link_source(priv, link);
 		if (!source->sd)
 			continue;
 
@@ -826,7 +826,7 @@ static int max_des_set_pipes_stream_id(struct max_des_priv *priv)
 		if (!link->enabled)
 			continue;
 
-		source = max_des_find_link_source(priv, link);
+		source = max_des_get_link_source(priv, link);
 		if (!source->sd)
 			continue;
 
@@ -1702,7 +1702,7 @@ static int max_des_get_frame_desc_state(struct v4l2_subdev *sd,
 		if (!pipe)
 			return -ENOENT;
 
-		source = max_des_find_link_source(priv, link);
+		source = max_des_get_link_source(priv, link);
 		if (!source->sd)
 			continue;
 
@@ -1810,7 +1810,7 @@ static int max_des_update_link(struct max_des_priv *priv,
 	if (!pipe)
 		return -ENOENT;
 
-	source = max_des_find_link_source(priv, link);
+	source = max_des_get_link_source(priv, link);
 	if (!source->sd)
 		return 0;
 
@@ -2193,7 +2193,7 @@ static int max_des_v4l2_notifier_register(struct max_des_priv *priv)
 		if (!link->enabled)
 			continue;
 
-		source = max_des_find_link_source(priv, link);
+		source = max_des_get_link_source(priv, link);
 		if (!source->ep_fwnode)
 			continue;
 
@@ -2564,7 +2564,7 @@ static int max_des_parse_dt(struct max_des_priv *priv)
 		struct max_des_link *link = &des->links[i];
 		struct max_source *source;
 
-		source = max_des_find_link_source(priv, link);
+		source = max_des_get_link_source(priv, link);
 		source->index = i;
 
 		ret = max_des_parse_sink_dt_endpoint(priv, link, source, fwnode);

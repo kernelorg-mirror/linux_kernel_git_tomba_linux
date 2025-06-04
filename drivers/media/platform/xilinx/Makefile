@@ -2,9 +2,9 @@
 
 xilinx-scd-objs += xilinx-scenechange.o xilinx-scenechange-channel.o \
 		   xilinx-scenechange-dma.o
-xilinx-video-objs += xilinx-dma.o xilinx-vip.o xilinx-vipp.o
+xilinx-video-objs += xilinx-dma.o xilinx-vipp.o
 
-obj-$(CONFIG_VIDEO_XILINX) += xilinx-video.o
+obj-$(CONFIG_VIDEO_XILINX) += xilinx-video.o xilinx-vip.o
 obj-$(CONFIG_VIDEO_XILINX_AXI4S_BROADCASTER) += xilinx-axis-broadcaster.o
 obj-$(CONFIG_VIDEO_XILINX_AXI4S_SUBSETCONV) += xilinx-axis-subsetconv.o
 obj-$(CONFIG_VIDEO_XILINX_AXI4S_SWITCH) += xilinx-axis-switch.o

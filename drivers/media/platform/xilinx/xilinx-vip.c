@@ -322,3 +322,7 @@ int xvip_enum_frame_size(struct v4l2_subdev *subdev,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(xvip_enum_frame_size);
+
+MODULE_AUTHOR("Laurent Pinchart <laurent.pinchart@ideasonboard.com>");
+MODULE_DESCRIPTION("Xilinx Video IP Core");
+MODULE_LICENSE("GPL");

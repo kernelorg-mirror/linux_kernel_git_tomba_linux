@@ -29,6 +29,7 @@
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_managed.h>
 #include <drm/drm_mode_config.h>
+#include <drm/drm_modeset_helper_vtables.h>
 #include <drm/drm_print.h>
 #include <drm/drm_colorop.h>
 #include <linux/dma-resv.h>
@@ -182,15 +183,7 @@ int drm_mode_getresources(struct drm_device *dev, void *data,
 	return ret;
 }
 
-/**
- * drm_mode_config_reset - call ->reset callbacks
- * @dev: drm device
- *
- * This functions calls all the crtc's, encoder's and connector's ->reset
- * callback. Drivers can use this in e.g. their driver load or resume code to
- * reset hardware and software state.
- */
-void drm_mode_config_reset(struct drm_device *dev)
+static void drm_mode_config_reset_pristine(struct drm_device *dev)
 {
 	struct drm_crtc *crtc;
 	struct drm_colorop *colorop;
@@ -219,6 +212,27 @@ void drm_mode_config_reset(struct drm_device *dev)
 		if (connector->funcs->reset)
 			connector->funcs->reset(connector);
 	drm_connector_list_iter_end(&conn_iter);
+}
+
+/**
+ * drm_mode_config_reset - call ->reset callbacks
+ * @dev: drm device
+ *
+ * This functions calls all the crtc's, encoder's and connector's ->reset
+ * callback. Drivers can use this in e.g. their driver load or resume code to
+ * reset hardware and software state.
+ */
+void drm_mode_config_reset(struct drm_device *dev)
+{
+	if (drm_core_check_feature(dev, DRIVER_ATOMIC)) {
+		const struct drm_mode_config_helper_funcs *funcs =
+			dev->mode_config.helper_private;
+
+		if (funcs && funcs->atomic_reset)
+			return funcs->atomic_reset(dev);
+	}
+
+	return drm_mode_config_reset_pristine(dev);
 }
 EXPORT_SYMBOL(drm_mode_config_reset);
 

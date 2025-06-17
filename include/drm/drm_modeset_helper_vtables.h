@@ -1552,6 +1552,19 @@ struct drm_mode_config_helper_funcs {
 	 * This hook is optional.
 	 */
 	int (*atomic_commit_setup)(struct drm_atomic_state *state);
+
+	/**
+	 * @atomic_reset:
+	 *
+	 * This hook is used to create the initial @drm_atomic_state.
+	 * It's used by drm_mode_config_reset().
+	 *
+	 * The default implementation will create an empty one, but
+	 * drivers can provide an alternative implementation to, for
+	 * example, read the initial state from hardware to implement
+	 * flicker-free and / or faster boot.
+	 */
+	void (*atomic_reset)(struct drm_device *dev);
 };
 
 #endif

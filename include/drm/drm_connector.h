@@ -1512,6 +1512,32 @@ struct drm_connector_funcs {
 	void (*destroy)(struct drm_connector *connector);
 
 	/**
+	 * @atomic_readout_state:
+	 *
+	 * Allocates, initializes, and returns an atomic state for this
+	 * connector.
+	 *
+	 * It's meant to be used by drivers that wants to implement fast
+	 * / flicker-free boot and allows to initialize the atomic state
+	 * from the hardware state left by the firmware.
+	 *
+	 * It's used at initialization time, so drivers must make sure
+	 * that the power state is sensible when accessing the hardware.
+	 *
+	 * The drm_atomic_state being passed is not fully filled. Only
+	 * the CRTC state are there when this hooks is called, and only
+	 * their old state. The only safe operation one can do on this
+	 * state in this hook is calling
+	 * drm_atomic_get_old_crtc_state().
+	 *
+	 * RETURNS:
+	 *
+	 * An atomic state on success, an error pointer otherwise.
+	 */
+	struct drm_connector_state *(*atomic_readout_state)(struct drm_connector *connector,
+							    struct drm_atomic_state *state);
+
+	/**
 	 * @atomic_duplicate_state:
 	 *
 	 * Duplicate the current atomic state for this connector and return it.

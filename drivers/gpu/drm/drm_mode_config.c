@@ -28,6 +28,7 @@
 #include <drm/drm_file.h>
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_managed.h>
+#include <drm/drm_modeset_helper_vtables.h>
 #include <drm/drm_mode_config.h>
 #include <drm/drm_modeset_helper_vtables.h>
 #include <drm/drm_print.h>

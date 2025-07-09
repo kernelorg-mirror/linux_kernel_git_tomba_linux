@@ -48,6 +48,389 @@
 
 #include "drm_crtc_helper_internal.h"
 #include "drm_crtc_internal.h"
+#include "drm_internal.h"
+
+static void drm_atomic_set_old_plane_state(struct drm_atomic_state *state,
+					   struct drm_plane *plane,
+					   struct drm_plane_state *plane_state)
+{
+	int idx = drm_plane_index(plane);
+
+	state->planes[idx].old_state = plane_state;
+	state->planes[idx].ptr = plane;
+
+	drm_dbg_atomic(plane->dev, "Added [PLANE:%d:%s] %p state to %p\n",
+		       plane->base.id, plane->name, plane_state, state);
+}
+
+static void drm_atomic_set_old_crtc_state(struct drm_atomic_state *state,
+					  struct drm_crtc *crtc,
+					  struct drm_crtc_state *crtc_state)
+{
+	int idx = drm_crtc_index(crtc);
+
+	state->crtcs[idx].old_state = crtc_state;
+	state->crtcs[idx].ptr = crtc;
+
+	drm_dbg_atomic(state->dev, "Added [CRTC:%d:%s] %p state to %p\n",
+		       crtc->base.id, crtc->name, crtc_state, state);
+}
+
+static void drm_atomic_set_old_connector_state(struct drm_atomic_state *state,
+					       struct drm_connector *conn,
+					       struct drm_connector_state *conn_state)
+{
+	int idx = drm_connector_index(conn);
+
+	drm_connector_get(conn);
+	state->connectors[idx].old_state = conn_state;
+	state->connectors[idx].ptr = conn;
+	state->num_connector++;
+
+	drm_dbg_atomic(conn->dev,
+		       "Added [CONNECTOR:%d:%s] %p state to %p\n",
+		       conn->base.id, conn->name, conn_state, state);
+}
+
+static void drm_atomic_set_old_private_obj_state(struct drm_atomic_state *state,
+						 struct drm_private_obj *obj,
+						 struct drm_private_state *obj_state)
+{
+	int idx = state->num_private_objs;
+
+	memset(&state->private_objs[idx], 0, sizeof(*state->private_objs));
+	state->private_objs[idx].old_state = obj_state;
+	state->private_objs[idx].ptr = obj;
+	state->num_private_objs++;
+
+	drm_dbg_atomic(state->dev,
+		       "Added new private object %p state %p to %p\n", obj,
+		       obj_state, state);
+}
+
+static void drm_atomic_set_old_bridge_state(struct drm_atomic_state *state,
+					    struct drm_bridge *bridge,
+					    struct drm_bridge_state *bridge_state)
+{
+	drm_atomic_set_old_private_obj_state(state, &bridge->base, &bridge_state->base);
+}
+
+static struct drm_connector_state *
+find_connector_state_for_encoder(struct drm_atomic_state *state,
+				struct drm_encoder *encoder)
+{
+	struct drm_connector_list_iter conn_iter;
+	struct drm_connector *connector;
+
+	drm_connector_list_iter_begin(state->dev, &conn_iter);
+	drm_for_each_connector_iter(connector, &conn_iter) {
+		struct drm_connector_state *conn_state =
+			drm_atomic_get_old_connector_state(state, connector);
+
+		if (WARN_ON(!conn_state))
+			continue;
+
+		if (encoder == conn_state->best_encoder)
+			return conn_state;
+	}
+	drm_connector_list_iter_end(&conn_iter);
+
+	return NULL;
+}
+
+/**
+ * drm_atomic_helper_install_readout_state - Sets the state pointer from their readout state
+ * @state: drm_atomic_state to initialize the DRM device with.
+ *
+ * This function takes a &struct drm_atomic_state initialized by
+ * drm_atomic_build_readout_state() and sets up the entities state
+ * pointers (ie, &drm_crtc.state and similar) to properly setup the
+ * initial state.
+ */
+static void
+drm_atomic_helper_install_readout_state(struct drm_atomic_state *state)
+{
+	struct drm_connector_state *old_conn_state;
+	struct drm_private_state *old_obj_state;
+	struct drm_plane_state *old_plane_state;
+	struct drm_crtc_state *old_crtc_state;
+	struct drm_connector *connector;
+	struct drm_private_obj *obj;
+	struct drm_plane *plane;
+	struct drm_crtc *crtc;
+	unsigned int i;
+
+	for_each_old_connector_in_state(state, connector, old_conn_state, i) {
+		connector->state = old_conn_state;
+
+		drm_connector_put(state->connectors[i].ptr);
+		state->connectors[i].ptr = NULL;
+		state->connectors[i].old_state = NULL;
+	}
+
+	for_each_old_crtc_in_state(state, crtc, old_crtc_state, i) {
+		crtc->state = old_crtc_state;
+
+		state->crtcs[i].ptr = NULL;
+		state->crtcs[i].old_state = NULL;
+	}
+
+	for_each_old_plane_in_state(state, plane, old_plane_state, i) {
+		plane->state = old_plane_state;
+
+		state->planes[i].ptr = NULL;
+		state->planes[i].old_state = NULL;
+	}
+
+	for_each_old_private_obj_in_state(state, obj, old_obj_state, i) {
+		obj->state = old_obj_state;
+
+		state->private_objs[i].ptr = NULL;
+		state->private_objs[i].old_state = NULL;
+	}
+	state->num_private_objs = 0;
+}
+
+static unsigned int count_private_obj(struct drm_device *dev)
+{
+	struct drm_mode_config *config = &dev->mode_config;
+	struct drm_private_obj *obj;
+	unsigned int count = 0;
+
+	list_for_each_entry(obj, &config->privobj_list, head)
+		count++;
+
+	return count;
+}
+
+/**
+ * drm_atomic_build_readout_state - Creates an initial state from the hardware
+ * @dev: DRM device to build the state for
+ *
+ * This function allocates a &struct drm_atomic_state, calls the
+ * atomic_readout_state callbacks, and fills the global state old states
+ * by what the callbacks returned.
+ *
+ * Returns:
+ *
+ * A partially initialized &struct drm_atomic_state on success, an error
+ * pointer otherwise.
+ */
+static struct drm_atomic_state *
+drm_atomic_build_readout_state(struct drm_device *dev)
+{
+	struct drm_connector_list_iter conn_iter;
+	struct drm_atomic_state *state;
+	struct drm_mode_config *config =
+		&dev->mode_config;
+	struct drm_connector *connector;
+	struct drm_printer p =
+		drm_info_printer(dev->dev);
+	struct drm_encoder *encoder;
+	struct drm_plane *plane;
+	struct drm_crtc *crtc;
+	int ret;
+
+	drm_dbg_kms(dev, "Starting to build atomic state from hardware state.\n");
+
+	state = drm_atomic_state_alloc(dev);
+	if (WARN_ON(!state))
+		return ERR_PTR(-ENOMEM);
+
+	state->connectors = kcalloc(config->num_connector, sizeof(*state->connectors), GFP_KERNEL);
+	if (WARN_ON(!state->connectors)) {
+		ret = -ENOMEM;
+		goto err_state_put;
+	}
+
+	state->private_objs = kcalloc(count_private_obj(dev), sizeof(*state->private_objs), GFP_KERNEL);
+	if (WARN_ON(!state->private_objs)) {
+		ret = -ENOMEM;
+		goto err_state_put;
+	}
+
+	drm_for_each_crtc(crtc, dev) {
+		const struct drm_crtc_funcs *crtc_funcs =
+			crtc->funcs;
+		struct drm_crtc_state *crtc_state;
+
+		drm_dbg_kms(dev, "Initializing CRTC %s state.\n", crtc->name);
+
+		if (crtc_funcs->atomic_readout_state) {
+			crtc_state = crtc_funcs->atomic_readout_state(crtc);
+		} else if (crtc_funcs->reset) {
+			crtc_funcs->reset(crtc);
+
+			/*
+			 * We don't want to set crtc->state field yet. Let's save and clear it up.
+			 */
+			crtc_state = crtc->state;
+			crtc->state = NULL;
+		} else {
+			drm_warn(dev, "No CRTC readout or reset implementation.");
+			continue;
+		}
+
+		if (WARN_ON(IS_ERR(crtc_state))) {
+			ret = PTR_ERR(crtc_state);
+			goto err_state_put;
+		}
+
+		drm_atomic_set_old_crtc_state(state, crtc, crtc_state);
+	}
+
+	drm_connector_list_iter_begin(dev, &conn_iter);
+	drm_for_each_connector_iter(connector, &conn_iter) {
+		const struct drm_connector_funcs *conn_funcs =
+			connector->funcs;
+		struct drm_connector_state *conn_state;
+
+		drm_dbg_kms(dev, "Initializing Connector %s state.\n", connector->name);
+
+		if (conn_funcs->atomic_readout_state) {
+			conn_state = conn_funcs->atomic_readout_state(connector, state);
+		} else if (conn_funcs->reset) {
+			conn_funcs->reset(connector);
+
+			/*
+			 * We don't want to set connector->state field yet. Let's save and clear it
+			 * up.
+			 */
+			conn_state = connector->state;
+			connector->state = NULL;
+		} else {
+			drm_warn(dev, "No Connector readout or reset implementation.");
+			continue;
+		}
+
+		if (WARN_ON(IS_ERR(conn_state))) {
+			ret = PTR_ERR(conn_state);
+			goto err_state_put;
+		}
+
+		drm_atomic_set_old_connector_state(state, connector, conn_state);
+	}
+	drm_connector_list_iter_end(&conn_iter);
+
+	WARN_ON(state->num_connector != config->num_connector);
+
+	drm_for_each_encoder(encoder, dev) {
+		struct drm_connector_state *enc_conn_state;
+		struct drm_crtc_state *enc_crtc_state;
+		struct drm_bridge *bridge;
+
+		/*
+		 * It works a bit differently for bridges. Because they are
+		 * using a drm_private_state, and because
+		 * drm_atomic_private_obj_init() asks for its initial state when
+		 * initializing, instead of doing it later on through a reset
+		 * call like the other entities, we can't have reset xor
+		 * readout.
+		 *
+		 * We'll need a mandatory reset to create that initial, blank,
+		 * state, and then readout will fill that state later on if the
+		 * driver implements it.
+		 *
+		 * This also means we don't need to call the readout state
+		 * function if we don't have the bridge enabled (ie, if no
+		 * drm_connector_state->best_encoder points to bridge->encoder,
+		 * and / or if drm_connector_state->crtc is NULL).
+		 *
+		 * In such a case, we would get the blank state reset created
+		 * during registration.
+		 */
+
+		enc_conn_state = find_connector_state_for_encoder(state, encoder);
+		if (!enc_conn_state)
+			continue;
+
+		enc_crtc_state = drm_atomic_get_old_crtc_state(state, enc_conn_state->crtc);
+		if (!enc_crtc_state)
+			continue;
+
+		list_for_each_entry(bridge, &encoder->bridge_chain, chain_node) {
+			const struct drm_bridge_funcs *bridge_funcs = bridge->funcs;
+			struct drm_bridge_state *bridge_state;
+
+			bridge_state = drm_bridge_get_current_state(bridge);
+			if (WARN_ON(!bridge_state)) {
+				ret = -EINVAL;
+				goto err_state_put;
+			}
+
+			if (bridge_funcs->atomic_readout_state) {
+				ret = bridge_funcs->atomic_readout_state(bridge,
+									 bridge_state,
+									 enc_crtc_state,
+									 enc_conn_state);
+				if (WARN_ON(ret))
+					goto err_state_put;
+			}
+
+			drm_atomic_set_old_bridge_state(state, bridge, bridge_state);
+		}
+	}
+
+	drm_for_each_plane(plane, dev) {
+		const struct drm_plane_funcs *plane_funcs =
+			plane->funcs;
+		struct drm_plane_state *plane_state;
+
+		drm_dbg_kms(dev, "Initializing Plane %s state.\n", plane->name);
+
+		if (plane_funcs->atomic_readout_state) {
+			plane_state = plane_funcs->atomic_readout_state(plane, state);
+		} else if (plane_funcs->reset) {
+			plane_funcs->reset(plane);
+
+			/*
+			 * We don't want to set conn->state field yet. Let's save and clear it up.
+			 */
+			plane_state = plane->state;
+			plane->state = NULL;
+		} else {
+			drm_warn(dev, "No plane readout or reset implementation.");
+			continue;
+		}
+
+		if (WARN_ON(IS_ERR(plane_state))) {
+			ret = PTR_ERR(plane_state);
+			goto err_state_put;
+		}
+
+		drm_atomic_set_old_plane_state(state, plane, plane_state);
+	}
+
+	drm_atomic_print_old_state(state, &p);
+
+	return state;
+
+err_state_put:
+	drm_atomic_state_put(state);
+	return ERR_PTR(ret);
+}
+
+/**
+ * drm_atomic_helper_readout_state - Builds an initial state from hardware state
+ * @dev: DRM device to build the state for
+ *
+ * This function creates the initial state for all the entities on a
+ * @dev. Drivers can use this as their
+ * &drm_mode_config_helper_funcs.atomic_reset callback to implement
+ * hardware state readout suppport.
+ */
+void drm_atomic_helper_readout_state(struct drm_device *dev)
+{
+	struct drm_atomic_state *state;
+
+	state = drm_atomic_build_readout_state(dev);
+	if (IS_ERR(state))
+		return;
+
+	drm_atomic_helper_install_readout_state(state);
+	drm_atomic_state_put(state);
+}
+EXPORT_SYMBOL(drm_atomic_helper_readout_state);
 
 /**
  * DOC: overview

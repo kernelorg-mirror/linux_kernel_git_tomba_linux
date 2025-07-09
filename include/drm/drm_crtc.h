@@ -627,6 +627,25 @@ struct drm_crtc_funcs {
 			    struct drm_property *property, uint64_t val);
 
 	/**
+	 * @atomic_readout_state:
+	 *
+	 * Allocates, initializes, and returns an atomic state for this
+	 * CRTC.
+	 *
+	 * It's meant to be used by drivers that wants to implement fast
+	 * / flicker-free boot and allows to initialize the atomic state
+	 * from the hardware state left by the firmware.
+	 *
+	 * It's used at initialization time, so drivers must make sure
+	 * that the power state is sensible when accessing the hardware.
+	 *
+	 * RETURNS:
+	 *
+	 * An atomic state on success, an error pointer otherwise.
+	 */
+	struct drm_crtc_state *(*atomic_readout_state)(struct drm_crtc *crtc);
+
+	/**
 	 * @atomic_duplicate_state:
 	 *
 	 * Duplicate the current atomic state for this CRTC and return it.

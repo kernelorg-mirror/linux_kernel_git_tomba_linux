@@ -376,6 +376,27 @@ struct drm_bridge_funcs {
 				    struct drm_atomic_state *state);
 
 	/**
+	 * @atomic_readout_state:
+	 *
+	 * Initializes,this bridge atomic state.
+	 *
+	 * It's meant to be used by drivers that wants to implement fast
+	 * / flicker-free boot and allows to initialize the atomic state
+	 * from the hardware state left by the firmware.
+	 *
+	 * It's used at initialization time, so drivers must make sure
+	 * that the power state is sensible when accessing the hardware.
+	 *
+	 * RETURNS:
+	 *
+	 * 0 on success, an error code otherwise.
+	 */
+	int (*atomic_readout_state)(struct drm_bridge *bridge,
+				    struct drm_bridge_state *bridge_state,
+				    struct drm_crtc_state *crtc_state,
+				    struct drm_connector_state *conn_state);
+
+	/**
 	 * @atomic_duplicate_state:
 	 *
 	 * Duplicate the current bridge state object (which is guaranteed to be

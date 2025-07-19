@@ -713,6 +713,13 @@ void drm_atomic_helper_connector_destroy_state(struct drm_connector *connector,
 }
 EXPORT_SYMBOL(drm_atomic_helper_connector_destroy_state);
 
+static void __drm_atomic_helper_private_obj_reset(struct drm_private_obj *obj,
+						  struct drm_private_state *state)
+{
+	memset(state, 0, sizeof(*state));
+	state->obj = obj;
+}
+
 /**
  * __drm_atomic_helper_private_obj_duplicate_state - copy atomic private state
  * @obj: CRTC object
@@ -802,6 +809,7 @@ void __drm_atomic_helper_bridge_reset(struct drm_bridge *bridge,
 				      struct drm_bridge_state *state)
 {
 	memset(state, 0, sizeof(*state));
+	__drm_atomic_helper_private_obj_reset(&bridge->base, &state->base);
 	state->bridge = bridge;
 }
 EXPORT_SYMBOL(__drm_atomic_helper_bridge_reset);

@@ -144,6 +144,7 @@ void dispc_plane_setup(struct dispc_device *dispc, u32 hw_plane,
 		       u32 hw_videoport);
 void dispc_plane_enable(struct dispc_device *dispc, u32 hw_plane, bool enable);
 const u32 *dispc_plane_formats(struct dispc_device *dispc, unsigned int *len);
+u32 dispc_plane_find_fourcc_by_dss_code(u8 code);
 
 int dispc_init(struct tidss_device *tidss);
 void dispc_remove(struct tidss_device *tidss);

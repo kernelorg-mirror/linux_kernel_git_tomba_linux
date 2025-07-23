@@ -67,6 +67,14 @@ struct drm_bridge_connector {
 	 */
 	struct drm_encoder *encoder;
 	/**
+	 * @bridge_connector_hw_readout:
+	 *
+	 * The last bridge in the chain (closest to the connector) that
+	 * provides hardware state readout support, if any (see
+	 * &DRM_BRIDGE_OP_CONNECTOR_HW_READOUT).
+	 */
+	struct drm_bridge *bridge_connector_hw_readout;
+	/**
 	 * @bridge_edid:
 	 *
 	 * The last bridge in the chain (closest to the connector) that provides
@@ -265,22 +273,42 @@ static void drm_bridge_connector_debugfs_init(struct drm_connector *connector,
 	}
 }
 
-static void drm_bridge_connector_reset(struct drm_connector *connector)
+static struct drm_connector_state *
+drm_bridge_connector_readout_state(struct drm_connector *connector,
+				   struct drm_atomic_state *state)
 {
 	struct drm_bridge_connector *bridge_connector =
 		to_drm_bridge_connector(connector);
+	struct drm_connector_state *conn_state;
+	struct drm_bridge *readout =
+		bridge_connector->bridge_connector_hw_readout;
 
-	drm_atomic_helper_connector_reset(connector);
+	if (connector->state)
+		connector->funcs->atomic_destroy_state(connector,
+						       connector->state);
+
+	conn_state = kzalloc(sizeof(*conn_state), GFP_KERNEL);
+	if (!conn_state)
+		return ERR_PTR(-ENOMEM);
+
+	__drm_atomic_helper_connector_state_reset(conn_state, connector);
+
 	if (bridge_connector->bridge_hdmi)
 		__drm_atomic_helper_connector_hdmi_reset(connector,
 							 connector->state);
+
+	if (readout)
+		readout->funcs->connector_hw_readout(readout, state, conn_state);
+
+	return conn_state;
 }
 
 static const struct drm_connector_funcs drm_bridge_connector_funcs = {
-	.reset = drm_bridge_connector_reset,
 	.detect = drm_bridge_connector_detect,
 	.force = drm_bridge_connector_force,
 	.fill_modes = drm_helper_probe_single_connector_modes,
+	.atomic_readout_state = drm_bridge_connector_readout_state,
+	.atomic_compare_state = drm_atomic_helper_connector_compare_state,
 	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
 	.debugfs_init = drm_bridge_connector_debugfs_init,
@@ -826,6 +854,10 @@ struct drm_connector *drm_bridge_connector_init(struct drm_device *drm,
 		if (!bridge->ycbcr_420_allowed)
 			connector->ycbcr_420_allowed = false;
 
+		if (bridge->ops & DRM_BRIDGE_OP_CONNECTOR_HW_READOUT) {
+			drm_bridge_put(bridge_connector->bridge_readout);
+			bridge_connector->bridge_readout = drm_bridge_get(bridge);
+		}
 		if (bridge->ops & DRM_BRIDGE_OP_EDID) {
 			drm_bridge_put(bridge_connector->bridge_edid);
 			bridge_connector->bridge_edid = drm_bridge_get(bridge);

@@ -88,6 +88,19 @@ struct drm_encoder_funcs {
 	 * Allows encoders to create encoder-specific debugfs files.
 	 */
 	void (*debugfs_init)(struct drm_encoder *encoder, struct dentry *root);
+
+	/**
+	 * @get_current_crtc:
+	 *
+	 * This optional hook is used during initialization to read out
+	 * the initial state by connectors that support atomic state
+	 * hardware readout.
+	 *
+	 * Returns:
+	 *
+	 * The CRTC currently associated with the encoder if enabled, NULL otherwise.
+	 */
+	struct drm_crtc *(*get_current_crtc)(struct drm_encoder *encoder);
 };
 
 /**

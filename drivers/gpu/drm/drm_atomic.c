@@ -2082,6 +2082,51 @@ void drm_atomic_print_new_state(const struct drm_atomic_state *state,
 }
 EXPORT_SYMBOL(drm_atomic_print_new_state);
 
+/**
+ * drm_atomic_print_old_state - prints drm atomic state
+ * @state: atomic configuration to check
+ * @p: drm printer
+ *
+ * This functions prints the drm atomic state snapshot using the drm printer
+ * which is passed to it. This snapshot can be used for debugging purposes.
+ *
+ * Note that this function looks into the old state objects and hence its not
+ * safe to be used after the call to drm_atomic_helper_commit_hw_done().
+ */
+void drm_atomic_print_old_state(const struct drm_atomic_state *state,
+		struct drm_printer *p)
+{
+	struct drm_plane *plane;
+	struct drm_plane_state *plane_state;
+	struct drm_crtc *crtc;
+	struct drm_crtc_state *crtc_state;
+	struct drm_connector *connector;
+	struct drm_connector_state *connector_state;
+	struct drm_private_obj *obj;
+	struct drm_private_state *obj_state;
+	int i;
+
+	if (!p) {
+		drm_err(state->dev, "invalid drm printer\n");
+		return;
+	}
+
+	drm_dbg_atomic(state->dev, "checking %p\n", state);
+
+	for_each_old_plane_in_state(state, plane, plane_state, i)
+		drm_atomic_plane_print_state(p, plane_state);
+
+	for_each_old_crtc_in_state(state, crtc, crtc_state, i)
+		drm_atomic_crtc_print_state(p, crtc_state);
+
+	for_each_old_connector_in_state(state, connector, connector_state, i)
+		drm_atomic_connector_print_state(p, connector_state);
+
+	for_each_old_private_obj_in_state(state, obj, obj_state, i)
+		drm_atomic_private_obj_print_state(p, obj_state);
+}
+EXPORT_SYMBOL(drm_atomic_print_old_state);
+
 static void __drm_state_dump(struct drm_device *dev, struct drm_printer *p,
 			     bool take_locks)
 {

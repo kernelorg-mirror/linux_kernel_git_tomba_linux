@@ -283,6 +283,20 @@ struct drm_private_state_funcs {
 				     struct drm_private_state *state);
 
 	/**
+	 * @atomic_compare_state
+	 *
+	 * Compares two &struct drm_private_state instances.
+	 *
+	 * RETURNS:
+	 *
+	 * True if the states are identical, false otherwise.
+	 */
+	bool (*atomic_compare_state)(struct drm_private_obj *obj,
+				     struct drm_printer *p,
+				     struct drm_private_state *a,
+				     struct drm_private_state *b);
+
+	/**
 	 * @atomic_print_state:
 	 *
 	 * If driver subclasses &struct drm_private_state, it should implement

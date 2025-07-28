@@ -397,6 +397,20 @@ struct drm_bridge_funcs {
 				    struct drm_connector_state *conn_state);
 
 	/**
+	 * @atomic_compare_state
+	 *
+	 * Compares two &struct drm_bridge_state instances.
+	 *
+	 * RETURNS:
+	 *
+	 * True if the states are identical, false otherwise.
+	 */
+	bool (*atomic_compare_state)(struct drm_bridge *bridge,
+				     struct drm_printer *p,
+				     struct drm_bridge_state *a,
+				     struct drm_bridge_state *b);
+
+	/**
 	 * @atomic_duplicate_state:
 	 *
 	 * Duplicate the current bridge state object (which is guaranteed to be

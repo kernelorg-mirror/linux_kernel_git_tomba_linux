@@ -690,6 +690,20 @@ struct drm_crtc_funcs {
 				     struct drm_crtc_state *state);
 
 	/**
+	 * @atomic_compare_state
+	 *
+	 * Compares two &struct drm_crtc_state instances.
+	 *
+	 * RETURNS:
+	 *
+	 * True if the states are identical, false otherwise.
+	 */
+	bool (*atomic_compare_state)(struct drm_crtc *crtc,
+				     struct drm_printer *p,
+				     struct drm_crtc_state *a,
+				     struct drm_crtc_state *b);
+
+	/**
 	 * @atomic_set_property:
 	 *
 	 * Decode a driver-private property value and store the decoded value

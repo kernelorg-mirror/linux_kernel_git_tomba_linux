@@ -1582,6 +1582,20 @@ struct drm_connector_funcs {
 				     struct drm_connector_state *state);
 
 	/**
+	 * @atomic_compare_state
+	 *
+	 * Compares two &struct drm_connector_state instances.
+	 *
+	 * RETURNS:
+	 *
+	 * True if the states are identical, false otherwise.
+	 */
+	bool (*atomic_compare_state)(struct drm_connector *connector,
+				     struct drm_printer *p,
+				     struct drm_connector_state *a,
+				     struct drm_connector_state *b);
+
+	/**
 	 * @atomic_set_property:
 	 *
 	 * Decode a driver-private property value and store the decoded value

@@ -440,6 +440,21 @@ void drm_bridge_remove(struct drm_bridge *bridge)
 }
 EXPORT_SYMBOL(drm_bridge_remove);
 
+static bool drm_bridge_atomic_compare_priv_state(struct drm_private_obj *obj,
+						 struct drm_printer *p,
+						 struct drm_private_state *a,
+						 struct drm_private_state *b)
+{
+	struct drm_bridge *bridge = drm_priv_to_bridge(obj);
+	struct drm_bridge_state *state_a = drm_priv_to_bridge_state(a);
+	struct drm_bridge_state *state_b = drm_priv_to_bridge_state(b);
+
+	if (bridge->funcs->atomic_compare_state)
+		return bridge->funcs->atomic_compare_state(bridge, p, state_a, state_b);
+	else
+		return false;
+}
+
 static struct drm_private_state *
 drm_bridge_atomic_duplicate_priv_state(struct drm_private_obj *obj)
 {
@@ -481,6 +496,7 @@ drm_bridge_atomic_print_priv_state(struct drm_printer *p,
 }
 
 static const struct drm_private_state_funcs drm_bridge_priv_state_funcs = {
+	.atomic_compare_state = drm_bridge_atomic_compare_priv_state,
 	.atomic_duplicate_state = drm_bridge_atomic_duplicate_priv_state,
 	.atomic_destroy_state = drm_bridge_atomic_destroy_priv_state,
 	.atomic_print_state = drm_bridge_atomic_print_priv_state,

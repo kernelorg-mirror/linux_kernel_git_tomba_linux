@@ -41,19 +41,18 @@
 
 struct xvip_dma_format {
 	unsigned int code;
-	unsigned int bpp;
 	u32 fourcc;
 };
 
 static const struct xvip_dma_format xvip_dma_video_formats[] = {
-	{ MEDIA_BUS_FMT_UYVY8_1X16, 2, V4L2_PIX_FMT_YUYV },
-	{ MEDIA_BUS_FMT_VUY8_1X24, 3, V4L2_PIX_FMT_YUV24 },
-	{ MEDIA_BUS_FMT_Y8_1X8, 1, V4L2_PIX_FMT_GREY },
-	{ MEDIA_BUS_FMT_SRGGB8_1X8, 1, V4L2_PIX_FMT_SRGGB8 },
-	{ MEDIA_BUS_FMT_SGRBG8_1X8, 1, V4L2_PIX_FMT_SGRBG8 },
-	{ MEDIA_BUS_FMT_SGBRG8_1X8, 1, V4L2_PIX_FMT_SGBRG8 },
-	{ MEDIA_BUS_FMT_SBGGR8_1X8, 1, V4L2_PIX_FMT_SBGGR8 },
-	{ MEDIA_BUS_FMT_Y12_1X12, 2, V4L2_PIX_FMT_Y12 },
+	{ MEDIA_BUS_FMT_UYVY8_1X16, V4L2_PIX_FMT_YUYV },
+	{ MEDIA_BUS_FMT_VUY8_1X24, V4L2_PIX_FMT_YUV24 },
+	{ MEDIA_BUS_FMT_Y8_1X8, V4L2_PIX_FMT_GREY },
+	{ MEDIA_BUS_FMT_SRGGB8_1X8, V4L2_PIX_FMT_SRGGB8 },
+	{ MEDIA_BUS_FMT_SGRBG8_1X8, V4L2_PIX_FMT_SGRBG8 },
+	{ MEDIA_BUS_FMT_SGBRG8_1X8, V4L2_PIX_FMT_SGBRG8 },
+	{ MEDIA_BUS_FMT_SBGGR8_1X8, V4L2_PIX_FMT_SBGGR8 },
+	{ MEDIA_BUS_FMT_Y12_1X12, V4L2_PIX_FMT_Y12 },
 };
 
 static const struct xvip_dma_format *xvip_dma_get_format_by_fourcc(u32 fourcc)
@@ -343,6 +342,8 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 {
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
 	struct xvip_dma *dma = vb2_get_drv_priv(vb->vb2_queue);
+	const struct v4l2_format_info *finfo =
+		v4l2_format_info(dma->format.pixelformat);
 	struct xvip_dma_buffer *buf = to_xvip_dma_buffer(vbuf);
 	struct dma_async_tx_descriptor *desc;
 	dma_addr_t addr = vb2_dma_contig_plane_dma_addr(vb, 0);
@@ -365,7 +366,7 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 	}
 
 	xt->frame_size = 1;
-	xt->sgl[0].size = dma->format.width * dma->fmtinfo->bpp;
+	xt->sgl[0].size = dma->format.width * finfo->bpp[0] / finfo->bpp_div[0];
 	xt->sgl[0].icg = dma->format.bytesperline - xt->sgl[0].size;
 	xt->numf = dma->format.height;
 
@@ -539,6 +540,7 @@ static void
 __xvip_dma_try_format(struct xvip_dma *dma, struct v4l2_pix_format *pix,
 		      const struct xvip_dma_format **fmtinfo)
 {
+	const struct v4l2_format_info *finfo;
 	const struct xvip_dma_format *info;
 	unsigned int min_width_bytes;
 	unsigned int max_width_bytes;
@@ -554,6 +556,7 @@ __xvip_dma_try_format(struct xvip_dma *dma, struct v4l2_pix_format *pix,
 	info = xvip_dma_get_format_by_fourcc(pix->pixelformat);
 	if (!info)
 		info = xvip_dma_get_format_by_fourcc(V4L2_PIX_FMT_YUYV);
+	finfo = v4l2_format_info(info->fourcc);
 
 	pix->pixelformat = info->fourcc;
 	pix->field = V4L2_FIELD_NONE;
@@ -562,17 +565,19 @@ __xvip_dma_try_format(struct xvip_dma *dma, struct v4l2_pix_format *pix,
 	 * the minimum and maximum values, clamp the requested width and convert
 	 * it back to pixels.
 	 */
-	align_bytes = lcm(dma->align, info->bpp);
+	align_bytes = lcm(dma->align, finfo->bpp[0]);
 	min_width_bytes = roundup(XVIP_DMA_MIN_WIDTH, align_bytes);
 	max_width_bytes = rounddown(XVIP_DMA_MAX_WIDTH, align_bytes);
-	width_bytes = rounddown(pix->width * info->bpp, align_bytes);
+	width_bytes = pix->width * finfo->bpp[0] / finfo->bpp_div[0];
+	width_bytes = rounddown(width_bytes, align_bytes);
 
-	pix->width = clamp(width_bytes, min_width_bytes, max_width_bytes) / info->bpp;
+	pix->width = clamp(width_bytes, min_width_bytes, max_width_bytes) *
+		     finfo->bpp_div[0] / finfo->bpp[0];
 	pix->height = clamp(pix->height, XVIP_DMA_MIN_HEIGHT,
 			    XVIP_DMA_MAX_HEIGHT);
 
 	/* Clamp the requested bytes per line value. */
-	min_bytesperline = pix->width * info->bpp;
+	min_bytesperline = pix->width * finfo->bpp[0] / finfo->bpp_div[0];
 	max_bytesperline = rounddown(XVIP_DMA_MAX_WIDTH, dma->align);
 	bytesperline = rounddown(pix->bytesperline, dma->align);
 

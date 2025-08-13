@@ -121,7 +121,7 @@ struct xvip_video_format {
 
 const struct xvip_video_format *xvip_get_format_by_code(unsigned int code);
 const struct xvip_video_format *xvip_get_format_by_fourcc(u32 fourcc);
-const struct xvip_video_format *xvip_of_get_format(struct device_node *node);
+const struct xvip_video_format *xvip_fwnode_get_format(struct fwnode_handle *fwnode);
 void xvip_set_format_size(struct v4l2_mbus_framefmt *format,
 			  const struct v4l2_subdev_format *fmt);
 int xvip_enum_mbus_code(struct v4l2_subdev *subdev,

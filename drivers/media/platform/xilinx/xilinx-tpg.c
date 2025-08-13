@@ -719,7 +719,7 @@ static int xtpg_parse_of(struct xtpg_device *xtpg)
 		const struct xvip_video_format *format;
 		struct device_node *endpoint;
 
-		format = xvip_of_get_format(port);
+		format = xvip_fwnode_get_format(of_fwnode_handle(port));
 		if (IS_ERR(format)) {
 			dev_err(dev, "invalid format in DT");
 			return PTR_ERR(format);

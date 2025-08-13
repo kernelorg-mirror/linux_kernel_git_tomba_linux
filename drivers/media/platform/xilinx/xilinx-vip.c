@@ -12,7 +12,7 @@
 #include <linux/clk.h>
 #include <linux/export.h>
 #include <linux/kernel.h>
-#include <linux/of.h>
+#include <linux/property.h>
 #include <linux/platform_device.h>
 
 #include <dt-bindings/media/xilinx-vip.h>
@@ -91,17 +91,17 @@ const struct xvip_video_format *xvip_get_format_by_fourcc(u32 fourcc)
 EXPORT_SYMBOL_GPL(xvip_get_format_by_fourcc);
 
 /**
- * xvip_of_get_format - Parse a device tree node and return format information
- * @node: the device tree node
+ * xvip_fwnode_get_format - Parse a fwnode and return format information
+ * @fwnode: the firmware node
  *
  * Read the xlnx,video-format, xlnx,video-width and xlnx,cfa-pattern properties
- * from the device tree @node passed as an argument and return the corresponding
+ * from the firmware node @fwnode passed as an argument and return the corresponding
  * format information.
  *
  * Return: a pointer to the format information structure corresponding to the
  * format name and width, or ERR_PTR if no corresponding format can be found.
  */
-const struct xvip_video_format *xvip_of_get_format(struct device_node *node)
+const struct xvip_video_format *xvip_fwnode_get_format(struct fwnode_handle *fwnode)
 {
 	const char *pattern = "mono";
 	unsigned int vf_code;
@@ -109,16 +109,16 @@ const struct xvip_video_format *xvip_of_get_format(struct device_node *node)
 	u32 width;
 	int ret;
 
-	ret = of_property_read_u32(node, "xlnx,video-format", &vf_code);
+	ret = fwnode_property_read_u32(fwnode, "xlnx,video-format", &vf_code);
 	if (ret < 0)
 		return ERR_PTR(ret);
 
-	ret = of_property_read_u32(node, "xlnx,video-width", &width);
+	ret = fwnode_property_read_u32(fwnode, "xlnx,video-width", &width);
 	if (ret < 0)
 		return ERR_PTR(ret);
 
 	if (vf_code == XVIP_VF_MONO_SENSOR)
-		of_property_read_string(node, "xlnx,cfa-pattern", &pattern);
+		fwnode_property_read_string(fwnode, "xlnx,cfa-pattern", &pattern);
 
 	for (i = 0; i < ARRAY_SIZE(xvip_video_formats); ++i) {
 		const struct xvip_video_format *format = &xvip_video_formats[i];
@@ -135,7 +135,7 @@ const struct xvip_video_format *xvip_of_get_format(struct device_node *node)
 
 	return ERR_PTR(-EINVAL);
 }
-EXPORT_SYMBOL_GPL(xvip_of_get_format);
+EXPORT_SYMBOL_GPL(xvip_fwnode_get_format);
 
 /**
  * xvip_set_format_size - Set the media bus frame format size

@@ -13,9 +13,8 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
-#include <linux/of.h>
-#include <linux/of_irq.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/v4l2-subdev.h>
 #include <media/media-entity.h>
 #include <media/mipi-csi2.h>
@@ -796,11 +795,9 @@ static const struct v4l2_subdev_internal_ops xcsi2rxss_internal_ops = {
 	.init_state = xcsi2rxss_init_state,
 };
 
-static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
+static int xcsi2rxss_parse_properties(struct xcsi2rxss_state *xcsi2rxss)
 {
 	struct device *dev = xcsi2rxss->dev;
-	struct device_node *node = dev->of_node;
-
 	struct fwnode_handle *ep;
 	struct v4l2_fwnode_endpoint vep = {
 		.bus_type = V4L2_MBUS_CSI2_DPHY
@@ -808,15 +805,15 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 	bool en_csi_v20, vfb;
 	int ret;
 
-	en_csi_v20 = of_property_read_bool(node, "xlnx,en-csi-v2-0");
+	en_csi_v20 = device_property_read_bool(dev, "xlnx,en-csi-v2-0");
 	if (en_csi_v20)
-		xcsi2rxss->en_vcx = of_property_read_bool(node, "xlnx,en-vcx");
+		xcsi2rxss->en_vcx = device_property_read_bool(dev, "xlnx,en-vcx");
 
 	xcsi2rxss->enable_active_lanes =
-		of_property_read_bool(node, "xlnx,en-active-lanes");
+		device_property_read_bool(dev, "xlnx,en-active-lanes");
 
-	ret = of_property_read_u32(node, "xlnx,csi-pxl-format",
-				   &xcsi2rxss->datatype);
+	ret = device_property_read_u32(dev, "xlnx,csi-pxl-format",
+				       &xcsi2rxss->datatype);
 	if (ret < 0) {
 		dev_err(dev, "missing xlnx,csi-pxl-format property\n");
 		return ret;
@@ -852,7 +849,7 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 		return ret;
 	}
 
-	vfb = of_property_read_bool(node, "xlnx,vfb");
+	vfb = device_property_read_bool(dev, "xlnx,vfb");
 	if (!vfb) {
 		dev_err(dev, "operation without VFB is not supported\n");
 		return -EINVAL;
@@ -923,7 +920,7 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, PTR_ERR(xcsi2rxss->rst_gpio),
 				     "Video Reset GPIO not setup in DT\n");
 
-	ret = xcsi2rxss_parse_of(xcsi2rxss);
+	ret = xcsi2rxss_parse_properties(xcsi2rxss);
 	if (ret < 0)
 		return ret;
 

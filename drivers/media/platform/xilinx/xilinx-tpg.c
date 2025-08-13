@@ -12,9 +12,8 @@
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
-#include <linux/of.h>
-#include <linux/of_graph.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/xilinx-v4l2-controls.h>
 
 #include <media/v4l2-async.h>
@@ -708,21 +707,31 @@ static int __maybe_unused xtpg_pm_resume(struct device *dev)
  * Platform Device Driver
  */
 
-static int xtpg_parse_of(struct xtpg_device *xtpg)
+static int xtpg_parse_ports(struct xtpg_device *xtpg)
 {
 	struct device *dev = xtpg->xvip.dev;
-	struct device_node *node = xtpg->xvip.dev->of_node;
+	struct fwnode_handle *ports;
+	struct fwnode_handle *port;
 	unsigned int nports = 0;
 	bool has_endpoint = false;
+	int ret = 0;
 
-	for_each_of_graph_port(node, port) {
+	ports = device_get_named_child_node(dev, "ports");
+	if (!ports) {
+		dev_err(dev, "ports node not present");
+		return -EINVAL;
+	}
+
+	fwnode_for_each_child_node(ports, port) {
 		const struct xvip_video_format *format;
-		struct device_node *endpoint;
+		struct fwnode_handle *endpoint;
 
-		format = xvip_fwnode_get_format(of_fwnode_handle(port));
+		format = xvip_fwnode_get_format(port);
 		if (IS_ERR(format)) {
 			dev_err(dev, "invalid format in DT");
-			return PTR_ERR(format);
+			ret = PTR_ERR(format);
+			fwnode_handle_put(port);
+			goto out;
 		}
 
 		/* Get and check the format description */
@@ -730,14 +739,17 @@ static int xtpg_parse_of(struct xtpg_device *xtpg)
 			xtpg->vip_format = format;
 		} else if (xtpg->vip_format != format) {
 			dev_err(dev, "in/out format mismatch in DT");
-			return -EINVAL;
+			ret = -EINVAL;
+			fwnode_handle_put(port);
+			goto out;
 		}
 
 		if (nports == 0) {
-			endpoint = of_graph_get_next_port_endpoint(port, NULL);
-			if (endpoint)
+			endpoint = fwnode_graph_get_next_endpoint(port, NULL);
+			if (endpoint) {
 				has_endpoint = true;
-			of_node_put(endpoint);
+				fwnode_handle_put(endpoint);
+			}
 		}
 
 		/* Count the number of ports. */
@@ -746,14 +758,17 @@ static int xtpg_parse_of(struct xtpg_device *xtpg)
 
 	if (nports != 1 && nports != 2) {
 		dev_err(dev, "invalid number of ports %u\n", nports);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
 
 	xtpg->npads = nports;
 	if (nports == 2 && has_endpoint)
 		xtpg->has_input = true;
 
-	return 0;
+out:
+	fwnode_handle_put(ports);
+	return ret;
 }
 
 static int xtpg_probe(struct platform_device *pdev)
@@ -769,7 +784,7 @@ static int xtpg_probe(struct platform_device *pdev)
 
 	xtpg->xvip.dev = &pdev->dev;
 
-	ret = xtpg_parse_of(xtpg);
+	ret = xtpg_parse_ports(xtpg);
 	if (ret < 0)
 		return ret;
 

@@ -11,8 +11,8 @@
 
 #include <linux/clk.h>
 #include <linux/module.h>
-#include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/slab.h>
 
 #include "xilinx-vip.h"
@@ -248,36 +248,36 @@ int xvtc_generator_stop(struct xvtc_device *xvtc)
 }
 EXPORT_SYMBOL_GPL(xvtc_generator_stop);
 
-struct xvtc_device *xvtc_of_get(struct device_node *np)
+struct xvtc_device *xvtc_fwnode_get(struct fwnode_handle *fwnode)
 {
-	struct device_node *xvtc_node;
+	struct fwnode_handle *xvtc_fwnode;
 	struct xvtc_device *found = NULL;
 	struct xvtc_device *xvtc;
 
-	if (!of_property_present(np, "xlnx,vtc"))
+	if (!fwnode_property_present(fwnode, "xlnx,vtc"))
 		return NULL;
 
-	xvtc_node = of_parse_phandle(np, "xlnx,vtc", 0);
-	if (xvtc_node == NULL)
+	xvtc_fwnode = fwnode_find_reference(fwnode, "xlnx,vtc", 0);
+	if (IS_ERR(xvtc_fwnode))
 		return ERR_PTR(-EINVAL);
 
 	mutex_lock(&xvtc_lock);
 	list_for_each_entry(xvtc, &xvtc_list, list) {
-		if (xvtc->xvip.dev->of_node == xvtc_node) {
+		if (dev_fwnode(xvtc->xvip.dev) == xvtc_fwnode) {
 			found = xvtc;
 			break;
 		}
 	}
 	mutex_unlock(&xvtc_lock);
 
-	of_node_put(xvtc_node);
+	fwnode_handle_put(xvtc_fwnode);
 
 	if (!found)
 		return ERR_PTR(-EPROBE_DEFER);
 
 	return found;
 }
-EXPORT_SYMBOL_GPL(xvtc_of_get);
+EXPORT_SYMBOL_GPL(xvtc_fwnode_get);
 
 void xvtc_put(struct xvtc_device *xvtc)
 {
@@ -306,16 +306,6 @@ static void xvtc_unregister_device(struct xvtc_device *xvtc)
  * Platform Device Driver
  */
 
-static int xvtc_parse_of(struct xvtc_device *xvtc)
-{
-	struct device_node *node = xvtc->xvip.dev->of_node;
-
-	xvtc->has_detector = of_property_read_bool(node, "xlnx,detector");
-	xvtc->has_generator = of_property_read_bool(node, "xlnx,generator");
-
-	return 0;
-}
-
 static int xvtc_probe(struct platform_device *pdev)
 {
 	struct xvtc_device *xvtc;
@@ -327,9 +317,10 @@ static int xvtc_probe(struct platform_device *pdev)
 
 	xvtc->xvip.dev = &pdev->dev;
 
-	ret = xvtc_parse_of(xvtc);
-	if (ret < 0)
-		return ret;
+	xvtc->has_detector = device_property_read_bool(xvtc->xvip.dev,
+						       "xlnx,detector");
+	xvtc->has_generator = device_property_read_bool(xvtc->xvip.dev,
+							"xlnx,generator");
 
 	ret = xvip_init_resources(&xvtc->xvip);
 	if (ret < 0)

@@ -13,6 +13,7 @@
 #define __XILINX_VTC_H__
 
 struct device_node;
+struct fwnode_handle;
 struct xvtc_device;
 
 #define XVTC_MAX_HSIZE			8191
@@ -30,6 +31,7 @@ struct xvtc_config {
 };
 
 struct xvtc_device *xvtc_of_get(struct device_node *np);
+struct xvtc_device *xvtc_fwnode_get(struct fwnode_handle *fwnode);
 void xvtc_put(struct xvtc_device *xvtc);
 
 int xvtc_generator_start(struct xvtc_device *xvtc,

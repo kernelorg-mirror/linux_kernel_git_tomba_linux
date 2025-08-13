@@ -784,7 +784,7 @@ static int xtpg_probe(struct platform_device *pdev)
 		goto error_resource;
 	}
 
-	xtpg->vtc = xvtc_of_get(pdev->dev.of_node);
+	xtpg->vtc = xvtc_fwnode_get(dev_fwnode(&pdev->dev));
 	if (IS_ERR(xtpg->vtc)) {
 		ret = PTR_ERR(xtpg->vtc);
 		goto error_resource;

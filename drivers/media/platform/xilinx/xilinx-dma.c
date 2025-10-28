@@ -333,26 +333,28 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 	dma_addr_t addr = vb2_dma_contig_plane_dma_addr(vb, 0);
 	u32 flags;
 
+	DEFINE_RAW_FLEX(struct dma_interleaved_template, xt, sgl, 1);
+
 	if (dma->queue.type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
 		flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
-		dma->xt.dir = DMA_DEV_TO_MEM;
-		dma->xt.src_sgl = false;
-		dma->xt.dst_sgl = true;
-		dma->xt.dst_start = addr;
+		xt->dir = DMA_DEV_TO_MEM;
+		xt->src_sgl = false;
+		xt->dst_sgl = true;
+		xt->dst_start = addr;
 	} else {
 		flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
-		dma->xt.dir = DMA_MEM_TO_DEV;
-		dma->xt.src_sgl = true;
-		dma->xt.dst_sgl = false;
-		dma->xt.src_start = addr;
+		xt->dir = DMA_MEM_TO_DEV;
+		xt->src_sgl = true;
+		xt->dst_sgl = false;
+		xt->src_start = addr;
 	}
 
-	dma->xt.frame_size = 1;
-	dma->sgl.size = dma->format.width * dma->fmtinfo->bpp;
-	dma->sgl.icg = dma->format.bytesperline - dma->sgl.size;
-	dma->xt.numf = dma->format.height;
+	xt->frame_size = 1;
+	xt->sgl[0].size = dma->format.width * dma->fmtinfo->bpp;
+	xt->sgl[0].icg = dma->format.bytesperline - xt->sgl[0].size;
+	xt->numf = dma->format.height;
 
-	desc = dmaengine_prep_interleaved_dma(dma->dma, &dma->xt, flags);
+	desc = dmaengine_prep_interleaved_dma(dma->dma, xt, flags);
 	if (!desc) {
 		dev_err(dma->xdev->dev, "Failed to prepare DMA transfer\n");
 		vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_ERROR);

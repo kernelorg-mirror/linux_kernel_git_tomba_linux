@@ -15,44 +15,49 @@ description: |
   device and the other IP block is used for writing video frame data from
   the device to memory (FB Write). Both the FB Read/Write IP blocks are
   aware of the format of the data being written to or read from memory
-  including RGB and YUV in packed, planar, and semi-planar formats. Because
-  the FB Read/Write is format aware, only one buffer pointer is needed by
-  the IP blocks even when planar or semi-planar format are used.
+  including RGB and YUV in packed, planar, and semi-planar formats.
 
   Video Format Mapping:
-  The xlnx,vid-formats property uses string values that map to V4L2 and DRM
-  fourcc codes as follows:
+  The xlnx,vid-formats property uses string values corresponding to the
+  hardware format IDs. The table below lists the supported formats. See
+  Xilinx's "Video Frame Buffer Read and Video Frame Buffer Write LogiCORE IP
+  Product Guide (PG278 (v3.0) May 29, 2025)" for descriptions of the formats.
 
-  IP FORMAT    DTS String      V4L2 Fourcc             DRM Fourcc
-  -----------  --------------  ----------------------  ---------------------
-  RGB8         bgr888          V4L2_PIX_FMT_RGB24      DRM_FORMAT_BGR888
-  BGR8         rgb888          V4L2_PIX_FMT_BGR24      DRM_FORMAT_RGB888
-  RGBX8        xbgr8888        V4L2_PIX_FMT_BGRX32     DRM_FORMAT_XBGR8888
-  RGBA8        abgr8888        <not supported>         DRM_FORMAT_ABGR8888
-  BGRA8        argb8888        <not supported>         DRM_FORMAT_ARGB8888
-  BGRX8        xrgb8888        V4L2_PIX_FMT_XBGR32     DRM_FORMAT_XRGB8888
-  RGBX10       xbgr2101010     V4L2_PIX_FMT_XBGR30     DRM_FORMAT_XBGR2101010
-  RGBX12       xbgr2121212     V4L2_PIX_FMT_XBGR40     <not supported>
-  RGBX16       rgb16           V4L2_PIX_FMT_BGR40      <not supported>
-  YUV8         vuy888          V4L2_PIX_FMT_VUY24      DRM_FORMAT_VUY888
-  YUVX8        xvuy8888        V4L2_PIX_FMT_XVUY32     DRM_FORMAT_XVUY8888
-  Y_U_V8       y_u_v8          V4L2_PIX_FMT_YUV444P    DRM_FORMAT_YUV444
-  Y_U_V8       y_u_v8          V4L2_PIX_FMT_YUV444M    DRM_FORMAT_YUV444
-  Y_U_V10      y_u_v10         V4L2_PIX_FMT_X403       DRM_FORMAT_X403
-  YUYV8        yuyv            V4L2_PIX_FMT_YUYV       DRM_FORMAT_YUYV
-  UYVY8        uyvy            V4L2_PIX_FMT_UYVY       DRM_FORMAT_UYVY
-  YUVA8        avuy8888        <not supported>         DRM_FORMAT_AVUY
-  YUVX10       yuvx2101010     V4L2_PIX_FMT_XVUY10     DRM_FORMAT_XVUY2101010
-  Y8           y8              V4L2_PIX_FMT_GREY       DRM_FORMAT_Y8
-  Y10          y10             V4L2_PIX_FMT_XY10       DRM_FORMAT_Y10
-  Y_UV8        nv16            V4L2_PIX_FMT_NV16       DRM_FORMAT_NV16
-  Y_UV8        nv16            V4L2_PIX_FMT_NV16M      DRM_FORMAT_NV16
-  Y_UV8_420    nv12            V4L2_PIX_FMT_NV12       DRM_FORMAT_NV12
-  Y_UV8_420    nv12            V4L2_PIX_FMT_NV12M      DRM_FORMAT_NV12
-  Y_UV10       xv20            V4L2_PIX_FMT_XV20M      DRM_FORMAT_XV20
-  Y_UV10       xv20            V4L2_PIX_FMT_XV20       <not supported>
-  Y_UV10_420   xv15            V4L2_PIX_FMT_XV15M      DRM_FORMAT_XV15
-  Y_UV10_420   xv15            V4L2_PIX_FMT_XV20       <not supported>
+  IP Format    BPC  Format ID  DTS String      Notes
+  -----------  ---  ---------  --------------  ----------------------------------
+  Y8           8    24         y8
+  RGB8         8    20         bgr888
+  BGR8         8    29         rgb888
+  YUV8         8    21         vuy888
+  RGBX8        8    10         xbgr8888
+  BGRX8        8    27         xrgb8888
+  YUVX8        8    11         xvuy8888
+  YUYV8        8    12         yuyv
+  UYVY8        8    28         uyvy
+  RGBA8        8    13         abgr8888        FB Read only
+  BGRA8        8    26         argb8888        FB Read only
+  YUVA8        8    14         avuy8888        FB Read only
+  Y_UV8        8    18         nv16
+  Y_UV8_420    8    19         nv12
+  Y_U_V8       8    42         y_u_v8
+  Y_U_V8_420   8    41         TBD
+  XY10         10   25         y10
+  Y_UV10       10   22         xv20
+  Y_UV10_420   10   23         xv15
+  RGBX10       10   15         xbgr2101010
+  YUVX10       10   16         yuvx2101010
+  Y_U_V10      10   43         TBD
+  Y12          12   34         TBD
+  Y_UV12       12   32         TBD
+  Y_UV12_420   12   33         TBD
+  RGBX12       12   30         xbgr2121212
+  YUVX12       12   31         TBD
+  Y_U_V12      12   44         TBD
+  Y16          16   39         TBD
+  Y_UV16       16   37         TBD
+  Y_UV16_420   16   38         TBD
+  RGB16        16   35         rgb16
+  YUV16        16   36         TBD
 
 allOf:
   - $ref: ../dma-controller.yaml#
@@ -148,6 +153,8 @@ examples:
     v_frmbuf_rd_0: dma-controller@80000000 {
         #dma-cells = <1>;
         compatible = "xlnx,axi-frmbuf-rd-v2.1";
+        clocks = <&vid_stream_clk>;
+        clock-names = "ap_clk";
         interrupt-parent = <&gic>;
         interrupts = <0 92 4>;
         reset-gpios = <&gpio 80 GPIO_ACTIVE_HIGH>;
@@ -158,8 +165,6 @@ examples:
         xlnx,dma-align = <8>;
         xlnx,max-width = <3840>;
         xlnx,max-height = <2160>;
-        clocks = <&vid_stream_clk>;
-        clock-names = "ap_clk";
     };
 
   - |
@@ -168,6 +173,8 @@ examples:
     v_frmbuf_wr_0: dma-controller@80010000 {
         #dma-cells = <1>;
         compatible = "xlnx,axi-frmbuf-wr-v2.1";
+        clocks = <&vid_stream_clk>;
+        clock-names = "ap_clk";
         interrupt-parent = <&gic>;
         interrupts = <0 93 4>;
         reset-gpios = <&gpio 80 GPIO_ACTIVE_HIGH>;
@@ -178,6 +185,4 @@ examples:
         xlnx,dma-align = <16>;
         xlnx,max-width = <3840>;
         xlnx,max-height = <2160>;
-        clocks = <&vid_stream_clk>;
-        clock-names = "ap_clk";
     };

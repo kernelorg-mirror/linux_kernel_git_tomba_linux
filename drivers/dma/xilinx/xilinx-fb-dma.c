@@ -185,8 +185,6 @@ enum xilinx_fb_dma_fid_modes {
  * @num_planes: Expected number of plane buffers in framebuffer for this format
  * @drm_fmt: DRM video framework equivalent fourcc code
  * @v4l2_fmt: Video 4 Linux framework equivalent fourcc code
- * @fmt_bitmask: Flag identifying this format in device-specific "enabled"
- *	bitmap
  */
 struct xilinx_fb_dma_format_desc {
 	const char *dts_name;
@@ -196,7 +194,6 @@ struct xilinx_fb_dma_format_desc {
 	u32 num_planes;
 	u32 drm_fmt;
 	u32 v4l2_fmt;
-	u32 fmt_bitmask;
 };
 
 static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
@@ -208,7 +205,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = DRM_FORMAT_XBGR8888,
 		.v4l2_fmt = V4L2_PIX_FMT_RGBX32,
-		.fmt_bitmask = BIT(0),
 	},
 	{
 		.dts_name = "xbgr2101010",
@@ -218,7 +214,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = DRM_FORMAT_XBGR2101010,
 		.v4l2_fmt = 0,
-		.fmt_bitmask = BIT(1),
 	},
 	{
 		.dts_name = "xrgb8888",
@@ -228,7 +223,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = DRM_FORMAT_XRGB8888,
 		.v4l2_fmt = V4L2_PIX_FMT_XBGR32,
-		.fmt_bitmask = BIT(2),
 	},
 	{
 		.dts_name = "xvuy8888",
@@ -238,7 +232,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = DRM_FORMAT_XVUY8888,
 		.v4l2_fmt = V4L2_PIX_FMT_YUVX32,
-		.fmt_bitmask = BIT(5),
 	},
 	{
 		.dts_name = "vuy888",
@@ -248,7 +241,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = DRM_FORMAT_VUY888,
 		.v4l2_fmt = V4L2_PIX_FMT_YUV24,
-		.fmt_bitmask = BIT(6),
 	},
 	{
 		.dts_name = "yuvx2101010",
@@ -258,7 +250,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = 0,
 		.v4l2_fmt = 0,
-		.fmt_bitmask = BIT(7),
 	},
 	{
 		.dts_name = "yuyv",
@@ -268,7 +259,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = DRM_FORMAT_YUYV,
 		.v4l2_fmt = V4L2_PIX_FMT_YUYV,
-		.fmt_bitmask = BIT(8),
 	},
 	{
 		.dts_name = "uyvy",
@@ -278,7 +268,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = DRM_FORMAT_UYVY,
 		.v4l2_fmt = V4L2_PIX_FMT_UYVY,
-		.fmt_bitmask = BIT(9),
 	},
 	{
 		.dts_name = "nv16",
@@ -288,7 +277,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 2,
 		.drm_fmt = DRM_FORMAT_NV16,
 		.v4l2_fmt = V4L2_PIX_FMT_NV16M,
-		.fmt_bitmask = BIT(11),
 	},
 	{
 		.dts_name = "nv16",
@@ -298,7 +286,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 2,
 		.drm_fmt = 0,
 		.v4l2_fmt = V4L2_PIX_FMT_NV16,
-		.fmt_bitmask = BIT(11),
 	},
 	{
 		.dts_name = "nv12",
@@ -308,7 +295,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 2,
 		.drm_fmt = DRM_FORMAT_NV12,
 		.v4l2_fmt = V4L2_PIX_FMT_NV12M,
-		.fmt_bitmask = BIT(12),
 	},
 	{
 		.dts_name = "nv12",
@@ -318,7 +304,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 2,
 		.drm_fmt = 0,
 		.v4l2_fmt = V4L2_PIX_FMT_NV12,
-		.fmt_bitmask = BIT(12),
 	},
 	{
 		.dts_name = "xv15",
@@ -328,7 +313,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 2,
 		.drm_fmt = 0,
 		.v4l2_fmt = 0,
-		.fmt_bitmask = BIT(13),
 	},
 	{
 		.dts_name = "xv15",
@@ -338,7 +322,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 2,
 		.drm_fmt = 0,
 		.v4l2_fmt = 0,
-		.fmt_bitmask = BIT(13),
 	},
 	{
 		.dts_name = "xv20",
@@ -348,7 +331,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 2,
 		.drm_fmt = 0,
 		.v4l2_fmt = 0,
-		.fmt_bitmask = BIT(14),
 	},
 	{
 		.dts_name = "xv20",
@@ -358,7 +340,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 2,
 		.drm_fmt = 0,
 		.v4l2_fmt = 0,
-		.fmt_bitmask = BIT(14),
 	},
 	{
 		.dts_name = "bgr888",
@@ -368,7 +349,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = DRM_FORMAT_BGR888,
 		.v4l2_fmt = V4L2_PIX_FMT_RGB24,
-		.fmt_bitmask = BIT(15),
 	},
 	{
 		.dts_name = "y8",
@@ -378,7 +358,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = 0,
 		.v4l2_fmt = V4L2_PIX_FMT_GREY,
-		.fmt_bitmask = BIT(16),
 	},
 	{
 		.dts_name = "y10",
@@ -388,7 +367,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = 0,
 		.v4l2_fmt = 0,
-		.fmt_bitmask = BIT(17),
 	},
 	{
 		.dts_name = "rgb888",
@@ -398,7 +376,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = DRM_FORMAT_RGB888,
 		.v4l2_fmt = V4L2_PIX_FMT_BGR24,
-		.fmt_bitmask = BIT(18),
 	},
 	{
 		.dts_name = "abgr8888",
@@ -408,7 +385,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = DRM_FORMAT_ABGR8888,
 		.v4l2_fmt = 0,
-		.fmt_bitmask = BIT(19),
 	},
 	{
 		.dts_name = "argb8888",
@@ -418,7 +394,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = DRM_FORMAT_ARGB8888,
 		.v4l2_fmt = 0,
-		.fmt_bitmask = BIT(20),
 	},
 	{
 		.dts_name = "avuy8888",
@@ -428,7 +403,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 1,
 		.drm_fmt = DRM_FORMAT_AVUY8888,
 		.v4l2_fmt = 0,
-		.fmt_bitmask = BIT(21),
 	},
 	{
 		.dts_name = "xbgr2121212",
@@ -437,7 +411,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.ppw = 1,
 		.num_planes = 1,
 		.v4l2_fmt = 0,
-		.fmt_bitmask = BIT(22),
 	},
 	{
 		.dts_name = "rgb16",
@@ -446,7 +419,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.ppw = 1,
 		.num_planes = 1,
 		.v4l2_fmt = V4L2_PIX_FMT_BGR48,
-		.fmt_bitmask = BIT(23),
 	},
 	{
 		.dts_name = "y_u_v8",
@@ -456,7 +428,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 3,
 		.v4l2_fmt = V4L2_PIX_FMT_YUV444M,
 		.drm_fmt = DRM_FORMAT_YUV444,
-		.fmt_bitmask = BIT(24),
 	},
 	{
 		.dts_name = "y_u_v8",
@@ -466,7 +437,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 3,
 		.v4l2_fmt = 0,
 		.drm_fmt = DRM_FORMAT_YUV444,
-		.fmt_bitmask = BIT(24),
 	},
 	{
 		.dts_name = "y_u_v10",
@@ -476,7 +446,6 @@ static const struct xilinx_fb_dma_format_desc xilinx_frmbuf_formats[] = {
 		.num_planes = 3,
 		.v4l2_fmt = 0,
 		.drm_fmt = 0,
-		.fmt_bitmask = BIT(25),
 	},
 };
 
@@ -537,7 +506,7 @@ struct xilinx_fb_dma_chan {
  * @common: DMA device structure
  * @chan: Driver specific dma channel
  * @rst_gpio: GPIO reset
- * @enabled_vid_fmts: Bitmask of video formats enabled in hardware
+ * @enabled_vid_fmts: Bitmask of video format IDs enabled in hardware
  * @drm_memory_fmts: Array of supported DRM fourcc codes
  * @drm_fmt_cnt: Count of supported DRM fourcc codes
  * @v4l2_memory_fmts: Array of supported V4L2 fourcc codes
@@ -555,7 +524,7 @@ struct xilinx_fb_dma_device {
 	struct xilinx_fb_dma_chan chan;
 	struct gpio_desc *rst_gpio;
 
-	u32 enabled_vid_fmts;
+	u64 enabled_vid_fmts;
 	u32 drm_memory_fmts[ARRAY_SIZE(xilinx_frmbuf_formats)];
 	u32 drm_fmt_cnt;
 	u32 v4l2_memory_fmts[ARRAY_SIZE(xilinx_frmbuf_formats)];
@@ -766,7 +735,7 @@ static void xilinx_fb_dma_init_format_array(struct xilinx_fb_dma_device *xdev)
 
 	for (i = 0; i < ARRAY_SIZE(xilinx_frmbuf_formats); i++) {
 		if (!(xdev->enabled_vid_fmts &
-		      xilinx_frmbuf_formats[i].fmt_bitmask))
+		      BIT_U64(xilinx_frmbuf_formats[i].id)))
 			continue;
 
 		if (xilinx_frmbuf_formats[i].drm_fmt) {
@@ -793,7 +762,7 @@ static int xilinx_fb_dma_verify_format(struct xilinx_fb_dma_chan *xil_chan,
 		     fourcc != xilinx_frmbuf_formats[i].v4l2_fmt))
 			continue;
 
-		if (!(xilinx_frmbuf_formats[i].fmt_bitmask &
+		if (!(BIT_U64(xilinx_frmbuf_formats[i].id) &
 		      xil_chan->xdev->enabled_vid_fmts)) {
 			return -EINVAL;
 		}
@@ -1705,7 +1674,7 @@ static int xilinx_fb_dma_probe(struct platform_device *pdev)
 				continue;
 
 			xdev->enabled_vid_fmts |=
-				xilinx_frmbuf_formats[j].fmt_bitmask;
+				BIT_U64(xilinx_frmbuf_formats[j].id);
 		}
 	}
 

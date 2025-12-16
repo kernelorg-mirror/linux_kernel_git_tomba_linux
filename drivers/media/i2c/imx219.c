@@ -1028,6 +1028,11 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 	 * Finally, update the formats on the sink and source sides of the
 	 * embedded data stream.
 	 */
+
+	// hack: emb needs to get the details from source pad
+	format = v4l2_subdev_state_get_format(state, IMX219_PAD_SOURCE,
+					      IMX219_STREAM_IMAGE);
+
 	ed_format = v4l2_subdev_state_get_format(state, IMX219_PAD_EDATA);
 	ed_format->code = imx219_get_format_edata(format->code);
 	ed_format->width = fmt->format.width;

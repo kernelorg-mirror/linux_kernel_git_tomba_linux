@@ -18,6 +18,7 @@ description: |
   internally routed to 2 OLDI TXes. The second video port supports DPI
   format. The first plane is full video plane with all features and the
   second is a "lite plane" without scaling support.
+
   The AM62L display subsystem has a single output port which supports DPI
   format but it only supports single video "lite plane" which does not support
   scaling. The output port is routed to SoC boundary via DPI interface and same
@@ -25,12 +26,18 @@ description: |
   SoC. Due to clocking limitations only one of the interface i.e. either DSI or
   DPI can be used at once.
 
+  TI's AM62P SoC contains two instances of the TI Display SubSystem (DSS),
+  each with two video ports (VP) and two video planes. The outputs from
+  the DSS VPs can be routed to two OLDI TXes (OLDI0, OLDI1), a DSI TX, or
+  parallel DPI output.
+
 properties:
   compatible:
     enum:
       - ti,am625-dss
       - ti,am62a7-dss
       - ti,am62l-dss
+      - ti,am62p-dss
       - ti,am65x-dss
 
   reg:

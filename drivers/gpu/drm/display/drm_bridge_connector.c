@@ -855,8 +855,8 @@ struct drm_connector *drm_bridge_connector_init(struct drm_device *drm,
 			connector->ycbcr_420_allowed = false;
 
 		if (bridge->ops & DRM_BRIDGE_OP_CONNECTOR_HW_READOUT) {
-			drm_bridge_put(bridge_connector->bridge_readout);
-			bridge_connector->bridge_readout = drm_bridge_get(bridge);
+			drm_bridge_put(bridge_connector->bridge_connector_hw_readout);
+			bridge_connector->bridge_connector_hw_readout = drm_bridge_get(bridge);
 		}
 		if (bridge->ops & DRM_BRIDGE_OP_EDID) {
 			drm_bridge_put(bridge_connector->bridge_edid);

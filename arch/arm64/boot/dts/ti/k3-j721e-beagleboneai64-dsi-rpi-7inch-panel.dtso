@@ -62,6 +62,7 @@
 	};
 
 	touch-controller@38 {
+		status = "disabled";
 		compatible = "edt,edt-ft5406";
 		reg = <0x38>;
 

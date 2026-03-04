@@ -422,12 +422,19 @@ err_state_put:
 void drm_atomic_helper_readout_state(struct drm_device *dev)
 {
 	struct drm_atomic_state *state;
+	struct drm_modeset_acquire_ctx ctx;
+	int err;
+
+	DRM_MODESET_LOCK_ALL_BEGIN(dev, ctx, 0, err);
 
 	state = drm_atomic_build_readout_state(dev);
 	if (IS_ERR(state))
 		return;
 
 	drm_atomic_helper_install_readout_state(state);
+
+	DRM_MODESET_LOCK_ALL_END(dev, ctx, err);
+
 	drm_atomic_state_put(state);
 }
 EXPORT_SYMBOL(drm_atomic_helper_readout_state);

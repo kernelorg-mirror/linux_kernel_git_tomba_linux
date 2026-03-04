@@ -2585,8 +2585,8 @@ static void commit_tail(struct drm_atomic_state *state, bool nonblock)
 
 	drm_atomic_helper_commit_cleanup_done(state);
 
-	if (!nonblock)
-		drm_atomic_helper_readout_compare(state);
+	//if (!nonblock)
+	//	drm_atomic_helper_readout_compare(state);
 
 	drm_atomic_state_put(state);
 }

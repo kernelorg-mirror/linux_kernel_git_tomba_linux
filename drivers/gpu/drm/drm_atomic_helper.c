@@ -160,6 +160,10 @@ drm_atomic_helper_install_readout_state(struct drm_atomic_state *state)
 	struct drm_crtc *crtc;
 	unsigned int i;
 
+	if (state->dev->mode_config.helper_private->atomic_install_readout)
+		state->dev->mode_config.helper_private->atomic_install_readout(
+			state->dev, state);
+
 	for_each_old_connector_in_state(state, connector, old_conn_state, i) {
 		connector->state = old_conn_state;
 

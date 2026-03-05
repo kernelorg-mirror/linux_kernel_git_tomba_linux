@@ -1565,6 +1565,8 @@ struct drm_mode_config_helper_funcs {
 	 * flicker-free and / or faster boot.
 	 */
 	void (*atomic_reset)(struct drm_device *dev);
+	void (*atomic_install_readout)(struct drm_device *dev,
+				       struct drm_atomic_state *state);
 };
 
 #endif

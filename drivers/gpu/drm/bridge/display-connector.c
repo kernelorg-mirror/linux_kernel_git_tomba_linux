@@ -184,6 +184,9 @@ static const struct drm_bridge_funcs display_connector_bridge_funcs = {
 	.atomic_duplicate_state = drm_atomic_helper_bridge_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
 	.atomic_reset = drm_atomic_helper_bridge_reset,
+	// XXX we don't even have a readout, is this needed?
+	// This fixes "Committed and Readout private object state don't match"
+	.atomic_compare_state = drm_atomic_helper_bridge_compare_state,
 };
 
 static irqreturn_t display_connector_hpd_irq(int irq, void *arg)

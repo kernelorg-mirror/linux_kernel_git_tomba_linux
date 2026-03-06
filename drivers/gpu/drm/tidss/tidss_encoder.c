@@ -79,6 +79,9 @@ static const struct drm_bridge_funcs tidss_bridge_funcs = {
 	.atomic_reset			= drm_atomic_helper_bridge_reset,
 	.atomic_duplicate_state		= drm_atomic_helper_bridge_duplicate_state,
 	.atomic_destroy_state		= drm_atomic_helper_bridge_destroy_state,
+	// XXX we don't even have a readout, is this needed?
+	// This fixes "Committed and Readout private object state don't match"
+	.atomic_compare_state		= drm_atomic_helper_bridge_compare_state,
 };
 
 static struct drm_crtc *tidss_encoder_get_current_crtc(struct drm_encoder *encoder)

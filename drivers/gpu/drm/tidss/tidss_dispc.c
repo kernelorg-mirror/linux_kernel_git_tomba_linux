@@ -1229,6 +1229,12 @@ void dispc_vp_disable(struct dispc_device *dispc, u32 hw_videoport)
 		       DISPC_VP_CONTROL_ENABLE_MASK);
 }
 
+bool dispc_vp_is_enabled(struct dispc_device *dispc, u32 hw_videoport)
+{
+	return !!VP_REG_GET(dispc, hw_videoport, DISPC_VP_CONTROL,
+			    DISPC_VP_CONTROL_ENABLE_MASK);
+}
+
 void dispc_vp_unprepare(struct dispc_device *dispc, u32 hw_videoport)
 {
 	if (dispc->feat->vp_bus_type[hw_videoport] == DISPC_VP_OLDI_AM65X) {
@@ -2333,6 +2339,12 @@ void dispc_plane_enable(struct dispc_device *dispc, u32 hw_plane, bool enable)
 {
 	VID_REG_FLD_MOD(dispc, hw_plane, DISPC_VID_ATTRIBUTES, !!enable,
 			DISPC_VID_ATTRIBUTES_ENABLE_MASK);
+}
+
+bool dispc_plane_is_enabled(struct dispc_device *dispc, u32 hw_plane)
+{
+	return VID_REG_GET(dispc, hw_plane, DISPC_VID_ATTRIBUTES,
+			   DISPC_VID_ATTRIBUTES_ENABLE_MASK);
 }
 
 static u32 dispc_vid_get_fifo_size(struct dispc_device *dispc, u32 hw_plane)

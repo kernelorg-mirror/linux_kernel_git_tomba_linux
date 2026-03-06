@@ -151,4 +151,18 @@ u32 dispc_plane_find_fourcc_by_dss_code(u8 code);
 int dispc_init(struct tidss_device *tidss);
 void dispc_remove(struct tidss_device *tidss);
 
+/* WIP READOUT SUPPORT */
+
+int dispc_vid_state_readout(struct dispc_device *dispc, u32 hw_plane_id,
+			    struct drm_plane_state *plane_state);
+int dispc_fb_state_readout(struct dispc_device *dispc, u32 hw_plane_id,
+			   struct drm_framebuffer *fb);
+
+u32 dispc_crtc_readout_bus_flags(struct dispc_device *dispc, u32 hw_videoport);
+int dispc_crtc_readout_mode(struct dispc_device *dispc, u32 hw_videoport,
+			    struct drm_display_mode *mode);
+
+void dispc_ovr_readout_plane(struct dispc_device *dispc, u32 hw_plane_id,
+			     bool *enabled, u32 *hw_videoport);
+
 #endif

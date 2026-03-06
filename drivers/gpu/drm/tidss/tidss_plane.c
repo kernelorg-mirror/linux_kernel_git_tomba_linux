@@ -12,6 +12,7 @@
 #include <drm/drm_fourcc.h>
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_gem_atomic_helper.h>
+#include <drm/drm_gem_framebuffer_helper.h>
 
 #include "tidss_crtc.h"
 #include "tidss_dispc.h"
@@ -175,13 +176,127 @@ static const struct drm_plane_helper_funcs tidss_primary_plane_helper_funcs = {
 	.get_scanout_buffer = drm_fb_dma_get_scanout_buffer,
 };
 
+static const struct drm_framebuffer_funcs tidss_plane_readout_fb_funcs = {
+	.destroy	= drm_gem_fb_destroy,
+};
+
+static struct drm_framebuffer *tidss_plane_readout_fb(struct drm_plane *plane)
+{
+	struct drm_device *ddev = plane->dev;
+	struct tidss_device *tidss = to_tidss(ddev);
+	struct dispc_device *dispc = tidss->dispc;
+	struct tidss_plane *tplane = to_tidss_plane(plane);
+	struct drm_framebuffer *fb;
+	int ret;
+
+	fb = kzalloc(sizeof(*fb), GFP_KERNEL);
+	if (!fb)
+		return ERR_PTR(-ENOMEM);
+
+	fb->dev = plane->dev;
+
+	ret = dispc_fb_state_readout(dispc, tplane->hw_plane_id, fb);
+	if (ret)
+		goto err_free_fb;
+
+	ret = drm_framebuffer_init(plane->dev, fb, &tidss_plane_readout_fb_funcs);
+	if (ret) {
+		kfree(fb);
+		return ERR_PTR(ret);
+	}
+
+	return fb;
+
+err_free_fb:
+	kfree(fb);
+	return ERR_PTR(ret);
+}
+
+static struct drm_plane_state *tidss_plane_atomic_readout_state(struct drm_plane *plane,
+								struct drm_atomic_state *state)
+{
+	struct drm_device *ddev = plane->dev;
+	struct tidss_device *tidss = to_tidss(ddev);
+	struct dispc_device *dispc = tidss->dispc;
+	struct tidss_plane *tplane = to_tidss_plane(plane);
+	struct drm_plane_state *plane_state;
+	struct drm_crtc_state *crtc_state;
+	struct drm_framebuffer *fb;
+	struct drm_crtc *crtc;
+	int ret;
+
+	if (plane->state)
+		drm_atomic_helper_plane_destroy_state(plane, plane->state);
+
+	plane_state = kzalloc(sizeof(*plane_state), GFP_KERNEL);
+	if (!plane_state)
+		return ERR_PTR(-ENOMEM);
+
+	__drm_atomic_helper_plane_state_reset(plane_state, plane);
+
+	bool vid_enable = dispc_plane_is_enabled(dispc, tplane->hw_plane_id);
+
+	if (!vid_enable)
+		goto out;
+
+	bool ovr_enable;
+	u32 hw_videoport;
+	dispc_ovr_readout_plane(dispc, tplane->hw_plane_id, &ovr_enable,
+				&hw_videoport);
+
+	if (!ovr_enable)
+		goto out;
+
+	fb = tidss_plane_readout_fb(plane);
+	if (IS_ERR(fb)) {
+		ret = PTR_ERR(fb);
+		goto err_free_state;
+	}
+
+	crtc = NULL;
+	for (int crtc_idx = 0; crtc_idx < tidss->num_crtcs; ++crtc_idx) {
+		if (to_tidss_crtc(tidss->crtcs[crtc_idx])->hw_videoport ==
+		    hw_videoport) {
+			crtc = tidss->crtcs[crtc_idx];
+			break;
+		}
+	}
+
+	if (!crtc) {
+		ret = -ENODEV;
+		goto err_free_state;
+	}
+
+	plane_state->fb = fb;
+	plane_state->crtc = crtc;
+	plane_state->visible = true;
+
+	dispc_vid_state_readout(dispc, tplane->hw_plane_id, plane_state);
+
+	crtc_state = drm_atomic_get_old_crtc_state(state, crtc);
+	if (!crtc_state) {
+		ret = -ENODEV;
+		goto err_free_state;
+	}
+
+	crtc_state->plane_mask |= drm_plane_mask(plane);
+
+out:
+	return plane_state;
+
+err_free_state:
+	kfree(plane_state);
+	return ERR_PTR(ret);
+}
+
 static const struct drm_plane_funcs tidss_plane_funcs = {
 	.update_plane = drm_atomic_helper_update_plane,
 	.disable_plane = drm_atomic_helper_disable_plane,
-	.reset = drm_atomic_helper_plane_reset,
 	.destroy = drm_plane_destroy,
+	.atomic_compare_state = drm_atomic_helper_plane_compare_state,
 	.atomic_duplicate_state = drm_atomic_helper_plane_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_plane_destroy_state,
+	.atomic_readout_state = tidss_plane_atomic_readout_state,
 };
 
 struct tidss_plane *tidss_plane_create(struct tidss_device *tidss,

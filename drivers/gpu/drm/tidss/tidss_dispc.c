@@ -2938,90 +2938,6 @@ static void dispc_init_errata(struct dispc_device *dispc)
 	}
 }
 
-/*
- * K2G display controller does not support soft reset, so we do a basic manual
- * reset here: make sure the IRQs are masked and VPs are disabled.
- */
-static void dispc_softreset_k2g(struct dispc_device *dispc)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&dispc->tidss->irq_lock, flags);
-	dispc_set_irqenable(dispc, 0);
-	dispc_read_and_clear_irqstatus(dispc);
-	spin_unlock_irqrestore(&dispc->tidss->irq_lock, flags);
-
-	for (unsigned int vp_idx = 0; vp_idx < dispc->feat->num_vps; ++vp_idx)
-		VP_REG_FLD_MOD(dispc, vp_idx, DISPC_VP_CONTROL, 0,
-			       DISPC_VP_CONTROL_ENABLE_MASK);
-}
-
-static int dispc_softreset(struct dispc_device *dispc)
-{
-	u32 val;
-	int ret;
-
-	if (dispc->feat->subrev == DISPC_K2G) {
-		dispc_softreset_k2g(dispc);
-		return 0;
-	}
-
-	/* Soft reset */
-	REG_FLD_MOD(dispc, DSS_SYSCONFIG, 1, DSS_SYSCONFIG_SOFTRESET_MASK);
-	/* Wait for reset to complete */
-	ret = readl_poll_timeout(dispc->base_common + DSS_SYSSTATUS,
-				 val, val & 1, 100, 5000);
-	if (ret) {
-		dev_err(dispc->dev, "failed to reset dispc\n");
-		return ret;
-	}
-
-	return 0;
-}
-
-static int dispc_init_hw(struct dispc_device *dispc)
-{
-	struct device *dev = dispc->dev;
-	int ret;
-
-	ret = pm_runtime_set_active(dev);
-	if (ret) {
-		dev_err(dev, "Failed to set DSS PM to active\n");
-		return ret;
-	}
-
-	ret = clk_prepare_enable(dispc->fclk);
-	if (ret) {
-		dev_err(dev, "Failed to enable DSS fclk\n");
-		goto err_runtime_suspend;
-	}
-
-	ret = dispc_softreset(dispc);
-	if (ret)
-		goto err_clk_disable;
-
-	clk_disable_unprepare(dispc->fclk);
-	ret = pm_runtime_set_suspended(dev);
-	if (ret) {
-		dev_err(dev, "Failed to set DSS PM to suspended\n");
-		return ret;
-	}
-
-	return 0;
-
-err_clk_disable:
-	clk_disable_unprepare(dispc->fclk);
-
-err_runtime_suspend:
-	ret = pm_runtime_set_suspended(dev);
-	if (ret) {
-		dev_err(dev, "Failed to set DSS PM to suspended\n");
-		return ret;
-	}
-
-	return ret;
-}
-
 int dispc_init(struct tidss_device *tidss)
 {
 	struct device *dev = tidss->dev;
@@ -3129,11 +3045,218 @@ int dispc_init(struct tidss_device *tidss)
 	of_property_read_u32(dispc->dev->of_node, "max-memory-bandwidth",
 			     &dispc->memory_bandwidth_limit);
 
-	r = dispc_init_hw(dispc);
-	if (r)
-		return r;
-
 	tidss->dispc = dispc;
+
+	return 0;
+}
+
+/* WIP READOUT SUPPORT */
+
+u32 dispc_crtc_readout_bus_flags(struct dispc_device *dispc, u32 hw_videoport)
+{
+	u32 val;
+	u32 flags;
+
+	flags = 0;
+
+	val = dispc_vp_read(dispc, hw_videoport, DISPC_VP_POL_FREQ);
+	if (FIELD_GET(DISPC_VP_POL_FREQ_IPC_MASK, val))
+		flags |= DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE;
+
+	if (FIELD_GET(DISPC_VP_POL_FREQ_IEO_MASK, val))
+		flags |= DRM_BUS_FLAG_DE_LOW;
+
+	if (FIELD_GET(DISPC_VP_POL_FREQ_RF_MASK, val))
+		flags |= DRM_BUS_FLAG_SYNC_DRIVE_POSEDGE;
+
+	return flags;
+}
+
+void dispc_ovr_readout_plane(struct dispc_device *dispc, u32 hw_plane_id,
+			     bool *enabled, u32 *hw_videoport)
+{
+	*enabled = false;
+
+	for (int vp_idx = 0; vp_idx < dispc->feat->num_vps; ++vp_idx) {
+		for (int layer_idx = 0; layer_idx < dispc->feat->num_vids;
+		     ++layer_idx) {
+			u32 v;
+
+			v = dispc_ovr_read(dispc, vp_idx,
+					   DISPC_OVR_ATTRIBUTES(layer_idx));
+
+			u32 enable =
+				FIELD_GET(DISPC_OVR_ATTRIBUTES_ENABLE_MASK, v);
+			u32 channel = FIELD_GET(
+				DISPC_OVR_ATTRIBUTES_CHANNELIN_MASK, v);
+
+			if (!enable)
+				continue;
+
+			for (int vid_idx = 0; vid_idx < dispc->feat->num_vids;
+			     ++vid_idx) {
+				if (dispc->feat->vid_info[vid_idx].hw_id ==
+				    channel) {
+					*enabled = true;
+					*hw_videoport = vp_idx;
+					return;
+				}
+			}
+		}
+	}
+}
+
+int dispc_crtc_readout_mode(struct dispc_device *dispc, u32 hw_videoport,
+			    struct drm_display_mode *mode)
+{
+	u16 hdisplay, hfp, hsw, hbp;
+	u16 vdisplay, vfp, vsw, vbp;
+	u32 flags;
+	u32 val;
+	unsigned long rate;
+
+	flags = 0;
+
+	val = dispc_vp_read(dispc, hw_videoport, DISPC_VP_POL_FREQ);
+
+	if (FIELD_GET(DISPC_VP_POL_FREQ_IVS_MASK, val))
+		flags |= DRM_MODE_FLAG_NVSYNC;
+	else
+		flags |= DRM_MODE_FLAG_PVSYNC;
+
+	if (FIELD_GET(DISPC_VP_POL_FREQ_IHS_MASK, val))
+		flags |= DRM_MODE_FLAG_NHSYNC;
+	else
+		flags |= DRM_MODE_FLAG_PHSYNC;
+
+	val = dispc_vp_read(dispc, hw_videoport, DISPC_VP_SIZE_SCREEN);
+	hdisplay = FIELD_GET(DISPC_VP_SIZE_SCREEN_HDISPLAY_MASK, val) + 1;
+	vdisplay = FIELD_GET(DISPC_VP_SIZE_SCREEN_VDISPLAY_MASK, val) + 1;
+
+	val = dispc_vp_read(dispc, hw_videoport, DISPC_VP_TIMING_H);
+	hsw = FIELD_GET(DISPC_VP_TIMING_H_SYNC_PULSE_MASK, val) + 1;
+	hfp = FIELD_GET(DISPC_VP_TIMING_H_FRONT_PORCH_MASK, val) + 1;
+	hbp = FIELD_GET(DISPC_VP_TIMING_H_BACK_PORCH_MASK, val) + 1;
+
+	val = dispc_vp_read(dispc, hw_videoport, DISPC_VP_TIMING_V);
+	vsw = FIELD_GET(DISPC_VP_TIMING_V_SYNC_PULSE_MASK, val) + 1;
+	vfp = FIELD_GET(DISPC_VP_TIMING_V_FRONT_PORCH_MASK, val);
+	vbp = FIELD_GET(DISPC_VP_TIMING_V_BACK_PORCH_MASK, val);
+
+	mode->hdisplay = hdisplay;
+	mode->vdisplay = vdisplay;
+
+	mode->hsync_start = hdisplay + hfp;
+	mode->hsync_end = hdisplay + hfp + hsw;
+	mode->htotal = hdisplay + hfp + hsw + hbp;
+
+	mode->vsync_start = vdisplay + vfp;
+	mode->vsync_end = vdisplay + vfp + vsw;
+	mode->vtotal = vdisplay + vfp + vsw + vbp;
+
+	mode->flags = flags;
+
+	rate = clk_get_rate(dispc->vp_clk[hw_videoport]);
+
+	mode->clock = rate / 1000;
+
+	mode->type |= DRM_MODE_TYPE_DRIVER;
+	drm_mode_set_name(mode);
+	drm_mode_set_crtcinfo(mode, 0);
+
+	return 0;
+}
+
+int dispc_vid_state_readout(struct dispc_device *dispc, u32 hw_plane_id,
+			    struct drm_plane_state *plane_state)
+{
+	u32 val;
+	u32 in_w, in_h;
+
+	// TODO: Only AM62 supported now
+
+	val = dispc_vid_read(dispc, hw_plane_id, DISPC_VID_PICTURE_SIZE);
+	in_w = FIELD_GET(DISPC_VID_PICTURE_SIZE_MEMSIZEX_MASK, val) + 1;
+	in_h = FIELD_GET(DISPC_VID_PICTURE_SIZE_MEMSIZEY_MASK, val) + 1;
+	plane_state->src_w = in_w << 16;
+	plane_state->src_h = in_h << 16;
+
+	if (!dispc->feat->vid_info[hw_plane_id].is_lite) {
+		val = dispc_vid_read(dispc, hw_plane_id, DISPC_VID_SIZE);
+		plane_state->crtc_w =
+			FIELD_GET(DISPC_VID_SIZE_SIZEX_MASK, val) + 1;
+		plane_state->crtc_h =
+			FIELD_GET(DISPC_VID_SIZE_SIZEY_MASK, val) + 1;
+	} else {
+		plane_state->crtc_w = in_w;
+		plane_state->crtc_h = in_h;
+	}
+
+	// TODO: Handle crtc_x/crtc_x/src_x/src_y
+	// crtc_x/crtc_y are handled by DISPC_OVR_ATTRIBUTES / OVR1_DSS_ATTRIBUTES
+
+	// TODO: Handle zpos, see DISPC_OVR_ATTRIBUTES / OVR1_DSS_ATTRIBUTES
+
+	plane_state->src.x1 = 0;
+	plane_state->src.x2 = plane_state->src_w;
+	plane_state->src.y1 = 0;
+	plane_state->src.y2 = plane_state->src_h;
+	plane_state->dst.x1 = 0;
+	plane_state->dst.x2 = plane_state->crtc_w;
+	plane_state->dst.y1 = 0;
+	plane_state->dst.y2 = plane_state->crtc_h;
+
+	val = dispc_vid_read(dispc, hw_plane_id, DISPC_VID_GLOBAL_ALPHA);
+	plane_state->alpha =
+		FIELD_GET(DISPC_VID_GLOBAL_ALPHA_GLOBALALPHA_MASK, val) << 16;
+
+	val = dispc_vid_read(dispc, hw_plane_id, DISPC_VID_ATTRIBUTES);
+	if (FIELD_GET(DISPC_VID_ATTRIBUTES_PREMULTIPLYALPHA_MASK, val))
+		plane_state->pixel_blend_mode = DRM_MODE_BLEND_PREMULTI;
+	else
+		plane_state->pixel_blend_mode = DRM_MODE_BLEND_COVERAGE;
+
+	// TODO: If YUV, handle color encoding and range
+
+	return 0;
+}
+
+int dispc_fb_state_readout(struct dispc_device *dispc, u32 hw_plane_id,
+			   struct drm_framebuffer *fb)
+{
+	u32 code, fourcc;
+	u32 val;
+	const struct drm_format_info *info;
+
+	code = VID_REG_GET(dispc, hw_plane_id, DISPC_VID_ATTRIBUTES,
+			   DISPC_VID_ATTRIBUTES_FORMAT_MASK);
+	fourcc = dispc_plane_find_fourcc_by_dss_code(code);
+	if (!fourcc)
+		return -EINVAL;
+
+	info = drm_format_info(fourcc);
+	if (!info)
+		return -EINVAL;
+
+	// TODO: Figure out YUV and multiplanar formats
+	if (info->is_yuv)
+		return -EINVAL;
+
+	fb->format = info;
+
+	val = dispc_vid_read(dispc, hw_plane_id, DISPC_VID_PICTURE_SIZE);
+	fb->width = FIELD_GET(DISPC_VID_PICTURE_SIZE_MEMSIZEX_MASK, val) + 1;
+	fb->height = FIELD_GET(DISPC_VID_PICTURE_SIZE_MEMSIZEY_MASK, val) + 1;
+
+	// TODO: Figure that out.
+	val = dispc_vid_read(dispc, hw_plane_id, DISPC_VID_ROW_INC);
+	if (val != 1)
+		return -EINVAL;
+
+	fb->pitches[0] = fb->width * (drm_format_info_bpp(info, 0) / 8);
+
+	// TODO: Figure out the offsets
+	fb->offsets[0] = 0;
 
 	return 0;
 }

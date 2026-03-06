@@ -171,7 +171,16 @@ static int tidss_probe(struct platform_device *pdev)
 
 	drm_kms_helper_poll_init(ddev);
 
+	/*
+	 * Keep DSS enabled for the duration of state readout. If the readout-
+	 * install detects active displays, it will do a runtime_get and DSS
+	 * will be kept on.
+	 */
+	tidss_runtime_get(tidss);
+
 	drm_mode_config_reset(ddev);
+
+	tidss_runtime_put(tidss);
 
 	ret = drm_dev_register(ddev, 0);
 	if (ret) {

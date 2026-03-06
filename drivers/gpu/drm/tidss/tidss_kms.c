@@ -62,8 +62,65 @@ static void tidss_atomic_commit_tail(struct drm_atomic_state *old_state)
 	tidss_runtime_put(tidss);
 }
 
+static void tidss_readout_state(struct drm_device *dev)
+{
+	struct tidss_device *tidss = to_tidss(dev);
+
+	/*
+	 * DSS is enabled when readout is done from probe, but perhaps that is
+	 * not the case when doing state comparisons. So we have get/put here.
+	 */
+	tidss_runtime_get(tidss);
+
+	drm_atomic_helper_readout_state(dev);
+
+	tidss_runtime_put(tidss);
+}
+
+static void tidss_atomic_install_readout(struct drm_device *dev,
+					 struct drm_atomic_state *state)
+{
+	struct tidss_device *tidss = to_tidss(dev);
+	struct dispc_device *dispc = tidss->dispc;
+	const struct dispc_features *feat = tidss->feat;
+	struct drm_crtc *crtc;
+
+	u32 vp_enabled_mask = 0;
+
+	/*
+	 * Get/reserve the necessary resources for the enabled crtcs, similarly
+	 * to what crtc_atomic_enable() would do.
+	 */
+	drm_for_each_crtc(crtc, dev) {
+		struct drm_crtc_state *cstate = crtc->state;
+		struct tidss_crtc *tcrtc = to_tidss_crtc(crtc);
+
+		if (!cstate->active)
+			continue;
+
+		tidss_runtime_get(tidss);
+
+		WARN_ON(dispc_vp_enable_clk(dispc, tcrtc->hw_videoport));
+
+		drm_crtc_vblank_on(crtc);
+
+		vp_enabled_mask |= BIT_U32(tcrtc->hw_videoport);
+	}
+
+	/*
+	 * Make sure any unused videoports are disabled. The bootloader could
+	 * have enabled VPs for outputs for which we don't have crtcs.
+	 */
+	for (int hw_vp = 0; hw_vp < feat->num_vps; ++hw_vp) {
+		if (!(vp_enabled_mask & BIT_U32(hw_vp)))
+			dispc_vp_disable(dispc, hw_vp);
+	}
+}
+
 static const struct drm_mode_config_helper_funcs mode_config_helper_funcs = {
-	.atomic_commit_tail = tidss_atomic_commit_tail,
+	.atomic_commit_tail	= tidss_atomic_commit_tail,
+	.atomic_reset		= tidss_readout_state,
+	.atomic_install_readout	= tidss_atomic_install_readout,
 };
 
 static int tidss_atomic_check(struct drm_device *ddev,

@@ -308,6 +308,7 @@ drm_atomic_build_readout_state(struct drm_device *dev)
 		}
 
 		if (WARN_ON(IS_ERR(conn_state))) {
+			drm_connector_list_iter_end(&conn_iter);
 			ret = PTR_ERR(conn_state);
 			goto err_state_put;
 		}

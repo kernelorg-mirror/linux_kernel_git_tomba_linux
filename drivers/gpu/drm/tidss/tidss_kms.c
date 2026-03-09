@@ -115,6 +115,12 @@ static void tidss_atomic_install_readout(struct drm_device *dev,
 		if (!(vp_enabled_mask & BIT_U32(hw_vp)))
 			dispc_vp_disable(dispc, hw_vp);
 	}
+
+	/*
+	 * There were no enabled crtcs. Do a reset, just to be on the safe side.
+	 */
+	if (!vp_enabled_mask)
+		dispc_softreset(dispc);
 }
 
 static const struct drm_mode_config_helper_funcs mode_config_helper_funcs = {

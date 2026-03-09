@@ -148,6 +148,8 @@ bool dispc_plane_is_enabled(struct dispc_device *dispc, u32 hw_plane);
 const u32 *dispc_plane_formats(struct dispc_device *dispc, unsigned int *len);
 u32 dispc_plane_find_fourcc_by_dss_code(u8 code);
 
+int dispc_softreset(struct dispc_device *dispc);
+
 int dispc_init(struct tidss_device *tidss);
 void dispc_remove(struct tidss_device *tidss);
 

@@ -91,6 +91,7 @@ quiet_cmd_fdtoverlay = OVL $(quiet_dtb_check_tag) $@
       cmd_fdtoverlay = $(objtree)/scripts/dtc/fdtoverlay -o $@ -i $(filter %.dtb %.dtbo, $^) $(cmd_dtb_check)
 
 $(multi-dtb-y): $(DT_TMP_SCHEMA) FORCE
+	@/home/tomba/work/iob/dt-overlays/test/test-overlay-apply.py $(filter %.dtb %.dtbo, $^);
 	$(call if_changed,fdtoverlay)
 $(call multi_depend, $(multi-dtb-y), .dtb, -dtbs)
 

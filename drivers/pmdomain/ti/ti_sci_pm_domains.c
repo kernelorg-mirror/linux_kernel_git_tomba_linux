@@ -112,8 +112,6 @@ static int ti_sci_pd_power_off(struct generic_pm_domain *domain)
 	struct ti_sci_pm_domain *pd = genpd_to_ti_sci_pd(domain);
 	const struct ti_sci_handle *ti_sci = pd->parent->ti_sci;
 
-	printk("POWER OFF %u\n", pd->idx);
-
 	return ti_sci->ops.dev_ops.put_device(ti_sci, pd->idx);
 }
 
@@ -125,8 +123,6 @@ static int ti_sci_pd_power_on(struct generic_pm_domain *domain)
 {
 	struct ti_sci_pm_domain *pd = genpd_to_ti_sci_pd(domain);
 	const struct ti_sci_handle *ti_sci = pd->parent->ti_sci;
-
-	printk("POWER ON %u\n", pd->idx);
 
 	if (pd->exclusive)
 		return ti_sci->ops.dev_ops.get_device_exclusive(ti_sci,

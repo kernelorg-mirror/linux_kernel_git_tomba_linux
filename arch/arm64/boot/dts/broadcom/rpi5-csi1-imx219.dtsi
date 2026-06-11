@@ -1,0 +1,76 @@
+/* IMX219 Camera on CSI1 */
+
+/ {
+    cam1_clk: cam1_clk {
+	    compatible = "fixed-clock";
+	    #clock-cells = <0>;
+		status = "okay";
+		clock-frequency = <24000000>;
+    };
+
+    cam1_reg: cam1_reg {
+	    compatible = "regulator-fixed";
+	    regulator-name = "cam1_reg";
+	    enable-active-high;
+	    status = "okay";
+	    gpio = <&rp1_gpio 46 0>;  // CD1_IO0_MICCLK, to MIPI 1 connector
+    };
+
+    cam_dummy_reg: cam_dummy_reg {
+	    compatible = "regulator-fixed";
+	    regulator-name = "cam-dummy-reg";
+	    status = "okay";
+    };
+};
+
+&rp1_i2c4 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	imx219@10 {
+		compatible = "sony,imx219";
+		reg = <0x10>;
+	    	status = "okay";
+
+		clocks = <&cam1_clk>;
+		clock-names = "xclk";
+
+		VANA-supply = <&cam1_reg>;	/* 2.8v */
+		VDIG-supply = <&cam_dummy_reg>;	/* 1.8v */
+		VDDL-supply = <&cam_dummy_reg>;	/* 1.2v */
+
+		rotation = <180>;
+		orientation = <2>;
+
+		port {
+			cam_endpoint: endpoint {
+				remote-endpoint = <&csi_ep>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+				clock-noncontinuous;
+				link-frequencies = /bits/ 64 <456000000>;
+			};
+		};
+	};
+
+	vcm: ad5398@c {
+		compatible = "adi,ad5398";
+		reg = <0x0c>;
+		status = "disabled";
+		VANA-supply = <&cam1_reg>;
+	};
+};
+
+&rp1_csi1 {
+	status = "okay";
+
+	port {
+		csi_ep: endpoint {
+			remote-endpoint = <&cam_endpoint>;
+			clock-lanes = <0>;
+			data-lanes = <1 2>;
+			clock-noncontinuous;
+		};
+	};
+};

@@ -103,3 +103,5 @@
 &rp1_usb1 {
 	status = "okay";
 };
+
+#include "rpi5-csi1-imx219.dtsi"

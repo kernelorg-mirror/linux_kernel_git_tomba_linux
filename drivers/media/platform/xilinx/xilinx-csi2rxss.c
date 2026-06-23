@@ -1035,4 +1035,4 @@ module_platform_driver(xcsi2rxss_driver);
 
 MODULE_AUTHOR("Vishal Sagar <vsagar@xilinx.com>");
 MODULE_DESCRIPTION("Xilinx MIPI CSI-2 Rx Subsystem Driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

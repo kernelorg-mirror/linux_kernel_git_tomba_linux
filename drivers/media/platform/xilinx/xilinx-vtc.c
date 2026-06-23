@@ -372,4 +372,4 @@ module_platform_driver(xvtc_driver);
 
 MODULE_AUTHOR("Laurent Pinchart <laurent.pinchart@ideasonboard.com>");
 MODULE_DESCRIPTION("Xilinx Video Timing Controller Driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

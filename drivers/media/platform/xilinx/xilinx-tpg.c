@@ -917,4 +917,4 @@ module_platform_driver(xtpg_driver);
 
 MODULE_AUTHOR("Laurent Pinchart <laurent.pinchart@ideasonboard.com>");
 MODULE_DESCRIPTION("Xilinx Test Pattern Generator Driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

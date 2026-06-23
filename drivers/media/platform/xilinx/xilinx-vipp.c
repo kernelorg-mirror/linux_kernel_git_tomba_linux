@@ -622,4 +622,4 @@ module_platform_driver(xvip_composite_driver);
 
 MODULE_AUTHOR("Laurent Pinchart <laurent.pinchart@ideasonboard.com>");
 MODULE_DESCRIPTION("Xilinx Video IP Composite Driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

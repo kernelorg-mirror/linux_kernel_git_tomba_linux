@@ -23,7 +23,9 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
-#include "xilinx-vip.h"
+
+#define XCSI_PAD_SINK		0
+#define XCSI_PAD_SOURCE		1
 
 /* Register map */
 #define XCSI_CCR_OFFSET		0x00
@@ -495,7 +497,7 @@ static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
 	state->streaming = true;
 
 	state->rsubdev =
-		xcsi2rxss_get_remote_subdev(&state->pads[XVIP_PAD_SINK]);
+		xcsi2rxss_get_remote_subdev(&state->pads[XCSI_PAD_SINK]);
 
 	ret = v4l2_subdev_call(state->rsubdev, video, s_stream, 1);
 	if (ret) {
@@ -712,7 +714,7 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 					      fmt->pad, fmt->which);
 
 	/* only sink pad format can be updated */
-	if (fmt->pad == XVIP_PAD_SOURCE) {
+	if (fmt->pad == XCSI_PAD_SOURCE) {
 		fmt->format = *__format;
 		mutex_unlock(&xcsi2rxss->lock);
 		return 0;
@@ -859,7 +861,7 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 	}
 
 	ep = fwnode_graph_get_endpoint_by_id(dev_fwnode(dev),
-					     XVIP_PAD_SINK, 0,
+					     XCSI_PAD_SINK, 0,
 					     FWNODE_GRAPH_ENDPOINT_NEXT);
 	if (!ep) {
 		dev_err(dev, "no sink port found");
@@ -879,7 +881,7 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 	xcsi2rxss->max_num_lanes = vep.bus.mipi_csi2.num_data_lanes;
 
 	ep = fwnode_graph_get_endpoint_by_id(dev_fwnode(dev),
-					     XVIP_PAD_SOURCE, 0,
+					     XCSI_PAD_SOURCE, 0,
 					     FWNODE_GRAPH_ENDPOINT_NEXT);
 	if (!ep) {
 		dev_err(dev, "no source port found");
@@ -958,8 +960,8 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	xcsi2rxss_soft_reset(xcsi2rxss);
 
 	/* Initialize V4L2 subdevice and media entity */
-	xcsi2rxss->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	xcsi2rxss->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
+	xcsi2rxss->pads[XCSI_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
+	xcsi2rxss->pads[XCSI_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 
 	/* Initialize the default format */
 	xcsi2rxss->default_format.code =

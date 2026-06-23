@@ -24,7 +24,9 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
-#include "xilinx-vip.h"
+
+#define XCSI_PAD_SINK		0
+#define XCSI_PAD_SOURCE		1
 
 /* Register map */
 #define XCSI_CCR_OFFSET		0x00
@@ -535,7 +537,7 @@ static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
 	state->streaming = true;
 
 	state->rsubdev =
-		xcsi2rxss_get_remote_subdev(&state->pads[XVIP_PAD_SINK]);
+		xcsi2rxss_get_remote_subdev(&state->pads[XCSI_PAD_SINK]);
 
 	if (!state->rsubdev) {
 		ret = -ENODEV;
@@ -813,7 +815,7 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 	}
 
 	/* only sink pad format can be updated */
-	if (fmt->pad == XVIP_PAD_SOURCE) {
+	if (fmt->pad == XCSI_PAD_SOURCE) {
 		fmt->format = *__format;
 		goto unlock_set_format;
 	}
@@ -835,7 +837,7 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 
 	/* Propagate resolution from sink to source pad */
 	__format = __xcsi2rxss_get_pad_format(xcsi2rxss, sd_state,
-					      XVIP_PAD_SOURCE, fmt->which);
+					      XCSI_PAD_SOURCE, fmt->which);
 	if (__format) {
 		__format->width = fmt->format.width;
 		__format->height = fmt->format.height;
@@ -999,7 +1001,7 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 	}
 
 	ep = fwnode_graph_get_endpoint_by_id(dev_fwnode(dev),
-					     XVIP_PAD_SINK, 0,
+					     XCSI_PAD_SINK, 0,
 					     FWNODE_GRAPH_ENDPOINT_NEXT);
 	if (!ep) {
 		dev_err(dev, "no sink port found");
@@ -1020,7 +1022,7 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 	xcsi2rxss->max_num_lanes = vep.bus.mipi_csi2.num_data_lanes;
 
 	ep = fwnode_graph_get_endpoint_by_id(dev_fwnode(dev),
-					     XVIP_PAD_SOURCE, 0,
+					     XCSI_PAD_SOURCE, 0,
 					     FWNODE_GRAPH_ENDPOINT_NEXT);
 	if (!ep) {
 		dev_err(dev, "no source port found");
@@ -1105,8 +1107,8 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	xcsi2rxss_soft_reset(xcsi2rxss);
 
 	/* Initialize V4L2 subdevice and media entity */
-	xcsi2rxss->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
-	xcsi2rxss->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
+	xcsi2rxss->pads[XCSI_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
+	xcsi2rxss->pads[XCSI_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 
 	/* Initialize the default format */
 	xcsi2rxss->default_format.code =
@@ -1115,8 +1117,8 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	xcsi2rxss->default_format.colorspace = V4L2_COLORSPACE_SRGB;
 	xcsi2rxss->default_format.width = XCSI_DEFAULT_WIDTH;
 	xcsi2rxss->default_format.height = XCSI_DEFAULT_HEIGHT;
-	xcsi2rxss->format[XVIP_PAD_SINK] = xcsi2rxss->default_format;
-	xcsi2rxss->format[XVIP_PAD_SOURCE] = xcsi2rxss->default_format;
+	xcsi2rxss->format[XCSI_PAD_SINK] = xcsi2rxss->default_format;
+	xcsi2rxss->format[XCSI_PAD_SOURCE] = xcsi2rxss->default_format;
 
 	/* Initialize V4L2 subdevice and media entity */
 	subdev = &xcsi2rxss->subdev;

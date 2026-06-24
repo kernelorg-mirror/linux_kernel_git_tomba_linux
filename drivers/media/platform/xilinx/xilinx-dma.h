@@ -23,7 +23,7 @@
 
 struct dma_chan;
 struct xvip_composite_device;
-struct xvip_video_format;
+struct xvip_dma_format;
 
 /**
  * struct xvip_pipeline - Xilinx Video IP pipeline structure
@@ -86,7 +86,7 @@ struct xvip_dma {
 
 	struct mutex lock;
 	struct v4l2_pix_format format;
-	const struct xvip_video_format *fmtinfo;
+	const struct xvip_dma_format *fmtinfo;
 
 	struct vb2_queue queue;
 	unsigned int sequence;

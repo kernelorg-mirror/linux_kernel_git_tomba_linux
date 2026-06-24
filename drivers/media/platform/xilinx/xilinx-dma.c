@@ -23,7 +23,6 @@
 #include <media/videobuf2-dma-contig.h>
 
 #include "xilinx-dma.h"
-#include "xilinx-vip.h"
 #include "xilinx-vipp.h"
 
 #define XVIP_DMA_DEF_WIDTH		1920
@@ -38,6 +37,35 @@
 /* -----------------------------------------------------------------------------
  * Helper functions
  */
+
+struct xvip_dma_format {
+	unsigned int code;
+	unsigned int bpp;
+	u32 fourcc;
+};
+
+static const struct xvip_dma_format xvip_dma_video_formats[] = {
+	{ MEDIA_BUS_FMT_UYVY8_1X16, 2, V4L2_PIX_FMT_YUYV },
+	{ MEDIA_BUS_FMT_VUY8_1X24, 3, V4L2_PIX_FMT_YUV24 },
+	{ MEDIA_BUS_FMT_Y8_1X8, 1, V4L2_PIX_FMT_GREY },
+	{ MEDIA_BUS_FMT_SRGGB8_1X8, 1, V4L2_PIX_FMT_SRGGB8 },
+	{ MEDIA_BUS_FMT_SGRBG8_1X8, 1, V4L2_PIX_FMT_SGRBG8 },
+	{ MEDIA_BUS_FMT_SGBRG8_1X8, 1, V4L2_PIX_FMT_SGBRG8 },
+	{ MEDIA_BUS_FMT_SBGGR8_1X8, 1, V4L2_PIX_FMT_SBGGR8 },
+	{ MEDIA_BUS_FMT_Y12_1X12, 2, V4L2_PIX_FMT_Y12 },
+};
+
+static const struct xvip_dma_format *xvip_dma_get_format_by_fourcc(u32 fourcc)
+{
+	for (unsigned int i = 0; i < ARRAY_SIZE(xvip_dma_video_formats); ++i) {
+		const struct xvip_dma_format *format = &xvip_dma_video_formats[i];
+
+		if (format->fourcc == fourcc)
+			return format;
+	}
+
+	return &xvip_dma_video_formats[0];
+}
 
 static struct v4l2_subdev *
 xvip_dma_remote_subdev(struct media_pad *local, u32 *pad)
@@ -522,9 +550,9 @@ xvip_dma_get_format(struct file *file, void *fh, struct v4l2_format *format)
 
 static void
 __xvip_dma_try_format(struct xvip_dma *dma, struct v4l2_pix_format *pix,
-		      const struct xvip_video_format **fmtinfo)
+		      const struct xvip_dma_format **fmtinfo)
 {
-	const struct xvip_video_format *info;
+	const struct xvip_dma_format *info;
 	unsigned int min_width;
 	unsigned int max_width;
 	unsigned int min_bpl;
@@ -536,7 +564,7 @@ __xvip_dma_try_format(struct xvip_dma *dma, struct v4l2_pix_format *pix,
 	/* Retrieve format information and select the default format if the
 	 * requested format isn't supported.
 	 */
-	info = xvip_get_format_by_fourcc(pix->pixelformat);
+	info = xvip_dma_get_format_by_fourcc(pix->pixelformat);
 
 	pix->pixelformat = info->fourcc;
 	pix->field = V4L2_FIELD_NONE;
@@ -581,7 +609,7 @@ xvip_dma_set_format(struct file *file, void *fh, struct v4l2_format *format)
 {
 	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
-	const struct xvip_video_format *info;
+	const struct xvip_dma_format *info;
 
 	__xvip_dma_try_format(dma, &format->fmt.pix, &info);
 
@@ -643,7 +671,7 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	INIT_LIST_HEAD(&dma->queued_bufs);
 	spin_lock_init(&dma->queued_lock);
 
-	dma->fmtinfo = xvip_get_format_by_fourcc(V4L2_PIX_FMT_YUYV);
+	dma->fmtinfo = xvip_dma_get_format_by_fourcc(V4L2_PIX_FMT_YUYV);
 	dma->format.pixelformat = dma->fmtinfo->fourcc;
 	dma->format.colorspace = V4L2_COLORSPACE_SRGB;
 	dma->format.field = V4L2_FIELD_NONE;

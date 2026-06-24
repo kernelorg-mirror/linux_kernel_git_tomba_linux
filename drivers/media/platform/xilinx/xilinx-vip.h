@@ -107,20 +107,15 @@ struct xvip_device {
  * @width: AXI4 format width in bits per component
  * @pattern: CFA pattern for Mono/Sensor formats
  * @code: media bus format code
- * @bpp: bytes per pixel (when stored in memory)
- * @fourcc: V4L2 pixel format FCC identifier
  */
 struct xvip_video_format {
 	unsigned int vf_code;
 	unsigned int width;
 	const char *pattern;
 	unsigned int code;
-	unsigned int bpp;
-	u32 fourcc;
 };
 
 const struct xvip_video_format *xvip_get_format_by_code(unsigned int code);
-const struct xvip_video_format *xvip_get_format_by_fourcc(u32 fourcc);
 const struct xvip_video_format *xvip_of_get_format(struct device_node *node);
 void xvip_set_format_size(struct v4l2_mbus_framefmt *format,
 			  const struct v4l2_subdev_format *fmt);

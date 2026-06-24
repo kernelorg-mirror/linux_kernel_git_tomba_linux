@@ -24,24 +24,15 @@
  */
 
 static const struct xvip_video_format xvip_video_formats[] = {
-	{ XVIP_VF_YUV_422, 8, NULL, MEDIA_BUS_FMT_UYVY8_1X16,
-	  2, V4L2_PIX_FMT_YUYV },
-	{ XVIP_VF_YUV_444, 8, NULL, MEDIA_BUS_FMT_VUY8_1X24,
-	  3, V4L2_PIX_FMT_YUV24 },
-	{ XVIP_VF_RBG, 8, NULL, MEDIA_BUS_FMT_RBG888_1X24,
-	  3, 0 },
-	{ XVIP_VF_MONO_SENSOR, 8, "mono", MEDIA_BUS_FMT_Y8_1X8,
-	  1, V4L2_PIX_FMT_GREY },
-	{ XVIP_VF_MONO_SENSOR, 8, "rggb", MEDIA_BUS_FMT_SRGGB8_1X8,
-	  1, V4L2_PIX_FMT_SRGGB8 },
-	{ XVIP_VF_MONO_SENSOR, 8, "grbg", MEDIA_BUS_FMT_SGRBG8_1X8,
-	  1, V4L2_PIX_FMT_SGRBG8 },
-	{ XVIP_VF_MONO_SENSOR, 8, "gbrg", MEDIA_BUS_FMT_SGBRG8_1X8,
-	  1, V4L2_PIX_FMT_SGBRG8 },
-	{ XVIP_VF_MONO_SENSOR, 8, "bggr", MEDIA_BUS_FMT_SBGGR8_1X8,
-	  1, V4L2_PIX_FMT_SBGGR8 },
-	{ XVIP_VF_MONO_SENSOR, 12, "mono", MEDIA_BUS_FMT_Y12_1X12,
-	  2, V4L2_PIX_FMT_Y12 },
+	{ XVIP_VF_YUV_422, 8, NULL, MEDIA_BUS_FMT_UYVY8_1X16, },
+	{ XVIP_VF_YUV_444, 8, NULL, MEDIA_BUS_FMT_VUY8_1X24, },
+	{ XVIP_VF_RBG, 8, NULL, MEDIA_BUS_FMT_RBG888_1X24, },
+	{ XVIP_VF_MONO_SENSOR, 8, "mono", MEDIA_BUS_FMT_Y8_1X8, },
+	{ XVIP_VF_MONO_SENSOR, 8, "rggb", MEDIA_BUS_FMT_SRGGB8_1X8, },
+	{ XVIP_VF_MONO_SENSOR, 8, "grbg", MEDIA_BUS_FMT_SGRBG8_1X8, },
+	{ XVIP_VF_MONO_SENSOR, 8, "gbrg", MEDIA_BUS_FMT_SGBRG8_1X8, },
+	{ XVIP_VF_MONO_SENSOR, 8, "bggr", MEDIA_BUS_FMT_SBGGR8_1X8, },
+	{ XVIP_VF_MONO_SENSOR, 12, "mono", MEDIA_BUS_FMT_Y12_1X12, },
 };
 
 /**
@@ -66,29 +57,6 @@ const struct xvip_video_format *xvip_get_format_by_code(unsigned int code)
 	return ERR_PTR(-EINVAL);
 }
 EXPORT_SYMBOL_GPL(xvip_get_format_by_code);
-
-/**
- * xvip_get_format_by_fourcc - Retrieve format information for a 4CC
- * @fourcc: the format 4CC
- *
- * Return: a pointer to the format information structure corresponding to the
- * given V4L2 format @fourcc. If not found, return a pointer to the first
- * available format (V4L2_PIX_FMT_YUYV).
- */
-const struct xvip_video_format *xvip_get_format_by_fourcc(u32 fourcc)
-{
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(xvip_video_formats); ++i) {
-		const struct xvip_video_format *format = &xvip_video_formats[i];
-
-		if (format->fourcc == fourcc)
-			return format;
-	}
-
-	return &xvip_video_formats[0];
-}
-EXPORT_SYMBOL_GPL(xvip_get_format_by_fourcc);
 
 /**
  * xvip_of_get_format - Parse a device tree node and return format information

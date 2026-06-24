@@ -539,13 +539,13 @@ __xvip_dma_try_format(struct xvip_dma *dma, struct v4l2_pix_format *pix,
 		      const struct xvip_dma_format **fmtinfo)
 {
 	const struct xvip_dma_format *info;
-	unsigned int min_width;
-	unsigned int max_width;
-	unsigned int min_bpl;
-	unsigned int max_bpl;
-	unsigned int width;
-	unsigned int align;
-	unsigned int bpl;
+	unsigned int min_width_bytes;
+	unsigned int max_width_bytes;
+	unsigned int min_bytesperline;
+	unsigned int max_bytesperline;
+	unsigned int width_bytes;
+	unsigned int align_bytes;
+	unsigned int bytesperline;
 
 	/* Retrieve format information and select the default format if the
 	 * requested format isn't supported.
@@ -561,21 +561,22 @@ __xvip_dma_try_format(struct xvip_dma *dma, struct v4l2_pix_format *pix,
 	 * the minimum and maximum values, clamp the requested width and convert
 	 * it back to pixels.
 	 */
-	align = lcm(dma->align, info->bpp);
-	min_width = roundup(XVIP_DMA_MIN_WIDTH, align);
-	max_width = rounddown(XVIP_DMA_MAX_WIDTH, align);
-	width = rounddown(pix->width * info->bpp, align);
+	align_bytes = lcm(dma->align, info->bpp);
+	min_width_bytes = roundup(XVIP_DMA_MIN_WIDTH, align_bytes);
+	max_width_bytes = rounddown(XVIP_DMA_MAX_WIDTH, align_bytes);
+	width_bytes = rounddown(pix->width * info->bpp, align_bytes);
 
-	pix->width = clamp(width, min_width, max_width) / info->bpp;
+	pix->width = clamp(width_bytes, min_width_bytes, max_width_bytes) / info->bpp;
 	pix->height = clamp(pix->height, XVIP_DMA_MIN_HEIGHT,
 			    XVIP_DMA_MAX_HEIGHT);
 
 	/* Clamp the requested bytes per line value. */
-	min_bpl = pix->width * info->bpp;
-	max_bpl = rounddown(XVIP_DMA_MAX_WIDTH, dma->align);
-	bpl = rounddown(pix->bytesperline, dma->align);
+	min_bytesperline = pix->width * info->bpp;
+	max_bytesperline = rounddown(XVIP_DMA_MAX_WIDTH, dma->align);
+	bytesperline = rounddown(pix->bytesperline, dma->align);
 
-	pix->bytesperline = clamp(bpl, min_bpl, max_bpl);
+	pix->bytesperline = clamp(bytesperline, min_bytesperline,
+				  max_bytesperline);
 	pix->sizeimage = pix->bytesperline * pix->height;
 
 	if (fmtinfo)

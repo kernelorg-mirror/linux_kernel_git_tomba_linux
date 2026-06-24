@@ -554,10 +554,7 @@ __xvip_dma_try_format(struct xvip_dma *dma, struct v4l2_pix_format *pix,
 	pix->height = clamp(pix->height, XVIP_DMA_MIN_HEIGHT,
 			    XVIP_DMA_MAX_HEIGHT);
 
-	/* Clamp the requested bytes per line value. If the maximum bytes per
-	 * line value is zero, the module doesn't support user configurable line
-	 * sizes. Override the requested value with the minimum in that case.
-	 */
+	/* Clamp the requested bytes per line value. */
 	min_bpl = pix->width * info->bpp;
 	max_bpl = rounddown(XVIP_DMA_MAX_WIDTH, dma->align);
 	bpl = rounddown(pix->bytesperline, dma->align);

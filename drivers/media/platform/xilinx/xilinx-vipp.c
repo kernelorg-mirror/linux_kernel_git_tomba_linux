@@ -94,11 +94,11 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 		if (ep == NULL)
 			break;
 
-		dev_dbg(xdev->dev, "processing endpoint %p\n", ep);
+		dev_dbg(xdev->dev, "processing endpoint %pfwf\n", ep);
 
 		ret = v4l2_fwnode_parse_link(ep, &link);
 		if (ret < 0) {
-			dev_err(xdev->dev, "failed to parse link for %p\n",
+			dev_err(xdev->dev, "failed to parse link for %pfwf\n",
 				ep);
 			continue;
 		}
@@ -107,7 +107,7 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 		 * the link.
 		 */
 		if (link.local_port >= local->num_pads) {
-			dev_err(xdev->dev, "invalid port number %u for %p\n",
+			dev_err(xdev->dev, "invalid port number %u for %pfwf\n",
 				link.local_port, link.local_node);
 			v4l2_fwnode_put_link(&link);
 			ret = -EINVAL;
@@ -117,7 +117,7 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 		local_pad = &local->pads[link.local_port];
 
 		if (local_pad->flags & MEDIA_PAD_FL_SINK) {
-			dev_dbg(xdev->dev, "skipping sink port %p:%u\n",
+			dev_dbg(xdev->dev, "skipping sink port %pfwf:%u\n",
 				link.local_node, link.local_port);
 			v4l2_fwnode_put_link(&link);
 			continue;
@@ -125,7 +125,7 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 
 		/* Skip DMA engines, they will be processed separately. */
 		if (link.remote_node == of_fwnode_handle(xdev->dev->of_node)) {
-			dev_dbg(xdev->dev, "skipping DMA port %p:%u\n",
+			dev_dbg(xdev->dev, "skipping DMA port %pfwf:%u\n",
 				link.local_node, link.local_port);
 			v4l2_fwnode_put_link(&link);
 			continue;
@@ -134,7 +134,7 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 		/* Find the remote entity. */
 		ent = xvip_graph_find_entity(xdev, link.remote_node);
 		if (ent == NULL) {
-			dev_err(xdev->dev, "no entity found for %p\n",
+			dev_err(xdev->dev, "no entity found for %pfwf\n",
 				link.remote_node);
 			v4l2_fwnode_put_link(&link);
 			ret = -ENODEV;
@@ -144,7 +144,7 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 		remote = ent->entity;
 
 		if (link.remote_port >= remote->num_pads) {
-			dev_err(xdev->dev, "invalid port number %u on %p\n",
+			dev_err(xdev->dev, "invalid port number %u on %pfwf\n",
 				link.remote_port, link.remote_node);
 			v4l2_fwnode_put_link(&link);
 			ret = -EINVAL;
@@ -336,7 +336,7 @@ static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
 	struct fwnode_handle *ep = NULL;
 	int ret = 0;
 
-	dev_dbg(xdev->dev, "parsing node %p\n", fwnode);
+	dev_dbg(xdev->dev, "parsing node %pfwf\n", fwnode);
 
 	while (1) {
 		struct xvip_graph_entity *xge;
@@ -345,7 +345,7 @@ static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
 		if (ep == NULL)
 			break;
 
-		dev_dbg(xdev->dev, "handling endpoint %p\n", ep);
+		dev_dbg(xdev->dev, "handling endpoint %pfwf\n", ep);
 
 		remote = fwnode_graph_get_remote_port_parent(ep);
 		if (remote == NULL) {

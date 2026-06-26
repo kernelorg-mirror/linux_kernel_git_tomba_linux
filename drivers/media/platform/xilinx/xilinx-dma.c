@@ -115,8 +115,7 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  * @pipe: The pipeline
  * @start: Start (when true) or stop (when false) the pipeline
  *
- * Walk the entities chain starting at the pipeline output video node and start
- * or stop all of them.
+ * Start or stop streaming on the subdev directly connected to the video node.
  *
  * Return: 0 if successful, or the return value of the failed video::s_stream
  * operation otherwise.
@@ -124,28 +123,16 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
 static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
 {
 	struct xvip_dma *dma = pipe->output;
-	struct media_entity *entity;
-	struct media_pad *pad;
 	struct v4l2_subdev *subdev;
 	int ret;
 
-	entity = &dma->video.entity;
-	while (1) {
-		pad = &entity->pads[0];
-		if (!(pad->flags & MEDIA_PAD_FL_SINK))
-			break;
+	subdev = xvip_dma_remote_subdev(&dma->pad, NULL);
+	if (!subdev)
+		return -EPIPE;
 
-		pad = media_pad_remote_pad_first(pad);
-		if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
-			break;
-
-		entity = pad->entity;
-		subdev = media_entity_to_v4l2_subdev(entity);
-
-		ret = v4l2_subdev_call(subdev, video, s_stream, start);
-		if (start && ret < 0 && ret != -ENOIOCTLCMD)
-			return ret;
-	}
+	ret = v4l2_subdev_call(subdev, video, s_stream, start);
+	if (start && ret < 0 && ret != -ENOIOCTLCMD)
+		return ret;
 
 	return 0;
 }

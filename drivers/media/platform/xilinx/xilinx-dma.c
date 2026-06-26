@@ -52,6 +52,7 @@ struct xvip_dma_format {
 static const struct xvip_dma_format xvip_dma_video_formats[] = {
 	/* Note: this requires channel mapping on the FPGA, as normally Xilinx uses RBG order */
 	{ MEDIA_BUS_FMT_RBG888_1X24, V4L2_PIX_FMT_BGR24 },
+	{ MEDIA_BUS_FMT_ARGB8888_1X32, V4L2_PIX_FMT_BGR32 },
 	{ MEDIA_BUS_FMT_UYVY8_1X16, V4L2_PIX_FMT_YUYV },
 	{ MEDIA_BUS_FMT_VUY8_1X24, V4L2_PIX_FMT_YUV24 },
 	{ MEDIA_BUS_FMT_Y8_1X8, V4L2_PIX_FMT_GREY },

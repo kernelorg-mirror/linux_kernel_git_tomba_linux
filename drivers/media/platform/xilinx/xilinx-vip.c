@@ -207,6 +207,7 @@ EXPORT_SYMBOL_GPL(xvip_clr_and_set);
 int xvip_init_resources(struct xvip_device *xvip)
 {
 	struct platform_device *pdev = to_platform_device(xvip->dev);
+	int ret;
 
 	xvip->iomem = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(xvip->iomem))
@@ -216,7 +217,10 @@ int xvip_init_resources(struct xvip_device *xvip)
 	if (IS_ERR(xvip->clk))
 		return PTR_ERR(xvip->clk);
 
-	clk_prepare_enable(xvip->clk);
+	ret = clk_prepare_enable(xvip->clk);
+	if (ret)
+		return ret;
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(xvip_init_resources);

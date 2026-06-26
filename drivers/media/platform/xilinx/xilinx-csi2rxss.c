@@ -12,7 +12,6 @@
 #include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/platform_device.h>
@@ -230,8 +229,6 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
 /**
  * struct xcsi2rxss_state - CSI-2 Rx Subsystem device structure
  * @subdev: The v4l2 subdev structure
- * @format: Active V4L2 formats on each pad
- * @default_format: Default V4L2 format
  * @events: counter for events
  * @vcx_events: counter for vcx_events
  * @dev: Platform structure
@@ -241,7 +238,6 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  * @iomem: Base address of subsystem
  * @max_num_lanes: Maximum number of lanes present
  * @datatype: Data type filter
- * @lock: mutex for accessing this structure
  * @pads: media pads
  * @streaming: Flag for storing streaming state
  * @enable_active_lanes: If number of active lanes can be modified
@@ -253,8 +249,6 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  */
 struct xcsi2rxss_state {
 	struct v4l2_subdev subdev;
-	struct v4l2_mbus_framefmt format[XCSI_MEDIA_PADS];
-	struct v4l2_mbus_framefmt default_format;
 	u32 events[XCSI_NUM_EVENTS];
 	u32 vcx_events[XCSI_VCX_NUM_EVENTS];
 	struct device *dev;
@@ -264,8 +258,6 @@ struct xcsi2rxss_state {
 	void __iomem *iomem;
 	u32 max_num_lanes;
 	u32 datatype;
-	/* used to protect access to this struct */
-	struct mutex lock;
 	struct media_pad pads[XCSI_MEDIA_PADS];
 	bool streaming;
 	bool enable_active_lanes;
@@ -425,10 +417,11 @@ static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 {
 	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
 	struct device *dev = xcsi2rxss->dev;
+	struct v4l2_subdev_state *state;
 	u32 reg, data;
 	unsigned int i, max_vc;
 
-	mutex_lock(&xcsi2rxss->lock);
+	state = v4l2_subdev_lock_and_get_active_state(sd);
 
 	xcsi2rxss_log_counters(xcsi2rxss);
 
@@ -497,7 +490,7 @@ static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 		reg += XCSI_NEXTREG_OFFSET;
 	}
 
-	mutex_unlock(&xcsi2rxss->lock);
+	v4l2_subdev_unlock_state(state);
 
 	return 0;
 }
@@ -674,9 +667,10 @@ static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
 static int xcsi2rxss_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
+	struct v4l2_subdev_state *state;
 	int ret = 0;
 
-	mutex_lock(&xcsi2rxss->lock);
+	state = v4l2_subdev_lock_and_get_active_state(sd);
 
 	if (enable == xcsi2rxss->streaming)
 		goto stream_done;
@@ -690,42 +684,10 @@ static int xcsi2rxss_s_stream(struct v4l2_subdev *sd, int enable)
 	}
 
 stream_done:
-	mutex_unlock(&xcsi2rxss->lock);
+	v4l2_subdev_unlock_state(state);
 	return ret;
 }
 
-static struct v4l2_mbus_framefmt *
-__xcsi2rxss_get_pad_format(struct xcsi2rxss_state *xcsi2rxss,
-			   struct v4l2_subdev_state *sd_state,
-			   unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *get_fmt;
-
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		get_fmt = v4l2_subdev_state_get_format(sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		get_fmt = &xcsi2rxss->format[pad];
-		break;
-	default:
-		get_fmt = NULL;
-		break;
-	}
-
-	return get_fmt;
-}
-
-/**
- * xcsi2rxss_init_state - Initialise the pad format config to default
- * @sd: Pointer to V4L2 Sub device structure
- * @sd_state: Pointer to sub device state structure
- *
- * This function is used to initialize the pad format with the default
- * values.
- *
- * Return: 0 on success
- */
 static int xcsi2rxss_init_state(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *sd_state)
 {
@@ -733,49 +695,16 @@ static int xcsi2rxss_init_state(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *format;
 	unsigned int i;
 
-	mutex_lock(&xcsi2rxss->lock);
 	for (i = 0; i < XCSI_MEDIA_PADS; i++) {
 		format = v4l2_subdev_state_get_format(sd_state, i);
-		*format = xcsi2rxss->default_format;
+		format->code = xcsi2rxss_get_nth_mbus(xcsi2rxss->datatype, 0);
+		format->field = V4L2_FIELD_NONE;
+		format->colorspace = V4L2_COLORSPACE_SRGB;
+		format->width = XCSI_DEFAULT_WIDTH;
+		format->height = XCSI_DEFAULT_HEIGHT;
 	}
-	mutex_unlock(&xcsi2rxss->lock);
 
 	return 0;
-}
-
-/**
- * xcsi2rxss_get_format - Get the pad format
- * @sd: Pointer to V4L2 Sub device structure
- * @sd_state: Pointer to sub device state structure
- * @fmt: Pointer to pad level media bus format
- *
- * This function is used to get the pad format information.
- *
- * Return: 0 on success
- */
-static int xcsi2rxss_get_format(struct v4l2_subdev *sd,
-				struct v4l2_subdev_state *sd_state,
-				struct v4l2_subdev_format *fmt)
-{
-	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
-	struct v4l2_mbus_framefmt *get_fmt;
-	int ret = 0;
-
-	mutex_lock(&xcsi2rxss->lock);
-
-	get_fmt = __xcsi2rxss_get_pad_format(xcsi2rxss, sd_state, fmt->pad,
-					     fmt->which);
-	if (!get_fmt) {
-		ret = -EINVAL;
-		goto unlock_get_format;
-	}
-
-	fmt->format = *get_fmt;
-
-unlock_get_format:
-	mutex_unlock(&xcsi2rxss->lock);
-
-	return ret;
 }
 
 /**
@@ -785,9 +714,10 @@ unlock_get_format:
  * @fmt: Pointer to pad level media bus format
  *
  * This function is used to set the pad format for the CSI-2 Rx subsystem.
- * The source pad format is fixed in hardware and cannot be modified on run time.
- * For the sink pad, the function validates the requested format code against the
- * hardware's configured datatype and applies the requested format.
+ * Only the sink pad format can be set: the function validates the requested
+ * format code against the hardware's configured datatype, applies the requested
+ * format and propagates it to the source pad. Setting the source pad format is
+ * a no-op, as the source pad always mirrors the sink pad.
  *
  * Return: 0 on success
  */
@@ -798,29 +728,20 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
 	struct v4l2_mbus_framefmt *__format;
 	u32 dt;
-	int ret = 0;
-
-	mutex_lock(&xcsi2rxss->lock);
 
 	/*
-	 * Only the format->code parameter matters for CSI as the
-	 * CSI format cannot be changed at runtime.
-	 * Ensure that format to set is copied to over to CSI pad format
+	 * Only the sink pad format can be set. The source pad always mirrors
+	 * the sink pad, so report its current format unchanged.
 	 */
-	__format = __xcsi2rxss_get_pad_format(xcsi2rxss, sd_state,
-					      fmt->pad, fmt->which);
-	if (!__format) {
-		ret = -EINVAL;
-		goto unlock_set_format;
-	}
-
-	/* only sink pad format can be updated */
 	if (fmt->pad == XCSI_PAD_SOURCE) {
-		fmt->format = *__format;
-		goto unlock_set_format;
+		fmt->format = *v4l2_subdev_state_get_format(sd_state, fmt->pad);
+		return 0;
 	}
 
 	/*
+	 * Only the format->code parameter matters for CSI as the CSI format
+	 * cannot be changed at runtime.
+	 *
 	 * RAW8 is supported in all datatypes. So if requested media bus format
 	 * is of RAW8 type, then allow to be set. In case core is configured to
 	 * other RAW, YUV422 8/10 or RGB888, set appropriate media bus format.
@@ -833,20 +754,14 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 							  0);
 	}
 
+	/* Store the format on the sink pad and propagate it to the source pad. */
+	__format = v4l2_subdev_state_get_format(sd_state, XCSI_PAD_SINK);
 	*__format = fmt->format;
 
-	/* Propagate resolution from sink to source pad */
-	__format = __xcsi2rxss_get_pad_format(xcsi2rxss, sd_state,
-					      XCSI_PAD_SOURCE, fmt->which);
-	if (__format) {
-		__format->width = fmt->format.width;
-		__format->height = fmt->format.height;
-	}
+	__format = v4l2_subdev_state_get_format(sd_state, XCSI_PAD_SOURCE);
+	*__format = fmt->format;
 
-unlock_set_format:
-	mutex_unlock(&xcsi2rxss->lock);
-
-	return ret;
+	return 0;
 }
 
 /**
@@ -900,7 +815,7 @@ static const struct v4l2_subdev_video_ops xcsi2rxss_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops xcsi2rxss_pad_ops = {
-	.get_fmt = xcsi2rxss_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xcsi2rxss_set_format,
 	.enum_mbus_code = xcsi2rxss_enum_mbus_code,
 	.link_validate = v4l2_subdev_link_validate_default,
@@ -1095,24 +1010,12 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_clk_put;
 
-	mutex_init(&xcsi2rxss->lock);
-
 	xcsi2rxss_hard_reset(xcsi2rxss);
 	xcsi2rxss_soft_reset(xcsi2rxss);
 
-	/* Initialize V4L2 subdevice and media entity */
+	/* Initialize media pads */
 	xcsi2rxss->pads[XCSI_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 	xcsi2rxss->pads[XCSI_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
-
-	/* Initialize the default format */
-	xcsi2rxss->default_format.code =
-		xcsi2rxss_get_nth_mbus(xcsi2rxss->datatype, 0);
-	xcsi2rxss->default_format.field = V4L2_FIELD_NONE;
-	xcsi2rxss->default_format.colorspace = V4L2_COLORSPACE_SRGB;
-	xcsi2rxss->default_format.width = XCSI_DEFAULT_WIDTH;
-	xcsi2rxss->default_format.height = XCSI_DEFAULT_HEIGHT;
-	xcsi2rxss->format[XCSI_PAD_SINK] = xcsi2rxss->default_format;
-	xcsi2rxss->format[XCSI_PAD_SOURCE] = xcsi2rxss->default_format;
 
 	/* Initialize V4L2 subdevice and media entity */
 	subdev = &xcsi2rxss->subdev;
@@ -1128,20 +1031,28 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	ret = media_entity_pads_init(&subdev->entity, XCSI_MEDIA_PADS,
 				     xcsi2rxss->pads);
 	if (ret < 0)
-		goto error;
+		goto err_clk_disable;
+
+	/* Allocate the subdev active state and populate the default format. */
+	ret = v4l2_subdev_init_finalize(subdev);
+	if (ret < 0)
+		goto error_media_cleanup;
 
 	platform_set_drvdata(pdev, xcsi2rxss);
 
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
 		dev_err(dev, "failed to register subdev\n");
-		goto error;
+		goto error_subdev_cleanup;
 	}
 
 	return 0;
-error:
+
+error_subdev_cleanup:
+	v4l2_subdev_cleanup(subdev);
+error_media_cleanup:
 	media_entity_cleanup(&subdev->entity);
-	mutex_destroy(&xcsi2rxss->lock);
+err_clk_disable:
 	clk_bulk_disable_unprepare(num_clks, xcsi2rxss->clks);
 err_clk_put:
 	clk_bulk_put(num_clks, xcsi2rxss->clks);
@@ -1155,8 +1066,8 @@ static void xcsi2rxss_remove(struct platform_device *pdev)
 	int num_clks = ARRAY_SIZE(xcsi2rxss_clks);
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
-	mutex_destroy(&xcsi2rxss->lock);
 	clk_bulk_disable_unprepare(num_clks, xcsi2rxss->clks);
 	clk_bulk_put(num_clks, xcsi2rxss->clks);
 }

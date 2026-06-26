@@ -425,7 +425,9 @@ static int xvip_graph_dma_init_one(struct xvip_composite_device *xdev,
 	else
 		return -EINVAL;
 
-	of_property_read_u32(node, "reg", &index);
+	ret = of_property_read_u32(node, "reg", &index);
+	if (ret)
+		return -EINVAL;
 
 	dma = devm_kzalloc(xdev->dev, sizeof(*dma), GFP_KERNEL);
 	if (dma == NULL)

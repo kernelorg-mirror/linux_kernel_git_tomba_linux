@@ -25,7 +25,7 @@
 #include <media/v4l2-subdev.h>
 #include "xilinx-vip.h"
 
-/* Register register map */
+/* Register map */
 #define XCSI_CCR_OFFSET		0x00
 #define XCSI_CCR_SOFTRESET	BIT(1)
 #define XCSI_CCR_ENABLE		BIT(0)

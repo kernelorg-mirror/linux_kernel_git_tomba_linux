@@ -130,22 +130,37 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  */
 static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
 {
-	struct xvip_dma *dma = pipe->s2mm;
-	struct v4l2_subdev *subdev;
-	u32 pad;
-	int ret;
+	struct media_pipeline_pad_iter iter;
+	struct media_pad *pad;
 
-	subdev = xvip_dma_remote_subdev(&dma->pad, &pad);
-	if (!subdev)
-		return -EPIPE;
+	media_pipeline_for_each_pad(&pipe->pipe, &iter, pad) {
+		struct v4l2_subdev *subdev;
+		struct xvip_dma *dma;
+		u32 rpad;
+		int ret;
 
-	if (start)
-		ret = v4l2_subdev_enable_streams(subdev, pad, BIT_ULL(0));
-	else
-		ret = v4l2_subdev_disable_streams(subdev, pad, BIT_ULL(0));
+		if (pad->entity->function != MEDIA_ENT_F_IO_V4L)
+			continue;
 
-	if (start && ret < 0)
-		return ret;
+		dma = to_xvip_dma(media_entity_to_video_device(pad->entity));
+
+		if (!xvip_dma_is_s2mm(dma))
+			continue;
+
+		subdev = xvip_dma_remote_subdev(&dma->pad, &rpad);
+		if (!subdev)
+			return -EPIPE;
+
+		if (start)
+			ret = v4l2_subdev_enable_streams(subdev, rpad,
+							 BIT_ULL(0));
+		else
+			ret = v4l2_subdev_disable_streams(subdev, rpad,
+							  BIT_ULL(0));
+
+		if (start && ret < 0)
+			return ret;
+	}
 
 	return 0;
 }
@@ -231,12 +246,10 @@ static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
 
 		dma = to_xvip_dma(media_entity_to_video_device(pad->entity));
 
-		if (xvip_dma_is_s2mm(dma)) {
-			pipe->s2mm = dma;
+		if (xvip_dma_is_s2mm(dma))
 			num_s2mm++;
-		} else {
+		else
 			num_mm2s++;
-		}
 	}
 
 	/* We need exactly one S2MM and zero or one MM2S DMA. */
@@ -246,25 +259,16 @@ static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
 	return 0;
 }
 
-static void __xvip_pipeline_cleanup(struct xvip_pipeline *pipe)
-{
-	pipe->s2mm = NULL;
-}
-
 /**
  * xvip_pipeline_cleanup - Cleanup the pipeline after streaming
  * @pipe: the pipeline
  *
- * Decrease the pipeline use count and clean it up if we were the last user.
+ * Decrease the pipeline use count.
  */
 static void xvip_pipeline_cleanup(struct xvip_pipeline *pipe)
 {
 	mutex_lock(&pipe->lock);
-
-	/* If we're the last user clean up the pipeline. */
-	if (--pipe->use_count == 0)
-		__xvip_pipeline_cleanup(pipe);
-
+	pipe->use_count--;
 	mutex_unlock(&pipe->lock);
 }
 
@@ -285,13 +289,11 @@ static int xvip_pipeline_prepare(struct xvip_pipeline *pipe,
 
 	mutex_lock(&pipe->lock);
 
-	/* If we're the first user validate and initialize the pipeline. */
+	/* If we're the first user validate the pipeline. */
 	if (pipe->use_count == 0) {
 		ret = xvip_pipeline_validate(pipe, dma);
-		if (ret < 0) {
-			__xvip_pipeline_cleanup(pipe);
+		if (ret < 0)
 			goto done;
-		}
 	}
 
 	pipe->use_count++;

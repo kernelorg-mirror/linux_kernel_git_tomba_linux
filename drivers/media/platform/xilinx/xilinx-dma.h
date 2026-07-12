@@ -30,15 +30,12 @@ struct xvip_dma_format;
  * @pipe: media pipeline
  * @lock: protects the pipeline state
  * @use_count: number of DMA engines using the pipeline
- * @s2mm: S2MM (capture) DMA engine of the pipeline
  */
 struct xvip_pipeline {
 	struct media_pipeline pipe;
 
 	struct mutex lock;
 	unsigned int use_count;
-
-	struct xvip_dma *s2mm;
 };
 
 static inline struct xvip_pipeline *to_xvip_pipeline(struct video_device *vdev)

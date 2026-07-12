@@ -211,7 +211,6 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  * @datatype: Data type filter
  * @lock: mutex for accessing this structure
  * @pads: media pads
- * @streaming: Flag for storing streaming state
  * @enable_active_lanes: If number of active lanes can be modified
  * @en_vcx: If more than 4 VC are enabled
  *
@@ -230,7 +229,6 @@ struct xcsi2rxss_state {
 	/* used to protect access to this struct */
 	struct mutex lock;
 	struct media_pad pads[XCSI_MEDIA_PADS];
-	bool streaming;
 	bool enable_active_lanes;
 	bool en_vcx;
 };
@@ -486,17 +484,13 @@ static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
 	xcsi2rxss_set(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
 
 	ret = xcsi2rxss_soft_reset(state);
-	if (ret) {
-		state->streaming = false;
+	if (ret)
 		return ret;
-	}
 
 	/* enable interrupts */
 	xcsi2rxss_clr(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
 	xcsi2rxss_write(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
 	xcsi2rxss_set(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
-
-	state->streaming = true;
 
 	ret = xcsi2rxss_set_remote_streams(state, true);
 	if (ret) {
@@ -506,7 +500,6 @@ static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
 
 		/* disable core */
 		xcsi2rxss_clr(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
-		state->streaming = false;
 	}
 
 	return ret;
@@ -522,7 +515,6 @@ static void xcsi2rxss_stop_stream(struct xcsi2rxss_state *state)
 
 	/* disable core */
 	xcsi2rxss_clr(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
-	state->streaming = false;
 }
 
 /**
@@ -624,27 +616,33 @@ static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static int xcsi2rxss_s_stream(struct v4l2_subdev *sd, int enable)
+static int xcsi2rxss_enable_streams(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *sd_state,
+				    u32 pad, u64 streams_mask)
 {
 	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
-	int ret = 0;
+	int ret;
 
 	mutex_lock(&xcsi2rxss->lock);
-
-	if (enable == xcsi2rxss->streaming)
-		goto stream_done;
-
-	if (enable) {
-		xcsi2rxss_reset_event_counters(xcsi2rxss);
-		ret = xcsi2rxss_start_stream(xcsi2rxss);
-	} else {
-		xcsi2rxss_stop_stream(xcsi2rxss);
-		xcsi2rxss_hard_reset(xcsi2rxss);
-	}
-
-stream_done:
+	xcsi2rxss_reset_event_counters(xcsi2rxss);
+	ret = xcsi2rxss_start_stream(xcsi2rxss);
 	mutex_unlock(&xcsi2rxss->lock);
+
 	return ret;
+}
+
+static int xcsi2rxss_disable_streams(struct v4l2_subdev *sd,
+				     struct v4l2_subdev_state *sd_state,
+				     u32 pad, u64 streams_mask)
+{
+	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
+
+	mutex_lock(&xcsi2rxss->lock);
+	xcsi2rxss_stop_stream(xcsi2rxss);
+	xcsi2rxss_hard_reset(xcsi2rxss);
+	mutex_unlock(&xcsi2rxss->lock);
+
+	return 0;
 }
 
 static int xcsi2rxss_init_state(struct v4l2_subdev *sd,
@@ -747,20 +745,17 @@ static const struct v4l2_subdev_core_ops xcsi2rxss_core_ops = {
 	.log_status = xcsi2rxss_log_status,
 };
 
-static const struct v4l2_subdev_video_ops xcsi2rxss_video_ops = {
-	.s_stream = xcsi2rxss_s_stream
-};
-
 static const struct v4l2_subdev_pad_ops xcsi2rxss_pad_ops = {
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xcsi2rxss_set_format,
 	.enum_mbus_code = xcsi2rxss_enum_mbus_code,
 	.link_validate = v4l2_subdev_link_validate_default,
+	.enable_streams = xcsi2rxss_enable_streams,
+	.disable_streams = xcsi2rxss_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xcsi2rxss_ops = {
 	.core = &xcsi2rxss_core_ops,
-	.video = &xcsi2rxss_video_ops,
 	.pad = &xcsi2rxss_pad_ops
 };
 

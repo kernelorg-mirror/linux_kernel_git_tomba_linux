@@ -27,6 +27,7 @@
  * @notifier: V4L2 asynchronous subdevs notifier
  * @dmas: list of S2MM and MM2S DMA channels
  * @v4l2_caps: V4L2 capabilities of the whole device (see VIDIOC_QUERYCAP)
+ * @pipeline_lock: serializes pipeline start/stop across the DMA channels
  */
 struct xvip_composite_device {
 	struct v4l2_device v4l2_dev;
@@ -37,6 +38,8 @@ struct xvip_composite_device {
 
 	struct list_head dmas;
 	u32 v4l2_caps;
+
+	struct mutex pipeline_lock;
 };
 
 #endif /* __XILINX_VIPP_H__ */

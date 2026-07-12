@@ -29,13 +29,11 @@ struct xvip_dma_format;
  * struct xvip_pipeline - Xilinx Video IP pipeline structure
  * @pipe: media pipeline
  * @lock: protects the pipeline state
- * @use_count: number of DMA engines using the pipeline
  */
 struct xvip_pipeline {
 	struct media_pipeline pipe;
 
 	struct mutex lock;
-	unsigned int use_count;
 };
 
 static inline struct xvip_pipeline *to_xvip_pipeline(struct video_device *vdev)

@@ -229,8 +229,7 @@ static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe,
 	return ret;
 }
 
-static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
-				  struct xvip_dma *start)
+static int xvip_pipeline_validate(struct xvip_pipeline *pipe)
 {
 	struct media_pipeline_pad_iter iter;
 	unsigned int num_mm2s = 0;
@@ -257,51 +256,6 @@ static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
 		return -EPIPE;
 
 	return 0;
-}
-
-/**
- * xvip_pipeline_cleanup - Cleanup the pipeline after streaming
- * @pipe: the pipeline
- *
- * Decrease the pipeline use count.
- */
-static void xvip_pipeline_cleanup(struct xvip_pipeline *pipe)
-{
-	mutex_lock(&pipe->lock);
-	pipe->use_count--;
-	mutex_unlock(&pipe->lock);
-}
-
-/**
- * xvip_pipeline_prepare - Prepare the pipeline for streaming
- * @pipe: the pipeline
- * @dma: DMA engine at one end of the pipeline
- *
- * Validate the pipeline if no user exists yet, otherwise just increase the use
- * count.
- *
- * Return: 0 if successful or -EPIPE if the pipeline is not valid.
- */
-static int xvip_pipeline_prepare(struct xvip_pipeline *pipe,
-				 struct xvip_dma *dma)
-{
-	int ret;
-
-	mutex_lock(&pipe->lock);
-
-	/* If we're the first user validate the pipeline. */
-	if (pipe->use_count == 0) {
-		ret = xvip_pipeline_validate(pipe, dma);
-		if (ret < 0)
-			goto done;
-	}
-
-	pipe->use_count++;
-	ret = 0;
-
-done:
-	mutex_unlock(&pipe->lock);
-	return ret;
 }
 
 /* -----------------------------------------------------------------------------
@@ -420,6 +374,7 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 {
 	struct xvip_dma *dma = vb2_get_drv_priv(vq);
+	struct xvip_composite_device *xdev = dma->xdev;
 	struct xvip_dma_buffer *buf, *nbuf;
 	struct xvip_pipeline *pipe;
 	int ret;
@@ -431,11 +386,28 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	 * pipeline can be activated or deactivated once streaming is started.
 	 *
 	 * Use the pipeline object embedded in the first DMA object that starts
-	 * streaming.
+	 * streaming. The pipeline lock makes the pipe selection, the pipeline
+	 * start and the first start check atomic with respect to the other
+	 * video nodes of the pipeline.
 	 */
+	mutex_lock(&xdev->pipeline_lock);
+
 	pipe = to_xvip_pipeline(&dma->video) ? : &dma->pipe;
 
 	ret = video_device_pipeline_start(&dma->video, &pipe->pipe);
+
+	/*
+	 * Validate the pipeline topology when the pipeline is started for the
+	 * first time.
+	 */
+	if (!ret && pipe->pipe.start_count == 1) {
+		ret = xvip_pipeline_validate(pipe);
+		if (ret < 0)
+			video_device_pipeline_stop(&dma->video);
+	}
+
+	mutex_unlock(&xdev->pipeline_lock);
+
 	if (ret < 0)
 		goto error;
 
@@ -443,10 +415,6 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	 * connected subdev.
 	 */
 	ret = xvip_dma_verify_format(dma);
-	if (ret < 0)
-		goto error_stop;
-
-	ret = xvip_pipeline_prepare(pipe, dma);
 	if (ret < 0)
 		goto error_stop;
 
@@ -458,12 +426,9 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	/* Start the pipeline. */
 	ret = xvip_pipeline_set_stream(pipe, dma, true);
 	if (ret < 0)
-		goto error_cleanup;
+		goto error_stop;
 
 	return 0;
-
-error_cleanup:
-	xvip_pipeline_cleanup(pipe);
 
 error_stop:
 	video_device_pipeline_stop(&dma->video);
@@ -494,8 +459,7 @@ static void xvip_dma_stop_streaming(struct vb2_queue *vq)
 	/* Stop and reset the DMA engine. */
 	dmaengine_terminate_all(dma->dma);
 
-	/* Cleanup the pipeline and mark it as being stopped. */
-	xvip_pipeline_cleanup(pipe);
+	/* Mark the pipeline as being stopped. */
 	video_device_pipeline_stop(&dma->video);
 
 	/* Give back all queued buffers to videobuf2. */

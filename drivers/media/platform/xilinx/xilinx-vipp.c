@@ -441,10 +441,11 @@ static int xvip_composite_probe(struct platform_device *pdev)
 
 	xdev->dev = &pdev->dev;
 	INIT_LIST_HEAD(&xdev->dmas);
+	mutex_init(&xdev->pipeline_lock);
 
 	ret = xvip_composite_v4l2_init(xdev);
 	if (ret < 0)
-		return ret;
+		goto error_mutex;
 
 	ret = xvip_graph_init(xdev);
 	if (ret < 0)
@@ -458,6 +459,8 @@ static int xvip_composite_probe(struct platform_device *pdev)
 
 error:
 	xvip_composite_v4l2_cleanup(xdev);
+error_mutex:
+	mutex_destroy(&xdev->pipeline_lock);
 	return ret;
 }
 
@@ -467,6 +470,7 @@ static void xvip_composite_remove(struct platform_device *pdev)
 
 	xvip_graph_cleanup(xdev);
 	xvip_composite_v4l2_cleanup(xdev);
+	mutex_destroy(&xdev->pipeline_lock);
 }
 
 static const struct of_device_id xvip_composite_of_id_table[] = {

@@ -410,9 +410,14 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	dma_async_issue_pending(dma->dma);
 
 	/* Start the pipeline. */
-	xvip_pipeline_set_stream(pipe, true);
+	ret = xvip_pipeline_set_stream(pipe, true);
+	if (ret < 0)
+		goto error_cleanup;
 
 	return 0;
+
+error_cleanup:
+	xvip_pipeline_cleanup(pipe);
 
 error_stop:
 	video_device_pipeline_stop(&dma->video);

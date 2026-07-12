@@ -39,6 +39,11 @@
  * Helper functions
  */
 
+static inline bool xvip_dma_is_s2mm(const struct xvip_dma *dma)
+{
+	return dma->queue.type == V4L2_BUF_TYPE_VIDEO_CAPTURE;
+}
+
 struct xvip_dma_format {
 	unsigned int code;
 	u32 fourcc;
@@ -125,7 +130,7 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  */
 static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
 {
-	struct xvip_dma *dma = pipe->output;
+	struct xvip_dma *dma = pipe->s2mm;
 	struct v4l2_subdev *subdev;
 	u32 pad;
 	int ret;
@@ -150,8 +155,8 @@ static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
  * @pipe: The pipeline
  * @on: Turn the stream on when true or off when false
  *
- * The pipeline is shared between all DMA engines connect at its input and
- * output. While the stream state of DMA engines can be controlled
+ * The pipeline is shared between all the MM2S and S2MM DMA engines connected
+ * to it. While the stream state of DMA engines can be controlled
  * independently, pipelines have a shared stream state that enable or disable
  * all entities in the pipeline. For this reason the pipeline uses a streaming
  * counter that tracks the number of DMA engines that have requested the stream
@@ -197,8 +202,8 @@ static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
 				  struct xvip_dma *start)
 {
 	struct media_pipeline_pad_iter iter;
-	unsigned int num_inputs = 0;
-	unsigned int num_outputs = 0;
+	unsigned int num_mm2s = 0;
+	unsigned int num_s2mm = 0;
 	struct media_pad *pad;
 
 	/* Locate the video nodes in the pipeline. */
@@ -210,19 +215,19 @@ static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
 
 		dma = to_xvip_dma(media_entity_to_video_device(pad->entity));
 
-		if (dma->pad.flags & MEDIA_PAD_FL_SINK) {
-			pipe->output = dma;
-			num_outputs++;
+		if (xvip_dma_is_s2mm(dma)) {
+			pipe->s2mm = dma;
+			num_s2mm++;
 		} else {
-			num_inputs++;
+			num_mm2s++;
 		}
 	}
 
-	/* We need exactly one output and zero or one input. */
-	if (num_outputs != 1 || num_inputs > 1)
+	/* We need exactly one S2MM and zero or one MM2S DMA. */
+	if (num_s2mm != 1 || num_mm2s > 1)
 		return -EPIPE;
 
-	pipe->num_dmas = num_inputs + num_outputs;
+	pipe->num_dmas = num_s2mm + num_mm2s;
 
 	return 0;
 }
@@ -230,7 +235,7 @@ static int xvip_pipeline_validate(struct xvip_pipeline *pipe,
 static void __xvip_pipeline_cleanup(struct xvip_pipeline *pipe)
 {
 	pipe->num_dmas = 0;
-	pipe->output = NULL;
+	pipe->s2mm = NULL;
 }
 
 /**
@@ -359,7 +364,7 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 
 	DEFINE_RAW_FLEX(struct dma_interleaved_template, xt, sgl, 1);
 
-	if (dma->queue.type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
+	if (xvip_dma_is_s2mm(dma)) {
 		flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
 		xt->dir = DMA_DEV_TO_MEM;
 		xt->src_sgl = false;

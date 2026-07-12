@@ -25,7 +25,7 @@
  * @media_dev: media device
  * @dev: (OF) device
  * @notifier: V4L2 asynchronous subdevs notifier
- * @dmas: list of DMA channels at the pipeline output and input
+ * @dmas: list of S2MM and MM2S DMA channels
  * @v4l2_caps: V4L2 capabilities of the whole device (see VIDIOC_QUERYCAP)
  */
 struct xvip_composite_device {

@@ -26,36 +26,14 @@ struct xvip_composite_device;
 struct xvip_dma_format;
 
 /**
- * struct xvip_pipeline - Xilinx Video IP pipeline structure
- * @pipe: media pipeline
- * @lock: protects the pipeline state
- */
-struct xvip_pipeline {
-	struct media_pipeline pipe;
-
-	struct mutex lock;
-};
-
-static inline struct xvip_pipeline *to_xvip_pipeline(struct video_device *vdev)
-{
-	struct media_pipeline *pipe = video_device_pipeline(vdev);
-
-	if (!pipe)
-		return NULL;
-
-	return container_of(pipe, struct xvip_pipeline, pipe);
-}
-
-/**
  * struct xvip_dma - Video DMA channel
  * @list: list entry in a composite device dmas list
  * @video: V4L2 video device associated with the DMA channel
  * @pad: media pad for the video device entity
  * @xdev: composite device the DMA channel belongs to
- * @pipe: pipeline belonging to the DMA channel
  * @port: composite device DT node port number for the DMA channel
- * @streaming: whether the DMA engine is streaming, protected by the pipeline
- *	       lock
+ * @streaming: whether the DMA engine is streaming, protected by the composite
+ *	       device pipeline_lock
  * @lock: protects the @format, @fmtinfo and @queue fields
  * @format: active V4L2 pixel format
  * @fmtinfo: format information corresponding to the active @format
@@ -74,7 +52,6 @@ struct xvip_dma {
 	struct media_pad pad;
 
 	struct xvip_composite_device *xdev;
-	struct xvip_pipeline pipe;
 	unsigned int port;
 
 	bool streaming;

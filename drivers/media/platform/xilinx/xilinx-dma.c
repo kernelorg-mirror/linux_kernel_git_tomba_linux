@@ -128,12 +128,12 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  * Return: 0 if successful, or the return value of the failed
  * v4l2_subdev_enable_streams() operation otherwise.
  */
-static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
+static int xvip_pipeline_start_stop(struct media_pipeline *pipe, bool start)
 {
 	struct media_pipeline_pad_iter iter;
 	struct media_pad *pad;
 
-	media_pipeline_for_each_pad(&pipe->pipe, &iter, pad) {
+	media_pipeline_for_each_pad(pipe, &iter, pad) {
 		struct v4l2_subdev *subdev;
 		struct xvip_dma *dma;
 		u32 rpad;
@@ -167,7 +167,6 @@ static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
 
 /**
  * xvip_pipeline_set_stream - Enable/disable streaming on a pipeline
- * @pipe: The pipeline
  * @dma: The DMA engine whose stream state changed
  * @on: Turn the stream on when true or off when false
  *
@@ -182,16 +181,16 @@ static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
  * v4l2_subdev_enable_streams() operation otherwise. Stopping the pipeline
  * never fails. The pipeline state is not updated when the operation fails.
  */
-static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe,
-				    struct xvip_dma *dma, bool on)
+static int xvip_pipeline_set_stream(struct xvip_dma *dma, bool on)
 {
+	struct media_pipeline *pipe = video_device_pipeline(&dma->video);
 	struct media_pipeline_pad_iter iter;
 	unsigned int num_streaming = 0;
 	unsigned int num_dmas = 0;
 	struct media_pad *pad;
 	int ret = 0;
 
-	mutex_lock(&pipe->lock);
+	mutex_lock(&dma->xdev->pipeline_lock);
 
 	dma->streaming = on;
 
@@ -199,7 +198,7 @@ static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe,
 	 * Count the DMA engines in the pipeline and how many of them are
 	 * streaming.
 	 */
-	media_pipeline_for_each_pad(&pipe->pipe, &iter, pad) {
+	media_pipeline_for_each_pad(pipe, &iter, pad) {
 		struct xvip_dma *d;
 
 		if (pad->entity->function != MEDIA_ENT_F_IO_V4L)
@@ -225,11 +224,11 @@ static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe,
 			xvip_pipeline_start_stop(pipe, false);
 	}
 
-	mutex_unlock(&pipe->lock);
+	mutex_unlock(&dma->xdev->pipeline_lock);
 	return ret;
 }
 
-static int xvip_pipeline_validate(struct xvip_pipeline *pipe)
+static int xvip_pipeline_validate(struct media_pipeline *pipe)
 {
 	struct media_pipeline_pad_iter iter;
 	unsigned int num_mm2s = 0;
@@ -237,7 +236,7 @@ static int xvip_pipeline_validate(struct xvip_pipeline *pipe)
 	struct media_pad *pad;
 
 	/* Locate the video nodes in the pipeline. */
-	media_pipeline_for_each_pad(&pipe->pipe, &iter, pad) {
+	media_pipeline_for_each_pad(pipe, &iter, pad) {
 		struct xvip_dma *dma;
 
 		if (pad->entity->function != MEDIA_ENT_F_IO_V4L)
@@ -376,7 +375,6 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	struct xvip_dma *dma = vb2_get_drv_priv(vq);
 	struct xvip_composite_device *xdev = dma->xdev;
 	struct xvip_dma_buffer *buf, *nbuf;
-	struct xvip_pipeline *pipe;
 	int ret;
 
 	dma->sequence = 0;
@@ -385,25 +383,25 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	 * Start streaming on the pipeline. No link touching an entity in the
 	 * pipeline can be activated or deactivated once streaming is started.
 	 *
-	 * Use the pipeline object embedded in the first DMA object that starts
-	 * streaming. The pipeline lock makes the pipe selection, the pipeline
-	 * start and the first start check atomic with respect to the other
-	 * video nodes of the pipeline.
+	 * The pipeline lock makes the pipeline start and the first start check
+	 * atomic with respect to the other video nodes of the pipeline.
 	 */
 	mutex_lock(&xdev->pipeline_lock);
 
-	pipe = to_xvip_pipeline(&dma->video) ? : &dma->pipe;
-
-	ret = video_device_pipeline_start(&dma->video, &pipe->pipe);
+	ret = video_device_pipeline_alloc_start(&dma->video);
 
 	/*
 	 * Validate the pipeline topology when the pipeline is started for the
 	 * first time.
 	 */
-	if (!ret && pipe->pipe.start_count == 1) {
-		ret = xvip_pipeline_validate(pipe);
-		if (ret < 0)
-			video_device_pipeline_stop(&dma->video);
+	if (!ret) {
+		struct media_pipeline *pipe = video_device_pipeline(&dma->video);
+
+		if (pipe->start_count == 1) {
+			ret = xvip_pipeline_validate(pipe);
+			if (ret < 0)
+				video_device_pipeline_stop(&dma->video);
+		}
 	}
 
 	mutex_unlock(&xdev->pipeline_lock);
@@ -424,7 +422,7 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	dma_async_issue_pending(dma->dma);
 
 	/* Start the pipeline. */
-	ret = xvip_pipeline_set_stream(pipe, dma, true);
+	ret = xvip_pipeline_set_stream(dma, true);
 	if (ret < 0)
 		goto error_stop;
 
@@ -450,11 +448,10 @@ error:
 static void xvip_dma_stop_streaming(struct vb2_queue *vq)
 {
 	struct xvip_dma *dma = vb2_get_drv_priv(vq);
-	struct xvip_pipeline *pipe = to_xvip_pipeline(&dma->video);
 	struct xvip_dma_buffer *buf, *nbuf;
 
 	/* Stop the pipeline. */
-	xvip_pipeline_set_stream(pipe, dma, false);
+	xvip_pipeline_set_stream(dma, false);
 
 	/* Stop and reset the DMA engine. */
 	dmaengine_terminate_all(dma->dma);
@@ -655,7 +652,6 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	dma->xdev = xdev;
 	dma->port = port;
 	mutex_init(&dma->lock);
-	mutex_init(&dma->pipe.lock);
 	INIT_LIST_HEAD(&dma->queued_bufs);
 	spin_lock_init(&dma->queued_lock);
 
@@ -754,5 +750,4 @@ void xvip_dma_cleanup(struct xvip_dma *dma)
 	media_entity_cleanup(&dma->video.entity);
 
 	mutex_destroy(&dma->lock);
-	mutex_destroy(&dma->pipe.lock);
 }

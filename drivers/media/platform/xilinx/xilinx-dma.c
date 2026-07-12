@@ -87,17 +87,12 @@ xvip_dma_remote_subdev(struct media_pad *local, u32 *pad)
 	return media_entity_to_v4l2_subdev(remote->entity);
 }
 
-static int xvip_dma_verify_format(struct xvip_dma *dma)
+static int xvip_dma_verify_format(struct xvip_dma *dma,
+				  struct v4l2_subdev *subdev, u32 pad)
 {
 	const struct v4l2_mbus_framefmt *fmt;
 	struct v4l2_subdev_state *state;
-	struct v4l2_subdev *subdev;
 	int ret = 0;
-	u32 pad;
-
-	subdev = xvip_dma_remote_subdev(&dma->pad, &pad);
-	if (!subdev)
-		return -EPIPE;
 
 	state = v4l2_subdev_lock_and_get_active_state(subdev);
 
@@ -113,6 +108,38 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
 
 	return ret;
 }
+
+/*
+ * Validate the link between the DMA video node and the connected subdev. For
+ * S2MM the video node is the link's sink and the framework calls this
+ * operation directly. For MM2S the video node is the link's source, and the
+ * remote subdev's v4l2_subdev_link_validate() delegates the validation to
+ * this operation.
+ */
+static int xvip_dma_link_validate(struct media_link *link)
+{
+	struct media_pad *remote_pad;
+	struct xvip_dma *dma;
+
+	if (is_media_entity_v4l2_video_device(link->sink->entity)) {
+		dma = to_xvip_dma(media_entity_to_video_device(link->sink->entity));
+		remote_pad = link->source;
+	} else {
+		dma = to_xvip_dma(media_entity_to_video_device(link->source->entity));
+		remote_pad = link->sink;
+	}
+
+	if (!is_media_entity_v4l2_subdev(remote_pad->entity))
+		return -EPIPE;
+
+	return xvip_dma_verify_format(dma,
+				      media_entity_to_v4l2_subdev(remote_pad->entity),
+				      remote_pad->index);
+}
+
+static const struct media_entity_operations xvip_dma_media_ops = {
+	.link_validate = xvip_dma_link_validate,
+};
 
 /* -----------------------------------------------------------------------------
  * Pipeline Stream Management
@@ -409,13 +436,6 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	if (ret < 0)
 		goto error;
 
-	/* Verify that the configured format matches the output of the
-	 * connected subdev.
-	 */
-	ret = xvip_dma_verify_format(dma);
-	if (ret < 0)
-		goto error_stop;
-
 	/* Start the DMA engine. This must be done before starting the blocks
 	 * in the pipeline to avoid DMA synchronization issues.
 	 */
@@ -671,6 +691,7 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 
 	/* ... and the video node... */
 	dma->video.fops = &xvip_dma_fops;
+	dma->video.entity.ops = &xvip_dma_media_ops;
 	dma->video.v4l2_dev = &xdev->v4l2_dev;
 	dma->video.queue = &dma->queue;
 	snprintf(dma->video.name, sizeof(dma->video.name), "%pOFn %s %u",

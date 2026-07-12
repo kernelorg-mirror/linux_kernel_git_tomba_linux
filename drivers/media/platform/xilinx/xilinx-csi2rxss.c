@@ -204,7 +204,6 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  * @events: counter for events
  * @vcx_events: counter for vcx_events
  * @dev: Platform structure
- * @rsubdev: Remote subdev connected to sink pad
  * @rst_gpio: reset to video_aresetn
  * @clks: array of clocks
  * @iomem: Base address of subsystem
@@ -223,7 +222,6 @@ struct xcsi2rxss_state {
 	u32 events[XCSI_NUM_EVENTS];
 	u32 vcx_events[XCSI_VCX_NUM_EVENTS];
 	struct device *dev;
-	struct v4l2_subdev *rsubdev;
 	struct gpio_desc *rst_gpio;
 	struct clk_bulk_data *clks;
 	void __iomem *iomem;
@@ -461,15 +459,23 @@ static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 	return 0;
 }
 
-static struct v4l2_subdev *xcsi2rxss_get_remote_subdev(struct media_pad *local)
+static int xcsi2rxss_set_remote_streams(struct xcsi2rxss_state *state,
+					 bool enable)
 {
 	struct media_pad *remote;
+	struct v4l2_subdev *subdev;
 
-	remote = media_pad_remote_pad_first(local);
+	remote = media_pad_remote_pad_first(&state->pads[XCSI_PAD_SINK]);
 	if (!remote || !is_media_entity_v4l2_subdev(remote->entity))
-		return NULL;
+		return -EPIPE;
 
-	return media_entity_to_v4l2_subdev(remote->entity);
+	subdev = media_entity_to_v4l2_subdev(remote->entity);
+
+	if (enable)
+		return v4l2_subdev_enable_streams(subdev, remote->index,
+						  BIT_ULL(0));
+
+	return v4l2_subdev_disable_streams(subdev, remote->index, BIT_ULL(0));
 }
 
 static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
@@ -492,10 +498,7 @@ static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
 
 	state->streaming = true;
 
-	state->rsubdev =
-		xcsi2rxss_get_remote_subdev(&state->pads[XCSI_PAD_SINK]);
-
-	ret = v4l2_subdev_call(state->rsubdev, video, s_stream, 1);
+	ret = xcsi2rxss_set_remote_streams(state, true);
 	if (ret) {
 		/* disable interrupts */
 		xcsi2rxss_clr(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
@@ -511,7 +514,7 @@ static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
 
 static void xcsi2rxss_stop_stream(struct xcsi2rxss_state *state)
 {
-	v4l2_subdev_call(state->rsubdev, video, s_stream, 0);
+	xcsi2rxss_set_remote_streams(state, false);
 
 	/* disable interrupts */
 	xcsi2rxss_clr(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);

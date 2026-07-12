@@ -24,9 +24,6 @@
 #include "xilinx-dma.h"
 #include "xilinx-vipp.h"
 
-#define XVIPP_DMA_S2MM				0
-#define XVIPP_DMA_MM2S				1
-
 /**
  * struct xvip_graph_entity - Entity in the video graph
  * @asd: subdev asynchronous registration information

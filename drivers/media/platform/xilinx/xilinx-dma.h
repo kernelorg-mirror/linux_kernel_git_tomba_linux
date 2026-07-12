@@ -28,10 +28,8 @@ struct xvip_dma_format;
 /**
  * struct xvip_pipeline - Xilinx Video IP pipeline structure
  * @pipe: media pipeline
- * @lock: protects the pipeline @stream_count
+ * @lock: protects the pipeline state
  * @use_count: number of DMA engines using the pipeline
- * @stream_count: number of DMA engines currently streaming
- * @num_dmas: number of DMA engines in the pipeline
  * @s2mm: S2MM (capture) DMA engine of the pipeline
  */
 struct xvip_pipeline {
@@ -39,9 +37,7 @@ struct xvip_pipeline {
 
 	struct mutex lock;
 	unsigned int use_count;
-	unsigned int stream_count;
 
-	unsigned int num_dmas;
 	struct xvip_dma *s2mm;
 };
 
@@ -63,6 +59,8 @@ static inline struct xvip_pipeline *to_xvip_pipeline(struct video_device *vdev)
  * @xdev: composite device the DMA channel belongs to
  * @pipe: pipeline belonging to the DMA channel
  * @port: composite device DT node port number for the DMA channel
+ * @streaming: whether the DMA engine is streaming, protected by the pipeline
+ *	       lock
  * @lock: protects the @format, @fmtinfo and @queue fields
  * @format: active V4L2 pixel format
  * @fmtinfo: format information corresponding to the active @format
@@ -83,6 +81,8 @@ struct xvip_dma {
 	struct xvip_composite_device *xdev;
 	struct xvip_pipeline pipe;
 	unsigned int port;
+
+	bool streaming;
 
 	struct mutex lock;
 	struct v4l2_pix_format format;

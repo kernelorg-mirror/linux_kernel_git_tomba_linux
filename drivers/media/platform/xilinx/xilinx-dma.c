@@ -701,7 +701,7 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	dma->video.queue = &dma->queue;
 	snprintf(dma->video.name, sizeof(dma->video.name), "%pOFn %s %u",
 		 xdev->dev->of_node,
-		 type == V4L2_BUF_TYPE_VIDEO_CAPTURE ? "s2mm" : "mm2s",
+		 type == V4L2_BUF_TYPE_VIDEO_CAPTURE ? "output" : "input",
 		 port);
 	dma->video.vfl_type = VFL_TYPE_VIDEO;
 	dma->video.vfl_dir = type == V4L2_BUF_TYPE_VIDEO_CAPTURE

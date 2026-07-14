@@ -74,7 +74,6 @@
  * @pads: media pads
  * @npads: number of pads (1 or 2)
  * @has_input: whether an input is connected to the sink pad
- * @formats: active V4L2 media bus format for each pad
  * @default_format: default V4L2 media bus format
  * @vip_format: format information corresponding to the active format
  * @bayer: boolean flag if TPG is set to any bayer format
@@ -92,7 +91,6 @@ struct xtpg_device {
 	unsigned int npads;
 	bool has_input;
 
-	struct v4l2_mbus_framefmt formats[2];
 	struct v4l2_mbus_framefmt default_format;
 	const struct xvip_video_format *vip_format;
 	bool bayer;
@@ -166,21 +164,31 @@ static void xtpg_update_pattern_control(struct xtpg_device *xtpg,
 static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
-	unsigned int width = xtpg->formats[0].width;
-	unsigned int height = xtpg->formats[0].height;
+	const struct v4l2_mbus_framefmt *format;
+	struct v4l2_subdev_state *state;
+	unsigned int width;
+	unsigned int height;
 	bool passthrough;
 	u32 bayer_phase;
+
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
 
 	if (!enable) {
 		xvip_stop(&xtpg->xvip);
 		if (xtpg->vtc)
 			xvtc_generator_stop(xtpg->vtc);
 
-		xtpg_update_pattern_control(xtpg, true, true);
+		__xtpg_update_pattern_control(xtpg, true, true);
+
+		v4l2_subdev_unlock_state(state);
 		return 0;
 	}
 
-	xvip_set_frame_size(&xtpg->xvip, &xtpg->formats[0]);
+	format = v4l2_subdev_state_get_format(state, 0);
+	width = format->width;
+	height = format->height;
+
+	xvip_set_frame_size(&xtpg->xvip, format);
 
 	if (xtpg->vtc) {
 		struct xvtc_config config = {
@@ -193,9 +201,9 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 		unsigned int vtotal;
 
 		htotal = min_t(unsigned int, XVTC_MAX_HSIZE,
-			       v4l2_ctrl_g_ctrl(xtpg->hblank) + width);
+			       xtpg->hblank->cur.val + width);
 		vtotal = min_t(unsigned int, XVTC_MAX_VSIZE,
-			       v4l2_ctrl_g_ctrl(xtpg->vblank) + height);
+			       xtpg->vblank->cur.val + height);
 
 		config.hsync_end = htotal - 1;
 		config.hsize = htotal;
@@ -207,12 +215,8 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 
 	/*
 	 * Configure the bayer phase and video timing mux based on the
-	 * operation mode (passthrough or test pattern generation). The test
-	 * pattern can be modified by the control set handler, we thus need to
-	 * take the control lock here to avoid races.
+	 * operation mode (passthrough or test pattern generation).
 	 */
-	mutex_lock(xtpg->ctrl_handler.lock);
-
 	xvip_clr_and_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
 			 XTPG_PATTERN_MASK, xtpg->pattern->cur.val);
 
@@ -223,14 +227,12 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 	passthrough = xtpg->pattern->cur.val == 0;
 	__xtpg_update_pattern_control(xtpg, passthrough, !passthrough);
 
-	mutex_unlock(xtpg->ctrl_handler.lock);
-
 	/*
 	 * For TPG v5.0, the bayer phase needs to be off for the pass through
 	 * mode, otherwise the external input would be subsampled.
 	 */
 	bayer_phase = passthrough ? XTPG_BAYER_PHASE_OFF
-		    : xtpg_get_bayer_phase(xtpg->formats[0].code);
+		    : xtpg_get_bayer_phase(format->code);
 	xvip_write(&xtpg->xvip, XTPG_BAYER_PHASE, bayer_phase);
 
 	if (xtpg->vtmux_gpio)
@@ -238,39 +240,14 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 
 	xvip_start(&xtpg->xvip);
 
+	v4l2_subdev_unlock_state(state);
+
 	return 0;
 }
 
 /* -----------------------------------------------------------------------------
  * V4L2 Subdevice Pad Operations
  */
-
-static struct v4l2_mbus_framefmt *
-__xtpg_get_pad_format(struct xtpg_device *xtpg,
-		      struct v4l2_subdev_state *sd_state,
-		      unsigned int pad, u32 which)
-{
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_state_get_format(sd_state, pad);
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		return &xtpg->formats[pad];
-	default:
-		return NULL;
-	}
-}
-
-static int xtpg_get_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_state *sd_state,
-			   struct v4l2_subdev_format *fmt)
-{
-	struct xtpg_device *xtpg = to_tpg(subdev);
-
-	fmt->format = *__xtpg_get_pad_format(xtpg, sd_state, fmt->pad,
-					     fmt->which);
-
-	return 0;
-}
 
 static int xtpg_set_format(struct v4l2_subdev *subdev,
 			   struct v4l2_subdev_state *sd_state,
@@ -280,7 +257,7 @@ static int xtpg_set_format(struct v4l2_subdev *subdev,
 	struct v4l2_mbus_framefmt *__format;
 	u32 bayer_phase;
 
-	__format = __xtpg_get_pad_format(xtpg, sd_state, fmt->pad, fmt->which);
+	__format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 
 	/* In two pads mode the source pad format is always identical to the
 	 * sink pad format.
@@ -303,8 +280,7 @@ static int xtpg_set_format(struct v4l2_subdev *subdev,
 
 	/* Propagate the format to the source pad. */
 	if (xtpg->npads == 2) {
-		__format = __xtpg_get_pad_format(xtpg, sd_state, 1,
-						 fmt->which);
+		__format = v4l2_subdev_state_get_format(sd_state, 1);
 		*__format = fmt->format;
 	}
 
@@ -345,24 +321,18 @@ static int xtpg_enum_frame_size(struct v4l2_subdev *subdev,
 	return 0;
 }
 
-static int xtpg_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
+static int xtpg_init_state(struct v4l2_subdev *subdev,
+			   struct v4l2_subdev_state *sd_state)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
 	struct v4l2_mbus_framefmt *format;
+	unsigned int i;
 
-	format = v4l2_subdev_state_get_format(fh->state, 0);
-	*format = xtpg->default_format;
-
-	if (xtpg->npads == 2) {
-		format = v4l2_subdev_state_get_format(fh->state, 1);
+	for (i = 0; i < xtpg->npads; i++) {
+		format = v4l2_subdev_state_get_format(sd_state, i);
 		*format = xtpg->default_format;
 	}
 
-	return 0;
-}
-
-static int xtpg_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
 	return 0;
 }
 
@@ -466,7 +436,7 @@ static const struct v4l2_subdev_video_ops xtpg_video_ops = {
 static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {
 	.enum_mbus_code		= xvip_enum_mbus_code,
 	.enum_frame_size	= xtpg_enum_frame_size,
-	.get_fmt		= xtpg_get_format,
+	.get_fmt		= v4l2_subdev_get_fmt,
 	.set_fmt		= xtpg_set_format,
 };
 
@@ -477,8 +447,7 @@ static const struct v4l2_subdev_ops xtpg_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops xtpg_internal_ops = {
-	.open	= xtpg_open,
-	.close	= xtpg_close,
+	.init_state	= xtpg_init_state,
 };
 
 /*
@@ -809,10 +778,6 @@ static int xtpg_probe(struct platform_device *pdev)
 	if (bayer_phase != XTPG_BAYER_PHASE_OFF)
 		xtpg->bayer = true;
 
-	xtpg->formats[0] = xtpg->default_format;
-	if (xtpg->npads == 2)
-		xtpg->formats[1] = xtpg->default_format;
-
 	/* Initialize V4L2 subdevice and media entity */
 	subdev = &xtpg->xvip.subdev;
 	v4l2_subdev_init(subdev, &xtpg_ops);
@@ -858,6 +823,12 @@ static int xtpg_probe(struct platform_device *pdev)
 		goto error;
 	}
 
+	subdev->state_lock = subdev->ctrl_handler->lock;
+
+	ret = v4l2_subdev_init_finalize(subdev);
+	if (ret < 0)
+		goto error;
+
 	platform_set_drvdata(pdev, xtpg);
 
 	xvip_print_version(&xtpg->xvip);
@@ -872,6 +843,7 @@ static int xtpg_probe(struct platform_device *pdev)
 
 error:
 	v4l2_ctrl_handler_free(&xtpg->ctrl_handler);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 	xvtc_put(xtpg->vtc);
 error_resource:
@@ -886,6 +858,7 @@ static void xtpg_remove(struct platform_device *pdev)
 
 	v4l2_async_unregister_subdev(subdev);
 	v4l2_ctrl_handler_free(&xtpg->ctrl_handler);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 
 	xvip_cleanup_resources(&xtpg->xvip);

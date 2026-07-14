@@ -161,6 +161,28 @@ static void xtpg_update_pattern_control(struct xtpg_device *xtpg,
  * V4L2 Subdevice Video Operations
  */
 
+static int xtpg_set_remote_stream(struct xtpg_device *xtpg, int enable)
+{
+	struct media_pad *remote;
+	struct v4l2_subdev *subdev;
+	int ret;
+
+	if (xtpg->npads == 1)
+		return 0;
+
+	remote = media_pad_remote_pad_first(&xtpg->pads[0]);
+	if (!remote || !is_media_entity_v4l2_subdev(remote->entity))
+		return 0;
+
+	subdev = media_entity_to_v4l2_subdev(remote->entity);
+
+	ret = v4l2_subdev_call(subdev, video, s_stream, enable);
+	if (ret < 0 && ret != -ENOIOCTLCMD)
+		return ret;
+
+	return 0;
+}
+
 static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
@@ -170,10 +192,13 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 	unsigned int height;
 	bool passthrough;
 	u32 bayer_phase;
+	int ret;
 
 	state = v4l2_subdev_lock_and_get_active_state(subdev);
 
 	if (!enable) {
+		xtpg_set_remote_stream(xtpg, false);
+
 		xvip_stop(&xtpg->xvip);
 		if (xtpg->vtc)
 			xvtc_generator_stop(xtpg->vtc);
@@ -239,6 +264,18 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 		gpiod_set_value_cansleep(xtpg->vtmux_gpio, !passthrough);
 
 	xvip_start(&xtpg->xvip);
+
+	ret = xtpg_set_remote_stream(xtpg, true);
+	if (ret) {
+		xvip_stop(&xtpg->xvip);
+		if (xtpg->vtc)
+			xvtc_generator_stop(xtpg->vtc);
+
+		__xtpg_update_pattern_control(xtpg, true, true);
+
+		v4l2_subdev_unlock_state(state);
+		return ret;
+	}
 
 	v4l2_subdev_unlock_state(state);
 

@@ -161,7 +161,7 @@ static void xtpg_update_pattern_control(struct xtpg_device *xtpg,
  * V4L2 Subdevice Video Operations
  */
 
-static int xtpg_set_remote_stream(struct xtpg_device *xtpg, int enable)
+static int xtpg_set_remote_stream(struct xtpg_device *xtpg, bool enable)
 {
 	struct media_pad *remote;
 	struct v4l2_subdev *subdev;
@@ -176,7 +176,13 @@ static int xtpg_set_remote_stream(struct xtpg_device *xtpg, int enable)
 
 	subdev = media_entity_to_v4l2_subdev(remote->entity);
 
-	ret = v4l2_subdev_call(subdev, video, s_stream, enable);
+	if (enable)
+		ret = v4l2_subdev_enable_streams(subdev, remote->index,
+						 BIT_ULL(0));
+	else
+		ret = v4l2_subdev_disable_streams(subdev, remote->index,
+						  BIT_ULL(0));
+
 	if (ret < 0 && ret != -ENOIOCTLCMD)
 		return ret;
 

@@ -111,27 +111,32 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  */
 
 /**
- * xvip_pipeline_start_stop - Start ot stop streaming on a pipeline
+ * xvip_pipeline_start_stop - Start or stop streaming on a pipeline
  * @pipe: The pipeline
  * @start: Start (when true) or stop (when false) the pipeline
  *
  * Start or stop streaming on the subdev directly connected to the video node.
  *
- * Return: 0 if successful, or the return value of the failed video::s_stream
- * operation otherwise.
+ * Return: 0 if successful, or the return value of the failed
+ * v4l2_subdev_enable_streams() operation otherwise.
  */
 static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
 {
 	struct xvip_dma *dma = pipe->output;
 	struct v4l2_subdev *subdev;
+	u32 pad;
 	int ret;
 
-	subdev = xvip_dma_remote_subdev(&dma->pad, NULL);
+	subdev = xvip_dma_remote_subdev(&dma->pad, &pad);
 	if (!subdev)
 		return -EPIPE;
 
-	ret = v4l2_subdev_call(subdev, video, s_stream, start);
-	if (start && ret < 0 && ret != -ENOIOCTLCMD)
+	if (start)
+		ret = v4l2_subdev_enable_streams(subdev, pad, BIT_ULL(0));
+	else
+		ret = v4l2_subdev_disable_streams(subdev, pad, BIT_ULL(0));
+
+	if (start && ret < 0)
 		return ret;
 
 	return 0;
@@ -158,9 +163,9 @@ static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
  * decrement the pipeline streaming count and disable all entities in the
  * pipeline when the streaming count reaches zero.
  *
- * Return: 0 if successful, or the return value of the failed video::s_stream
- * operation otherwise. Stopping the pipeline never fails. The pipeline state is
- * not updated when the operation fails.
+ * Return: 0 if successful, or the return value of the failed
+ * v4l2_subdev_enable_streams() operation otherwise. Stopping the pipeline
+ * never fails. The pipeline state is not updated when the operation fails.
  */
 static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe, bool on)
 {

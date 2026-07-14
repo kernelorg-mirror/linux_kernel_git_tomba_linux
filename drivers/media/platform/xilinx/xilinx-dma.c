@@ -84,26 +84,29 @@ xvip_dma_remote_subdev(struct media_pad *local, u32 *pad)
 
 static int xvip_dma_verify_format(struct xvip_dma *dma)
 {
-	struct v4l2_subdev_format fmt = {
-		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
-	};
+	const struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_subdev_state *state;
 	struct v4l2_subdev *subdev;
-	int ret;
+	int ret = 0;
+	u32 pad;
 
-	subdev = xvip_dma_remote_subdev(&dma->pad, &fmt.pad);
+	subdev = xvip_dma_remote_subdev(&dma->pad, &pad);
 	if (!subdev)
 		return -EPIPE;
 
-	ret = v4l2_subdev_call(subdev, pad, get_fmt, NULL, &fmt);
-	if (ret < 0)
-		return ret == -ENOIOCTLCMD ? -EINVAL : ret;
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
 
-	if (dma->fmtinfo->code != fmt.format.code ||
-	    dma->format.height != fmt.format.height ||
-	    dma->format.width != fmt.format.width)
-		return -EINVAL;
+	fmt = v4l2_subdev_state_get_format(state, pad);
 
-	return 0;
+	if (!fmt ||
+	    dma->fmtinfo->code != fmt->code ||
+	    dma->format.height != fmt->height ||
+	    dma->format.width != fmt->width)
+		ret = -EINVAL;
+
+	v4l2_subdev_unlock_state(state);
+
+	return ret;
 }
 
 /* -----------------------------------------------------------------------------

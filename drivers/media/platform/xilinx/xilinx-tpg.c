@@ -9,8 +9,11 @@
  *           Laurent Pinchart <laurent.pinchart@ideasonboard.com>
  */
 
+#include <linux/bitops.h>
+#include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
+#include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_graph.h>
@@ -21,11 +24,34 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-subdev.h>
 
-#include "xilinx-vip.h"
+#include <dt-bindings/media/xilinx-vip.h>
+
 #include "xilinx-vtc.h"
 
+#define XTPG_MIN_WIDTH				32
+#define XTPG_MAX_WIDTH				7680
+#define XTPG_MIN_HEIGHT				32
+#define XTPG_MAX_HEIGHT				7680
+
+#define XTPG_CTRL_CONTROL			0x0000
+#define XTPG_CTRL_CONTROL_SW_ENABLE		BIT(0)
+#define XTPG_CTRL_CONTROL_REG_UPDATE		BIT(1)
+#define XTPG_CTRL_CONTROL_SW_RESET		BIT(31)
 #define XTPG_CTRL_STATUS_SLAVE_ERROR		BIT(16)
 #define XTPG_CTRL_IRQ_SLAVE_ERROR		BIT(16)
+#define XTPG_CTRL_VERSION			0x0010
+#define XTPG_CTRL_VERSION_MAJOR_MASK		(0xff << 24)
+#define XTPG_CTRL_VERSION_MAJOR_SHIFT		24
+#define XTPG_CTRL_VERSION_MINOR_MASK		(0xff << 16)
+#define XTPG_CTRL_VERSION_MINOR_SHIFT		16
+#define XTPG_CTRL_VERSION_REVISION_MASK		(0xf << 12)
+#define XTPG_CTRL_VERSION_REVISION_SHIFT	12
+
+#define XTPG_ACTIVE_SIZE			0x0020
+#define XTPG_ACTIVE_VSIZE_MASK			(0x7ff << 16)
+#define XTPG_ACTIVE_VSIZE_SHIFT			16
+#define XTPG_ACTIVE_HSIZE_MASK			(0x7ff << 0)
+#define XTPG_ACTIVE_HSIZE_SHIFT			0
 
 #define XTPG_PATTERN_CONTROL			0x0100
 #define XTPG_PATTERN_MASK			(0xf << 0)
@@ -64,13 +90,91 @@
  * cycle for the sync pulse and one clock cycle for the back porch.
  */
 #define XTPG_MIN_HBLANK			3
-#define XTPG_MAX_HBLANK			(XVTC_MAX_HSIZE - XVIP_MIN_WIDTH)
+#define XTPG_MAX_HBLANK			(XVTC_MAX_HSIZE - XTPG_MIN_WIDTH)
 #define XTPG_MIN_VBLANK			3
-#define XTPG_MAX_VBLANK			(XVTC_MAX_VSIZE - XVIP_MIN_HEIGHT)
+#define XTPG_MAX_VBLANK			(XVTC_MAX_VSIZE - XTPG_MIN_HEIGHT)
+
+/**
+ * struct xtpg_video_format - AXI4-Stream video format description
+ * @vf_code: AXI4 video format code
+ * @width: AXI4 format width in bits per component
+ * @pattern: CFA pattern for Mono/Sensor formats
+ * @code: media bus format code
+ */
+struct xtpg_video_format {
+	unsigned int vf_code;
+	unsigned int width;
+	const char *pattern;
+	unsigned int code;
+};
+
+static const struct xtpg_video_format xtpg_video_formats[] = {
+	{ XVIP_VF_YUV_422, 8, NULL, MEDIA_BUS_FMT_UYVY8_1X16, },
+	{ XVIP_VF_YUV_444, 8, NULL, MEDIA_BUS_FMT_VUY8_1X24, },
+	{ XVIP_VF_RBG, 8, NULL, MEDIA_BUS_FMT_RBG888_1X24, },
+	{ XVIP_VF_MONO_SENSOR, 8, "mono", MEDIA_BUS_FMT_Y8_1X8, },
+	{ XVIP_VF_MONO_SENSOR, 8, "rggb", MEDIA_BUS_FMT_SRGGB8_1X8, },
+	{ XVIP_VF_MONO_SENSOR, 8, "grbg", MEDIA_BUS_FMT_SGRBG8_1X8, },
+	{ XVIP_VF_MONO_SENSOR, 8, "gbrg", MEDIA_BUS_FMT_SGBRG8_1X8, },
+	{ XVIP_VF_MONO_SENSOR, 8, "bggr", MEDIA_BUS_FMT_SBGGR8_1X8, },
+	{ XVIP_VF_MONO_SENSOR, 12, "mono", MEDIA_BUS_FMT_Y12_1X12, },
+	{ XVIP_VF_MONO_SENSOR, 10, "rggb", MEDIA_BUS_FMT_SRGGB10_1X10, },
+};
+
+/**
+ * xtpg_of_get_format - Parse a device tree node and return format information
+ * @node: the device tree node
+ *
+ * Read the xlnx,video-format, xlnx,video-width and xlnx,cfa-pattern properties
+ * from the device tree @node passed as an argument and return the corresponding
+ * format information.
+ *
+ * Return: a pointer to the format information structure corresponding to the
+ * format name and width, or ERR_PTR if no corresponding format can be found.
+ */
+static const struct xtpg_video_format *
+xtpg_of_get_format(struct device_node *node)
+{
+	const char *pattern = "mono";
+	unsigned int vf_code;
+	unsigned int i;
+	u32 width;
+	int ret;
+
+	ret = of_property_read_u32(node, "xlnx,video-format", &vf_code);
+	if (ret < 0)
+		return ERR_PTR(ret);
+
+	ret = of_property_read_u32(node, "xlnx,video-width", &width);
+	if (ret < 0)
+		return ERR_PTR(ret);
+
+	if (vf_code == XVIP_VF_MONO_SENSOR)
+		of_property_read_string(node, "xlnx,cfa-pattern", &pattern);
+
+	for (i = 0; i < ARRAY_SIZE(xtpg_video_formats); ++i) {
+		const struct xtpg_video_format *format = &xtpg_video_formats[i];
+
+		if (format->vf_code != vf_code || format->width != width)
+			continue;
+
+		if (vf_code == XVIP_VF_MONO_SENSOR &&
+		    strcmp(pattern, format->pattern))
+			continue;
+
+		return format;
+	}
+
+	return ERR_PTR(-EINVAL);
+}
 
 /**
  * struct xtpg_device - Xilinx Test Pattern Generator device structure
- * @xvip: Xilinx Video IP device
+ * @subdev: V4L2 subdevice
+ * @dev: (OF) device
+ * @iomem: device I/O register space remapped to kernel virtual memory
+ * @clk: video core clock
+ * @saved_ctrl: saved control register for resume / suspend
  * @pads: media pads
  * @npads: number of pads (1 or 2)
  * @has_input: whether an input is connected to the sink pad
@@ -85,14 +189,18 @@
  * @vtmux_gpio: video timing mux GPIO
  */
 struct xtpg_device {
-	struct xvip_device xvip;
+	struct v4l2_subdev subdev;
+	struct device *dev;
+	void __iomem *iomem;
+	struct clk *clk;
+	u32 saved_ctrl;
 
 	struct media_pad pads[2];
 	unsigned int npads;
 	bool has_input;
 
 	struct v4l2_mbus_framefmt default_format;
-	const struct xvip_video_format *vip_format;
+	const struct xtpg_video_format *vip_format;
 	bool bayer;
 
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -106,7 +214,83 @@ struct xtpg_device {
 
 static inline struct xtpg_device *to_tpg(struct v4l2_subdev *subdev)
 {
-	return container_of(subdev, struct xtpg_device, xvip.subdev);
+	return container_of(subdev, struct xtpg_device, subdev);
+}
+
+/* -----------------------------------------------------------------------------
+ * Register Access
+ */
+
+static inline u32 xtpg_read(struct xtpg_device *xtpg, u32 addr)
+{
+	return ioread32(xtpg->iomem + addr);
+}
+
+static inline void xtpg_write(struct xtpg_device *xtpg, u32 addr, u32 value)
+{
+	iowrite32(value, xtpg->iomem + addr);
+}
+
+static inline void xtpg_clr(struct xtpg_device *xtpg, u32 addr, u32 clr)
+{
+	xtpg_write(xtpg, addr, xtpg_read(xtpg, addr) & ~clr);
+}
+
+static inline void xtpg_set(struct xtpg_device *xtpg, u32 addr, u32 set)
+{
+	xtpg_write(xtpg, addr, xtpg_read(xtpg, addr) | set);
+}
+
+static void xtpg_clr_or_set(struct xtpg_device *xtpg, u32 addr, u32 mask,
+			    bool set)
+{
+	u32 reg;
+
+	reg = xtpg_read(xtpg, addr);
+	reg = set ? reg | mask : reg & ~mask;
+	xtpg_write(xtpg, addr, reg);
+}
+
+static void xtpg_clr_and_set(struct xtpg_device *xtpg, u32 addr, u32 clr,
+			     u32 set)
+{
+	u32 reg;
+
+	reg = xtpg_read(xtpg, addr);
+	reg &= ~clr;
+	reg |= set;
+	xtpg_write(xtpg, addr, reg);
+}
+
+static inline void xtpg_reset(struct xtpg_device *xtpg)
+{
+	xtpg_write(xtpg, XTPG_CTRL_CONTROL, XTPG_CTRL_CONTROL_SW_RESET);
+}
+
+static inline void xtpg_start(struct xtpg_device *xtpg)
+{
+	xtpg_set(xtpg, XTPG_CTRL_CONTROL,
+		 XTPG_CTRL_CONTROL_SW_ENABLE | XTPG_CTRL_CONTROL_REG_UPDATE);
+}
+
+static inline void xtpg_stop(struct xtpg_device *xtpg)
+{
+	xtpg_clr(xtpg, XTPG_CTRL_CONTROL, XTPG_CTRL_CONTROL_SW_ENABLE);
+}
+
+static void xtpg_print_version(struct xtpg_device *xtpg)
+{
+	u32 version;
+
+	version = xtpg_read(xtpg, XTPG_CTRL_VERSION);
+
+	dev_info(xtpg->dev, "device found, version %u.%02x%x\n",
+		 (version & XTPG_CTRL_VERSION_MAJOR_MASK) >>
+		 XTPG_CTRL_VERSION_MAJOR_SHIFT,
+		 (version & XTPG_CTRL_VERSION_MINOR_MASK) >>
+		 XTPG_CTRL_VERSION_MINOR_SHIFT,
+		 (version & XTPG_CTRL_VERSION_REVISION_MASK) >>
+		 XTPG_CTRL_VERSION_REVISION_SHIFT);
 }
 
 static u32 xtpg_get_bayer_phase(unsigned int code)
@@ -205,7 +389,9 @@ static int xtpg_enable_streams(struct v4l2_subdev *subdev,
 	width = format->width;
 	height = format->height;
 
-	xvip_set_frame_size(&xtpg->xvip, format);
+	xtpg_write(xtpg, XTPG_ACTIVE_SIZE,
+		   (height << XTPG_ACTIVE_VSIZE_SHIFT) |
+		   (width << XTPG_ACTIVE_HSIZE_SHIFT));
 
 	if (xtpg->vtc) {
 		struct xvtc_config config = {
@@ -234,7 +420,7 @@ static int xtpg_enable_streams(struct v4l2_subdev *subdev,
 	 * Configure the bayer phase and video timing mux based on the
 	 * operation mode (passthrough or test pattern generation).
 	 */
-	xvip_clr_and_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
+	xtpg_clr_and_set(xtpg, XTPG_PATTERN_CONTROL,
 			 XTPG_PATTERN_MASK, xtpg->pattern->cur.val);
 
 	/*
@@ -250,16 +436,16 @@ static int xtpg_enable_streams(struct v4l2_subdev *subdev,
 	 */
 	bayer_phase = passthrough ? XTPG_BAYER_PHASE_OFF
 		    : xtpg_get_bayer_phase(format->code);
-	xvip_write(&xtpg->xvip, XTPG_BAYER_PHASE, bayer_phase);
+	xtpg_write(xtpg, XTPG_BAYER_PHASE, bayer_phase);
 
 	if (xtpg->vtmux_gpio)
 		gpiod_set_value_cansleep(xtpg->vtmux_gpio, !passthrough);
 
-	xvip_start(&xtpg->xvip);
+	xtpg_start(xtpg);
 
 	ret = xtpg_set_remote_stream(xtpg, true);
 	if (ret) {
-		xvip_stop(&xtpg->xvip);
+		xtpg_stop(xtpg);
 		if (xtpg->vtc)
 			xvtc_generator_stop(xtpg->vtc);
 
@@ -279,7 +465,7 @@ static int xtpg_disable_streams(struct v4l2_subdev *subdev,
 
 	xtpg_set_remote_stream(xtpg, false);
 
-	xvip_stop(&xtpg->xvip);
+	xtpg_stop(xtpg);
 	if (xtpg->vtc)
 		xvtc_generator_stop(xtpg->vtc);
 
@@ -317,7 +503,10 @@ static int xtpg_set_format(struct v4l2_subdev *subdev,
 			__format->code = fmt->format.code;
 	}
 
-	xvip_set_format_size(__format, fmt);
+	__format->width = clamp_t(unsigned int, fmt->format.width,
+				  XTPG_MIN_WIDTH, XTPG_MAX_WIDTH);
+	__format->height = clamp_t(unsigned int, fmt->format.height,
+				   XTPG_MIN_HEIGHT, XTPG_MAX_HEIGHT);
 
 	fmt->format = *__format;
 
@@ -333,6 +522,28 @@ static int xtpg_set_format(struct v4l2_subdev *subdev,
 /* -----------------------------------------------------------------------------
  * V4L2 Subdevice Operations
  */
+
+static int xtpg_enum_mbus_code(struct v4l2_subdev *subdev,
+			       struct v4l2_subdev_state *sd_state,
+			       struct v4l2_subdev_mbus_code_enum *code)
+{
+	struct v4l2_mbus_framefmt *format;
+
+	/* Enumerating media bus codes based on the active configuration isn't
+	 * supported yet.
+	 */
+	if (code->which == V4L2_SUBDEV_FORMAT_ACTIVE)
+		return -EINVAL;
+
+	if (code->index)
+		return -EINVAL;
+
+	format = v4l2_subdev_state_get_format(sd_state, code->pad);
+
+	code->code = format->code;
+
+	return 0;
+}
 
 static int xtpg_enum_frame_size(struct v4l2_subdev *subdev,
 				struct v4l2_subdev_state *sd_state,
@@ -350,10 +561,10 @@ static int xtpg_enum_frame_size(struct v4l2_subdev *subdev,
 	 * the sink pad size
 	 */
 	if (fse->pad == 0) {
-		fse->min_width = XVIP_MIN_WIDTH;
-		fse->max_width = XVIP_MAX_WIDTH;
-		fse->min_height = XVIP_MIN_HEIGHT;
-		fse->max_height = XVIP_MAX_HEIGHT;
+		fse->min_width = XTPG_MIN_WIDTH;
+		fse->max_width = XTPG_MAX_WIDTH;
+		fse->min_height = XTPG_MIN_HEIGHT;
+		fse->max_height = XTPG_MAX_HEIGHT;
 	} else {
 		fse->min_width = format->width;
 		fse->max_width = format->width;
@@ -386,79 +597,79 @@ static int xtpg_s_ctrl(struct v4l2_ctrl *ctrl)
 						ctrl_handler);
 	switch (ctrl->id) {
 	case V4L2_CID_TEST_PATTERN:
-		xvip_clr_and_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
+		xtpg_clr_and_set(xtpg, XTPG_PATTERN_CONTROL,
 				 XTPG_PATTERN_MASK, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_CROSS_HAIRS:
-		xvip_clr_or_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
+		xtpg_clr_or_set(xtpg, XTPG_PATTERN_CONTROL,
 				XTPG_PATTERN_CONTROL_CROSS_HAIRS, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_MOVING_BOX:
-		xvip_clr_or_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
+		xtpg_clr_or_set(xtpg, XTPG_PATTERN_CONTROL,
 				XTPG_PATTERN_CONTROL_MOVING_BOX, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_COLOR_MASK:
-		xvip_clr_and_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
+		xtpg_clr_and_set(xtpg, XTPG_PATTERN_CONTROL,
 				 XTPG_PATTERN_CONTROL_COLOR_MASK_MASK,
 				 ctrl->val <<
 				 XTPG_PATTERN_CONTROL_COLOR_MASK_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_STUCK_PIXEL:
-		xvip_clr_or_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
+		xtpg_clr_or_set(xtpg, XTPG_PATTERN_CONTROL,
 				XTPG_PATTERN_CONTROL_STUCK_PIXEL, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_NOISE:
-		xvip_clr_or_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
+		xtpg_clr_or_set(xtpg, XTPG_PATTERN_CONTROL,
 				XTPG_PATTERN_CONTROL_NOISE, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_MOTION:
-		xvip_clr_or_set(&xtpg->xvip, XTPG_PATTERN_CONTROL,
+		xtpg_clr_or_set(xtpg, XTPG_PATTERN_CONTROL,
 				XTPG_PATTERN_CONTROL_MOTION, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_MOTION_SPEED:
-		xvip_write(&xtpg->xvip, XTPG_MOTION_SPEED, ctrl->val);
+		xtpg_write(xtpg, XTPG_MOTION_SPEED, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_CROSS_HAIR_ROW:
-		xvip_clr_and_set(&xtpg->xvip, XTPG_CROSS_HAIRS,
+		xtpg_clr_and_set(xtpg, XTPG_CROSS_HAIRS,
 				 XTPG_CROSS_HAIRS_ROW_MASK,
 				 ctrl->val << XTPG_CROSS_HAIRS_ROW_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_CROSS_HAIR_COLUMN:
-		xvip_clr_and_set(&xtpg->xvip, XTPG_CROSS_HAIRS,
+		xtpg_clr_and_set(xtpg, XTPG_CROSS_HAIRS,
 				 XTPG_CROSS_HAIRS_COLUMN_MASK,
 				 ctrl->val << XTPG_CROSS_HAIRS_COLUMN_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_ZPLATE_HOR_START:
-		xvip_clr_and_set(&xtpg->xvip, XTPG_ZPLATE_HOR_CONTROL,
+		xtpg_clr_and_set(xtpg, XTPG_ZPLATE_HOR_CONTROL,
 				 XTPG_ZPLATE_START_MASK,
 				 ctrl->val << XTPG_ZPLATE_START_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_ZPLATE_HOR_SPEED:
-		xvip_clr_and_set(&xtpg->xvip, XTPG_ZPLATE_HOR_CONTROL,
+		xtpg_clr_and_set(xtpg, XTPG_ZPLATE_HOR_CONTROL,
 				 XTPG_ZPLATE_SPEED_MASK,
 				 ctrl->val << XTPG_ZPLATE_SPEED_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_ZPLATE_VER_START:
-		xvip_clr_and_set(&xtpg->xvip, XTPG_ZPLATE_VER_CONTROL,
+		xtpg_clr_and_set(xtpg, XTPG_ZPLATE_VER_CONTROL,
 				 XTPG_ZPLATE_START_MASK,
 				 ctrl->val << XTPG_ZPLATE_START_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_ZPLATE_VER_SPEED:
-		xvip_clr_and_set(&xtpg->xvip, XTPG_ZPLATE_VER_CONTROL,
+		xtpg_clr_and_set(xtpg, XTPG_ZPLATE_VER_CONTROL,
 				 XTPG_ZPLATE_SPEED_MASK,
 				 ctrl->val << XTPG_ZPLATE_SPEED_SHIFT);
 		return 0;
 	case V4L2_CID_XILINX_TPG_BOX_SIZE:
-		xvip_write(&xtpg->xvip, XTPG_BOX_SIZE, ctrl->val);
+		xtpg_write(xtpg, XTPG_BOX_SIZE, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_BOX_COLOR:
-		xvip_write(&xtpg->xvip, XTPG_BOX_COLOR, ctrl->val);
+		xtpg_write(xtpg, XTPG_BOX_COLOR, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_STUCK_PIXEL_THRESH:
-		xvip_write(&xtpg->xvip, XTPG_STUCK_PIXEL_THRESH, ctrl->val);
+		xtpg_write(xtpg, XTPG_STUCK_PIXEL_THRESH, ctrl->val);
 		return 0;
 	case V4L2_CID_XILINX_TPG_NOISE_GAIN:
-		xvip_write(&xtpg->xvip, XTPG_NOISE_GAIN, ctrl->val);
+		xtpg_write(xtpg, XTPG_NOISE_GAIN, ctrl->val);
 		return 0;
 	}
 
@@ -477,7 +688,7 @@ static const struct v4l2_subdev_video_ops xtpg_video_ops = {
 };
 
 static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {
-	.enum_mbus_code		= xvip_enum_mbus_code,
+	.enum_mbus_code		= xtpg_enum_mbus_code,
 	.enum_frame_size	= xtpg_enum_frame_size,
 	.get_fmt		= v4l2_subdev_get_fmt,
 	.set_fmt		= xtpg_set_format,
@@ -700,7 +911,9 @@ static int __maybe_unused xtpg_pm_suspend(struct device *dev)
 {
 	struct xtpg_device *xtpg = dev_get_drvdata(dev);
 
-	xvip_suspend(&xtpg->xvip);
+	xtpg->saved_ctrl = xtpg_read(xtpg, XTPG_CTRL_CONTROL);
+	xtpg_write(xtpg, XTPG_CTRL_CONTROL,
+		   xtpg->saved_ctrl & ~XTPG_CTRL_CONTROL_SW_ENABLE);
 
 	return 0;
 }
@@ -709,7 +922,8 @@ static int __maybe_unused xtpg_pm_resume(struct device *dev)
 {
 	struct xtpg_device *xtpg = dev_get_drvdata(dev);
 
-	xvip_resume(&xtpg->xvip);
+	xtpg_write(xtpg, XTPG_CTRL_CONTROL,
+		   xtpg->saved_ctrl | XTPG_CTRL_CONTROL_SW_ENABLE);
 
 	return 0;
 }
@@ -720,16 +934,16 @@ static int __maybe_unused xtpg_pm_resume(struct device *dev)
 
 static int xtpg_parse_of(struct xtpg_device *xtpg)
 {
-	struct device *dev = xtpg->xvip.dev;
-	struct device_node *node = xtpg->xvip.dev->of_node;
+	struct device *dev = xtpg->dev;
+	struct device_node *node = xtpg->dev->of_node;
 	unsigned int nports = 0;
 	bool has_endpoint = false;
 
 	for_each_of_graph_port(node, port) {
-		const struct xvip_video_format *format;
+		const struct xtpg_video_format *format;
 		struct device_node *endpoint;
 
-		format = xvip_of_get_format(port);
+		format = xtpg_of_get_format(port);
 		if (IS_ERR(format)) {
 			dev_err(dev, "invalid format in DT");
 			return PTR_ERR(format);
@@ -771,37 +985,38 @@ static int xtpg_probe(struct platform_device *pdev)
 	struct v4l2_subdev *subdev;
 	struct xtpg_device *xtpg;
 	u32 i, bayer_phase;
+	u32 size;
 	int ret;
 
 	xtpg = devm_kzalloc(&pdev->dev, sizeof(*xtpg), GFP_KERNEL);
 	if (!xtpg)
 		return -ENOMEM;
 
-	xtpg->xvip.dev = &pdev->dev;
+	xtpg->dev = &pdev->dev;
 
 	ret = xtpg_parse_of(xtpg);
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_init_resources(&xtpg->xvip);
-	if (ret < 0)
-		return ret;
+	xtpg->iomem = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(xtpg->iomem))
+		return PTR_ERR(xtpg->iomem);
+
+	xtpg->clk = devm_clk_get_enabled(&pdev->dev, NULL);
+	if (IS_ERR(xtpg->clk))
+		return PTR_ERR(xtpg->clk);
 
 	xtpg->vtmux_gpio = devm_gpiod_get_optional(&pdev->dev, "timing",
 						   GPIOD_OUT_HIGH);
-	if (IS_ERR(xtpg->vtmux_gpio)) {
-		ret = PTR_ERR(xtpg->vtmux_gpio);
-		goto error_resource;
-	}
+	if (IS_ERR(xtpg->vtmux_gpio))
+		return PTR_ERR(xtpg->vtmux_gpio);
 
 	xtpg->vtc = xvtc_of_get(pdev->dev.of_node);
-	if (IS_ERR(xtpg->vtc)) {
-		ret = PTR_ERR(xtpg->vtc);
-		goto error_resource;
-	}
+	if (IS_ERR(xtpg->vtc))
+		return PTR_ERR(xtpg->vtc);
 
 	/* Reset and initialize the core */
-	xvip_reset(&xtpg->xvip);
+	xtpg_reset(xtpg);
 
 	/* Initialize V4L2 subdevice and media entity. Pad numbers depend on the
 	 * number of pads.
@@ -817,14 +1032,19 @@ static int xtpg_probe(struct platform_device *pdev)
 	xtpg->default_format.code = xtpg->vip_format->code;
 	xtpg->default_format.field = V4L2_FIELD_NONE;
 	xtpg->default_format.colorspace = V4L2_COLORSPACE_SRGB;
-	xvip_get_frame_size(&xtpg->xvip, &xtpg->default_format);
+
+	size = xtpg_read(xtpg, XTPG_ACTIVE_SIZE);
+	xtpg->default_format.width = (size & XTPG_ACTIVE_HSIZE_MASK) >>
+				     XTPG_ACTIVE_HSIZE_SHIFT;
+	xtpg->default_format.height = (size & XTPG_ACTIVE_VSIZE_MASK) >>
+				      XTPG_ACTIVE_VSIZE_SHIFT;
 
 	bayer_phase = xtpg_get_bayer_phase(xtpg->vip_format->code);
 	if (bayer_phase != XTPG_BAYER_PHASE_OFF)
 		xtpg->bayer = true;
 
 	/* Initialize V4L2 subdevice and media entity */
-	subdev = &xtpg->xvip.subdev;
+	subdev = &xtpg->subdev;
 	v4l2_subdev_init(subdev, &xtpg_ops);
 	subdev->dev = &pdev->dev;
 	subdev->internal_ops = &xtpg_internal_ops;
@@ -876,7 +1096,7 @@ static int xtpg_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, xtpg);
 
-	xvip_print_version(&xtpg->xvip);
+	xtpg_print_version(xtpg);
 
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
@@ -891,22 +1111,18 @@ error:
 	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 	xvtc_put(xtpg->vtc);
-error_resource:
-	xvip_cleanup_resources(&xtpg->xvip);
 	return ret;
 }
 
 static void xtpg_remove(struct platform_device *pdev)
 {
 	struct xtpg_device *xtpg = platform_get_drvdata(pdev);
-	struct v4l2_subdev *subdev = &xtpg->xvip.subdev;
+	struct v4l2_subdev *subdev = &xtpg->subdev;
 
 	v4l2_async_unregister_subdev(subdev);
 	v4l2_ctrl_handler_free(&xtpg->ctrl_handler);
 	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
-
-	xvip_cleanup_resources(&xtpg->xvip);
 }
 
 static SIMPLE_DEV_PM_OPS(xtpg_pm_ops, xtpg_pm_suspend, xtpg_pm_resume);

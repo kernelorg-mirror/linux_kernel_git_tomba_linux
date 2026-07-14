@@ -10,14 +10,15 @@
  */
 
 #include <linux/clk.h>
+#include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
-#include "xilinx-vip.h"
 #include "xilinx-vtc.h"
 
+#define XVTC_CONTROL				0x0000
 #define XVTC_CONTROL_FIELD_ID_POL_SRC		BIT(26)
 #define XVTC_CONTROL_ACTIVE_CHROMA_POL_SRC	BIT(25)
 #define XVTC_CONTROL_ACTIVE_VIDEO_POL_SRC	BIT(24)
@@ -38,6 +39,7 @@
 #define XVTC_CONTROL_SYNC_ENABLE		BIT(5)
 #define XVTC_CONTROL_DET_ENABLE			BIT(3)
 #define XVTC_CONTROL_GEN_ENABLE			BIT(2)
+#define XVTC_CONTROL_REG_UPDATE			BIT(1)
 
 #define XVTC_STATUS_FSYNC(n)			((n) << 16)
 #define XVTC_STATUS_GEN_ACTIVE_VIDEO		BIT(13)
@@ -61,6 +63,14 @@
 #define XVTC_IRQ_ENABLE_DET_VBLANK		BIT(10)
 #define XVTC_IRQ_ENABLE_LOCK_LOSS		BIT(9)
 #define XVTC_IRQ_ENABLE_LOCK			BIT(8)
+
+#define XVTC_VERSION				0x0010
+#define XVTC_VERSION_MAJOR_MASK			(0xff << 24)
+#define XVTC_VERSION_MAJOR_SHIFT		24
+#define XVTC_VERSION_MINOR_MASK			(0xff << 16)
+#define XVTC_VERSION_MINOR_SHIFT		16
+#define XVTC_VERSION_REVISION_MASK		(0xf << 12)
+#define XVTC_VERSION_REVISION_SHIFT		12
 
 /*
  * The following registers exist in two blocks, one at 0x0020 for the detector
@@ -143,14 +153,18 @@
 
 /**
  * struct xvtc_device - Xilinx Video Timing Controller device structure
- * @xvip: Xilinx Video IP device
+ * @dev: (OF) device
+ * @iomem: device I/O register space remapped to kernel virtual memory
+ * @clk: video core clock
  * @list: entry in the global VTC list
  * @has_detector: the VTC has a timing detector
  * @has_generator: the VTC has a timing generator
  * @config: generator timings configuration
  */
 struct xvtc_device {
-	struct xvip_device xvip;
+	struct device *dev;
+	void __iomem *iomem;
+	struct clk *clk;
 	struct list_head list;
 
 	bool has_detector;
@@ -162,9 +176,19 @@ struct xvtc_device {
 static LIST_HEAD(xvtc_list);
 static DEFINE_MUTEX(xvtc_lock);
 
+static inline u32 xvtc_read(struct xvtc_device *xvtc, u32 addr)
+{
+	return ioread32(xvtc->iomem + addr);
+}
+
+static inline void xvtc_write(struct xvtc_device *xvtc, u32 addr, u32 value)
+{
+	iowrite32(value, xvtc->iomem + addr);
+}
+
 static inline void xvtc_gen_write(struct xvtc_device *xvtc, u32 addr, u32 value)
 {
-	xvip_write(&xvtc->xvip, XVTC_GENERATOR_OFFSET + addr, value);
+	xvtc_write(xvtc, XVTC_GENERATOR_OFFSET + addr, value);
 }
 
 /* -----------------------------------------------------------------------------
@@ -179,7 +203,7 @@ int xvtc_generator_start(struct xvtc_device *xvtc,
 	if (!xvtc->has_generator)
 		return -ENXIO;
 
-	ret = clk_prepare_enable(xvtc->xvip.clk);
+	ret = clk_prepare_enable(xvtc->clk);
 	if (ret < 0)
 		return ret;
 
@@ -217,7 +241,7 @@ int xvtc_generator_start(struct xvtc_device *xvtc,
 	/* Enable the generator. Set the source of all generator parameters to
 	 * generator registers.
 	 */
-	xvip_write(&xvtc->xvip, XVIP_CTRL_CONTROL,
+	xvtc_write(xvtc, XVTC_CONTROL,
 		   XVTC_CONTROL_ACTIVE_CHROMA_POL_SRC |
 		   XVTC_CONTROL_ACTIVE_VIDEO_POL_SRC |
 		   XVTC_CONTROL_HSYNC_POL_SRC | XVTC_CONTROL_VSYNC_POL_SRC |
@@ -229,7 +253,7 @@ int xvtc_generator_start(struct xvtc_device *xvtc,
 		   XVTC_CONTROL_HSYNC_START_SRC |
 		   XVTC_CONTROL_ACTIVE_HSIZE_SRC |
 		   XVTC_CONTROL_FRAME_HSIZE_SRC | XVTC_CONTROL_GEN_ENABLE |
-		   XVIP_CTRL_CONTROL_REG_UPDATE);
+		   XVTC_CONTROL_REG_UPDATE);
 
 	return 0;
 }
@@ -240,9 +264,9 @@ int xvtc_generator_stop(struct xvtc_device *xvtc)
 	if (!xvtc->has_generator)
 		return -ENXIO;
 
-	xvip_write(&xvtc->xvip, XVIP_CTRL_CONTROL, 0);
+	xvtc_write(xvtc, XVTC_CONTROL, 0);
 
-	clk_disable_unprepare(xvtc->xvip.clk);
+	clk_disable_unprepare(xvtc->clk);
 
 	return 0;
 }
@@ -263,7 +287,7 @@ struct xvtc_device *xvtc_of_get(struct device_node *np)
 
 	mutex_lock(&xvtc_lock);
 	list_for_each_entry(xvtc, &xvtc_list, list) {
-		if (xvtc->xvip.dev->of_node == xvtc_node) {
+		if (xvtc->dev->of_node == xvtc_node) {
 			found = xvtc;
 			break;
 		}
@@ -308,12 +332,27 @@ static void xvtc_unregister_device(struct xvtc_device *xvtc)
 
 static int xvtc_parse_of(struct xvtc_device *xvtc)
 {
-	struct device_node *node = xvtc->xvip.dev->of_node;
+	struct device_node *node = xvtc->dev->of_node;
 
 	xvtc->has_detector = of_property_read_bool(node, "xlnx,detector");
 	xvtc->has_generator = of_property_read_bool(node, "xlnx,generator");
 
 	return 0;
+}
+
+static void xvtc_print_version(struct xvtc_device *xvtc)
+{
+	u32 version;
+
+	version = xvtc_read(xvtc, XVTC_VERSION);
+
+	dev_info(xvtc->dev, "device found, version %u.%02x%x\n",
+		 (version & XVTC_VERSION_MAJOR_MASK) >>
+		 XVTC_VERSION_MAJOR_SHIFT,
+		 (version & XVTC_VERSION_MINOR_MASK) >>
+		 XVTC_VERSION_MINOR_SHIFT,
+		 (version & XVTC_VERSION_REVISION_MASK) >>
+		 XVTC_VERSION_REVISION_SHIFT);
 }
 
 static int xvtc_probe(struct platform_device *pdev)
@@ -325,19 +364,23 @@ static int xvtc_probe(struct platform_device *pdev)
 	if (!xvtc)
 		return -ENOMEM;
 
-	xvtc->xvip.dev = &pdev->dev;
+	xvtc->dev = &pdev->dev;
 
 	ret = xvtc_parse_of(xvtc);
 	if (ret < 0)
 		return ret;
 
-	ret = xvip_init_resources(&xvtc->xvip);
-	if (ret < 0)
-		return ret;
+	xvtc->iomem = devm_platform_ioremap_resource(pdev, 0);
+	if (IS_ERR(xvtc->iomem))
+		return PTR_ERR(xvtc->iomem);
+
+	xvtc->clk = devm_clk_get_enabled(&pdev->dev, NULL);
+	if (IS_ERR(xvtc->clk))
+		return PTR_ERR(xvtc->clk);
 
 	platform_set_drvdata(pdev, xvtc);
 
-	xvip_print_version(&xvtc->xvip);
+	xvtc_print_version(xvtc);
 
 	xvtc_register_device(xvtc);
 
@@ -349,8 +392,6 @@ static void xvtc_remove(struct platform_device *pdev)
 	struct xvtc_device *xvtc = platform_get_drvdata(pdev);
 
 	xvtc_unregister_device(xvtc);
-
-	xvip_cleanup_resources(&xvtc->xvip);
 }
 
 static const struct of_device_id xvtc_of_id_table[] = {

@@ -82,7 +82,6 @@
  * @hblank: horizontal blanking control
  * @vblank: vertical blanking control
  * @pattern: test pattern control
- * @streaming: is the video stream active
  * @vtc: video timing controller
  * @vtmux_gpio: video timing mux GPIO
  */
@@ -102,7 +101,6 @@ struct xtpg_device {
 	struct v4l2_ctrl *hblank;
 	struct v4l2_ctrl *vblank;
 	struct v4l2_ctrl *pattern;
-	bool streaming;
 
 	struct xvtc_device *vtc;
 	struct gpio_desc *vtmux_gpio;
@@ -179,7 +177,6 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 			xvtc_generator_stop(xtpg->vtc);
 
 		xtpg_update_pattern_control(xtpg, true, true);
-		xtpg->streaming = false;
 		return 0;
 	}
 
@@ -225,8 +222,6 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 	 */
 	passthrough = xtpg->pattern->cur.val == 0;
 	__xtpg_update_pattern_control(xtpg, passthrough, !passthrough);
-
-	xtpg->streaming = true;
 
 	mutex_unlock(xtpg->ctrl_handler.lock);
 

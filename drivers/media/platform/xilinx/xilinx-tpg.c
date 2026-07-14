@@ -189,33 +189,19 @@ static int xtpg_set_remote_stream(struct xtpg_device *xtpg, bool enable)
 	return 0;
 }
 
-static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
+static int xtpg_enable_streams(struct v4l2_subdev *subdev,
+			       struct v4l2_subdev_state *sd_state,
+			       u32 pad, u64 streams_mask)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
 	const struct v4l2_mbus_framefmt *format;
-	struct v4l2_subdev_state *state;
 	unsigned int width;
 	unsigned int height;
 	bool passthrough;
 	u32 bayer_phase;
 	int ret;
 
-	state = v4l2_subdev_lock_and_get_active_state(subdev);
-
-	if (!enable) {
-		xtpg_set_remote_stream(xtpg, false);
-
-		xvip_stop(&xtpg->xvip);
-		if (xtpg->vtc)
-			xvtc_generator_stop(xtpg->vtc);
-
-		__xtpg_update_pattern_control(xtpg, true, true);
-
-		v4l2_subdev_unlock_state(state);
-		return 0;
-	}
-
-	format = v4l2_subdev_state_get_format(state, 0);
+	format = v4l2_subdev_state_get_format(sd_state, 0);
 	width = format->width;
 	height = format->height;
 
@@ -279,11 +265,25 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 
 		__xtpg_update_pattern_control(xtpg, true, true);
 
-		v4l2_subdev_unlock_state(state);
 		return ret;
 	}
 
-	v4l2_subdev_unlock_state(state);
+	return 0;
+}
+
+static int xtpg_disable_streams(struct v4l2_subdev *subdev,
+				struct v4l2_subdev_state *sd_state,
+				u32 pad, u64 streams_mask)
+{
+	struct xtpg_device *xtpg = to_tpg(subdev);
+
+	xtpg_set_remote_stream(xtpg, false);
+
+	xvip_stop(&xtpg->xvip);
+	if (xtpg->vtc)
+		xvtc_generator_stop(xtpg->vtc);
+
+	__xtpg_update_pattern_control(xtpg, true, true);
 
 	return 0;
 }
@@ -473,7 +473,7 @@ static const struct v4l2_subdev_core_ops xtpg_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops xtpg_video_ops = {
-	.s_stream = xtpg_s_stream,
+	.s_stream = v4l2_subdev_s_stream_helper,
 };
 
 static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {
@@ -481,6 +481,8 @@ static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {
 	.enum_frame_size	= xtpg_enum_frame_size,
 	.get_fmt		= v4l2_subdev_get_fmt,
 	.set_fmt		= xtpg_set_format,
+	.enable_streams		= xtpg_enable_streams,
+	.disable_streams	= xtpg_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xtpg_ops = {

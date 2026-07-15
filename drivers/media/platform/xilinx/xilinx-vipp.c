@@ -69,119 +69,6 @@ xvip_graph_find_entity(struct xvip_composite_device *xdev,
 	return NULL;
 }
 
-static int xvip_graph_build_one(struct xvip_composite_device *xdev,
-				struct xvip_graph_entity *entity)
-{
-	u32 link_flags = MEDIA_LNK_FL_ENABLED;
-	struct media_entity *local = entity->entity;
-	struct media_entity *remote;
-	struct media_pad *local_pad;
-	struct media_pad *remote_pad;
-	struct xvip_graph_entity *ent;
-	struct v4l2_fwnode_link link;
-	struct fwnode_handle *ep = NULL;
-	int ret = 0;
-
-	dev_dbg(xdev->dev, "creating links for entity %s\n", local->name);
-
-	while (1) {
-		/* Get the next endpoint and parse its link. */
-		ep = fwnode_graph_get_next_endpoint(entity->asd.match.fwnode,
-						    ep);
-		if (!ep)
-			break;
-
-		dev_dbg(xdev->dev, "processing endpoint %pfwf\n", ep);
-
-		ret = v4l2_fwnode_parse_link(ep, &link);
-		if (ret < 0) {
-			dev_err(xdev->dev, "failed to parse link for %pfwf\n",
-				ep);
-			continue;
-		}
-
-		/* Skip sink ports, they will be processed from the other end of
-		 * the link.
-		 */
-		if (link.local_port >= local->num_pads) {
-			dev_err(xdev->dev, "invalid port number %u for %pfwf\n",
-				link.local_port, link.local_node);
-			v4l2_fwnode_put_link(&link);
-			ret = -EINVAL;
-			break;
-		}
-
-		local_pad = &local->pads[link.local_port];
-
-		if (local_pad->flags & MEDIA_PAD_FL_SINK) {
-			dev_dbg(xdev->dev, "skipping sink port %pfwf:%u\n",
-				link.local_node, link.local_port);
-			v4l2_fwnode_put_link(&link);
-			continue;
-		}
-
-		/* Skip DMA engines, they will be processed separately. */
-		if (link.remote_node == of_fwnode_handle(xdev->dev->of_node)) {
-			dev_dbg(xdev->dev, "skipping DMA port %pfwf:%u\n",
-				link.local_node, link.local_port);
-			v4l2_fwnode_put_link(&link);
-			continue;
-		}
-
-		/* Find the remote entity. */
-		ent = xvip_graph_find_entity(xdev, link.remote_node);
-		if (!ent) {
-			dev_err(xdev->dev, "no entity found for %pfwf\n",
-				link.remote_node);
-			v4l2_fwnode_put_link(&link);
-			ret = -ENODEV;
-			break;
-		}
-
-		remote = ent->entity;
-
-		if (link.remote_port >= remote->num_pads) {
-			dev_err(xdev->dev, "invalid port number %u on %pfwf\n",
-				link.remote_port, link.remote_node);
-			v4l2_fwnode_put_link(&link);
-			ret = -EINVAL;
-			break;
-		}
-
-		remote_pad = &remote->pads[link.remote_port];
-
-		/* Skip links already created by the remote subdev at bind time. */
-		if (media_entity_find_link(local_pad, remote_pad)) {
-			dev_dbg(xdev->dev, "skipping existing %s:%u -> %s:%u link\n",
-				local->name, local_pad->index,
-				remote->name, remote_pad->index);
-			v4l2_fwnode_put_link(&link);
-			continue;
-		}
-
-		v4l2_fwnode_put_link(&link);
-
-		/* Create the media link. */
-		dev_dbg(xdev->dev, "creating %s:%u -> %s:%u link\n",
-			local->name, local_pad->index,
-			remote->name, remote_pad->index);
-
-		ret = media_create_pad_link(local, local_pad->index,
-					    remote, remote_pad->index,
-					    link_flags);
-		if (ret < 0) {
-			dev_err(xdev->dev,
-				"failed to create %s:%u -> %s:%u link\n",
-				local->name, local_pad->index,
-				remote->name, remote_pad->index);
-			break;
-		}
-	}
-
-	fwnode_handle_put(ep);
-	return ret;
-}
-
 static struct xvip_dma *
 xvip_graph_find_dma(struct xvip_composite_device *xdev, unsigned int port)
 {
@@ -292,19 +179,9 @@ static int xvip_graph_notify_complete(struct v4l2_async_notifier *notifier)
 {
 	struct xvip_composite_device *xdev =
 		container_of(notifier, struct xvip_composite_device, notifier);
-	struct xvip_graph_entity *entity;
-	struct v4l2_async_connection *asd;
 	int ret;
 
 	dev_dbg(xdev->dev, "notify complete, all subdevs registered\n");
-
-	/* Create links for every entity. */
-	list_for_each_entry(asd, &xdev->notifier.done_list, asc_entry) {
-		entity = to_xvip_entity(asd);
-		ret = xvip_graph_build_one(xdev, entity);
-		if (ret < 0)
-			return ret;
-	}
 
 	/* Create links for DMA channels. */
 	ret = xvip_graph_build_dma(xdev);
@@ -385,30 +262,13 @@ err_notifier_cleanup:
 
 static int xvip_graph_parse(struct xvip_composite_device *xdev)
 {
-	struct xvip_graph_entity *entity;
-	struct v4l2_async_connection *asd;
-	int ret;
-
 	/*
-	 * Walk the links to parse the full graph. Start by parsing the
-	 * composite node and then parse entities in turn. The list_for_each
-	 * loop will handle entities added at the end of the list while walking
-	 * the links.
+	 * Only parse the composite node itself: the notifier claims just the
+	 * DMA engines' directly connected subdevs. Everything further
+	 * upstream is claimed by the subdev drivers' own notifiers, which
+	 * chain to this one, so completion still waits for the full graph.
 	 */
-	ret = xvip_graph_parse_one(xdev, of_fwnode_handle(xdev->dev->of_node));
-	if (ret < 0)
-		return 0;
-
-	list_for_each_entry(asd, &xdev->notifier.waiting_list, asc_entry) {
-		entity = to_xvip_entity(asd);
-		ret = xvip_graph_parse_one(xdev, entity->asd.match.fwnode);
-		if (ret < 0) {
-			v4l2_async_nf_cleanup(&xdev->notifier);
-			break;
-		}
-	}
-
-	return ret;
+	return xvip_graph_parse_one(xdev, of_fwnode_handle(xdev->dev->of_node));
 }
 
 static int xvip_graph_dma_init_one(struct xvip_composite_device *xdev,

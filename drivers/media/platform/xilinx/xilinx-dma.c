@@ -64,7 +64,7 @@ static const struct xvip_dma_format *xvip_dma_get_format_by_fourcc(u32 fourcc)
 			return format;
 	}
 
-	return &xvip_dma_video_formats[0];
+	return NULL;
 }
 
 static struct v4l2_subdev *
@@ -551,6 +551,8 @@ __xvip_dma_try_format(struct xvip_dma *dma, struct v4l2_pix_format *pix,
 	 * requested format isn't supported.
 	 */
 	info = xvip_dma_get_format_by_fourcc(pix->pixelformat);
+	if (!info)
+		info = xvip_dma_get_format_by_fourcc(V4L2_PIX_FMT_YUYV);
 
 	pix->pixelformat = info->fourcc;
 	pix->field = V4L2_FIELD_NONE;

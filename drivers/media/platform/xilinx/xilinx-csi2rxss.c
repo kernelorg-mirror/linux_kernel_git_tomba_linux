@@ -19,9 +19,11 @@
 #include <linux/v4l2-subdev.h>
 #include <media/media-entity.h>
 #include <media/mipi-csi2.h>
+#include <media/v4l2-async.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
+#include <media/v4l2-mc.h>
 #include <media/v4l2-subdev.h>
 
 #define XCSI_PAD_SINK		0
@@ -201,6 +203,7 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
 /**
  * struct xcsi2rxss_state - CSI-2 Rx Subsystem device structure
  * @subdev: The v4l2 subdev structure
+ * @notifier: Async notifier for the upstream subdev
  * @events: counter for events
  * @vcx_events: counter for vcx_events
  * @dev: Platform structure
@@ -218,6 +221,7 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  */
 struct xcsi2rxss_state {
 	struct v4l2_subdev subdev;
+	struct v4l2_async_notifier notifier;
 	u32 events[XCSI_NUM_EVENTS];
 	u32 vcx_events[XCSI_VCX_NUM_EVENTS];
 	struct device *dev;
@@ -738,6 +742,7 @@ static int xcsi2rxss_enum_mbus_code(struct v4l2_subdev *sd,
  */
 
 static const struct media_entity_operations xcsi2rxss_media_ops = {
+	.get_fwnode_pad = v4l2_subdev_get_fwnode_pad_1_to_1,
 	.link_validate = v4l2_subdev_link_validate
 };
 
@@ -858,6 +863,53 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 	return 0;
 }
 
+static int xcsi2rxss_notify_bound(struct v4l2_async_notifier *notifier,
+				  struct v4l2_subdev *sd,
+				  struct v4l2_async_connection *asc)
+{
+	struct xcsi2rxss_state *xcsi2rxss =
+		container_of(notifier, struct xcsi2rxss_state, notifier);
+
+	return v4l2_create_fwnode_links_to_pad(sd,
+					       &xcsi2rxss->pads[XCSI_PAD_SINK],
+					       MEDIA_LNK_FL_ENABLED |
+					       MEDIA_LNK_FL_IMMUTABLE);
+}
+
+static const struct v4l2_async_notifier_operations xcsi2rxss_notify_ops = {
+	.bound = xcsi2rxss_notify_bound,
+};
+
+static int xcsi2rxss_register_notifier(struct xcsi2rxss_state *xcsi2rxss)
+{
+	struct v4l2_async_connection *asc;
+	struct fwnode_handle *ep;
+	int ret;
+
+	ep = fwnode_graph_get_endpoint_by_id(dev_fwnode(xcsi2rxss->dev),
+					     XCSI_PAD_SINK, 0,
+					     FWNODE_GRAPH_ENDPOINT_NEXT);
+	if (!ep)
+		return -ENODEV;
+
+	v4l2_async_subdev_nf_init(&xcsi2rxss->notifier, &xcsi2rxss->subdev);
+	xcsi2rxss->notifier.ops = &xcsi2rxss_notify_ops;
+
+	asc = v4l2_async_nf_add_fwnode_remote(&xcsi2rxss->notifier, ep,
+					      struct v4l2_async_connection);
+	fwnode_handle_put(ep);
+	if (IS_ERR(asc)) {
+		v4l2_async_nf_cleanup(&xcsi2rxss->notifier);
+		return PTR_ERR(asc);
+	}
+
+	ret = v4l2_async_nf_register(&xcsi2rxss->notifier);
+	if (ret)
+		v4l2_async_nf_cleanup(&xcsi2rxss->notifier);
+
+	return ret;
+}
+
 static int xcsi2rxss_probe(struct platform_device *pdev)
 {
 	struct v4l2_subdev *subdev;
@@ -945,14 +997,21 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, xcsi2rxss);
 
+	ret = xcsi2rxss_register_notifier(xcsi2rxss);
+	if (ret < 0)
+		goto error_subdev_cleanup;
+
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
 		dev_err(dev, "failed to register subdev\n");
-		goto error_subdev_cleanup;
+		goto error_notifier_cleanup;
 	}
 
 	return 0;
 
+error_notifier_cleanup:
+	v4l2_async_nf_unregister(&xcsi2rxss->notifier);
+	v4l2_async_nf_cleanup(&xcsi2rxss->notifier);
 error_subdev_cleanup:
 	v4l2_subdev_cleanup(subdev);
 error_media_cleanup:
@@ -971,6 +1030,8 @@ static void xcsi2rxss_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xcsi2rxss->subdev;
 	int num_clks = ARRAY_SIZE(xcsi2rxss_clks);
 
+	v4l2_async_nf_unregister(&xcsi2rxss->notifier);
+	v4l2_async_nf_cleanup(&xcsi2rxss->notifier);
 	v4l2_async_unregister_subdev(subdev);
 	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);

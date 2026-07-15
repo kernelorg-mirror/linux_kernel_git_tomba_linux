@@ -146,11 +146,39 @@ static const struct media_entity_operations xvip_dma_media_ops = {
  */
 
 /**
+ * xvip_dma_set_remote_stream - Start or stop streaming on a DMA's remote subdev
+ * @dma: The DMA engine
+ * @enable: Start (when true) or stop (when false) the remote subdev
+ *
+ * Start or stop streaming on the subdev directly connected to the DMA video
+ * node. The subdev is responsible for propagating the stream state further up
+ * the pipeline towards the source.
+ *
+ * Return: 0 if successful, -EPIPE if no subdev is connected, or the return
+ * value of the failed v4l2_subdev_enable_streams() operation otherwise.
+ */
+static int xvip_dma_set_remote_stream(struct xvip_dma *dma, bool enable)
+{
+	struct v4l2_subdev *subdev;
+	u32 pad;
+
+	subdev = xvip_dma_remote_subdev(&dma->pad, &pad);
+	if (!subdev)
+		return -EPIPE;
+
+	if (enable)
+		return v4l2_subdev_enable_streams(subdev, pad, BIT_ULL(0));
+
+	return v4l2_subdev_disable_streams(subdev, pad, BIT_ULL(0));
+}
+
+/**
  * xvip_pipeline_start_stop - Start or stop streaming on a pipeline
  * @pipe: The pipeline
  * @start: Start (when true) or stop (when false) the pipeline
  *
- * Start or stop streaming on the subdev directly connected to the video node.
+ * Start or stop streaming on the subdevs directly connected to the
+ * video nodes.
  *
  * Return: 0 if successful, or the return value of the failed
  * v4l2_subdev_enable_streams() operation otherwise.
@@ -161,9 +189,7 @@ static int xvip_pipeline_start_stop(struct media_pipeline *pipe, bool start)
 	struct media_pad *pad;
 
 	media_pipeline_for_each_pad(pipe, &iter, pad) {
-		struct v4l2_subdev *subdev;
 		struct xvip_dma *dma;
-		u32 rpad;
 		int ret;
 
 		if (pad->entity->function != MEDIA_ENT_F_IO_V4L)
@@ -174,17 +200,7 @@ static int xvip_pipeline_start_stop(struct media_pipeline *pipe, bool start)
 		if (!xvip_dma_is_s2mm(dma))
 			continue;
 
-		subdev = xvip_dma_remote_subdev(&dma->pad, &rpad);
-		if (!subdev)
-			return -EPIPE;
-
-		if (start)
-			ret = v4l2_subdev_enable_streams(subdev, rpad,
-							 BIT_ULL(0));
-		else
-			ret = v4l2_subdev_disable_streams(subdev, rpad,
-							  BIT_ULL(0));
-
+		ret = xvip_dma_set_remote_stream(dma, start);
 		if (start && ret < 0)
 			return ret;
 	}
@@ -205,6 +221,10 @@ static int xvip_pipeline_start_stop(struct media_pipeline *pipe, bool start)
  * started when the last DMA engine in the pipeline starts streaming, and
  * stopped when the first DMA engine stops streaming.
  *
+ * With independent streams there is no shared stream state: each S2MM DMA
+ * engine starts and stops its own remote subdev in its own streamon and
+ * streamoff, and MM2S DMA engines never start or stop subdevs.
+ *
  * Return: 0 if successful, or the return value of the failed
  * v4l2_subdev_enable_streams() operation otherwise. Stopping the pipeline
  * never fails. The pipeline state is not updated when the operation fails.
@@ -217,6 +237,13 @@ static int xvip_pipeline_set_stream(struct xvip_dma *dma, bool on)
 	unsigned int num_dmas = 0;
 	struct media_pad *pad;
 	int ret = 0;
+
+	if (dma->xdev->independent_streams) {
+		if (!xvip_dma_is_s2mm(dma))
+			return 0;
+
+		return xvip_dma_set_remote_stream(dma, on);
+	}
 
 	mutex_lock(&dma->xdev->pipeline_lock);
 

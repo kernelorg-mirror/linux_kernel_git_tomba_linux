@@ -28,6 +28,10 @@
  * @dmas: list of S2MM and MM2S DMA channels
  * @v4l2_caps: V4L2 capabilities of the whole device (see VIDIOC_QUERYCAP)
  * @pipeline_lock: serializes pipeline start/stop across the DMA channels
+ * @independent_streams: when true, each S2MM DMA engine starts and stops its
+ *			 remote subdev in its own streamon and streamoff,
+ *			 instead of sharing the stream state with all the
+ *			 pipeline's DMA engines
  */
 struct xvip_composite_device {
 	struct v4l2_device v4l2_dev;
@@ -40,6 +44,7 @@ struct xvip_composite_device {
 	u32 v4l2_caps;
 
 	struct mutex pipeline_lock;
+	bool independent_streams;
 };
 
 #endif /* __XILINX_VIPP_H__ */

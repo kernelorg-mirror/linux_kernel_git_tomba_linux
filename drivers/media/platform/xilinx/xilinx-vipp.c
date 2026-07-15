@@ -24,6 +24,18 @@
 #include "xilinx-dma.h"
 #include "xilinx-vipp.h"
 
+/*
+ * FPGA pipelines typically stall on AXI4-Stream backpressure if part of the
+ * pipeline isn't running, so by default all the DMA engines of a pipeline
+ * share its stream state and the subdevs stream only while every DMA engine
+ * streams. Designs that don't need this can give each S2MM DMA engine an
+ * independent stream state instead.
+ */
+static bool independent_streams;
+module_param(independent_streams, bool, 0444);
+MODULE_PARM_DESC(independent_streams,
+		 "Start and stop the subdevs of each S2MM DMA engine in its own streamon and streamoff, instead of sharing the stream state with all the pipeline's DMA engines (default: N)");
+
 /**
  * struct xvip_graph_entity - Entity in the video graph
  * @asd: subdev asynchronous registration information
@@ -442,6 +454,7 @@ static int xvip_composite_probe(struct platform_device *pdev)
 	xdev->dev = &pdev->dev;
 	INIT_LIST_HEAD(&xdev->dmas);
 	mutex_init(&xdev->pipeline_lock);
+	xdev->independent_streams = independent_streams;
 
 	ret = xvip_composite_v4l2_init(xdev);
 	if (ret < 0)

@@ -34,9 +34,12 @@ struct xvip_dma_format;
  * @port: composite device DT node port number for the DMA channel
  * @streaming: whether the DMA engine is streaming, protected by the composite
  *	       device pipeline_lock
- * @lock: protects the @format, @fmtinfo and @queue fields
+ * @lock: protects the @format, @fmtinfo, @meta_format, @meta_fmtinfo and
+ *	  @queue fields
  * @format: active V4L2 pixel format
  * @fmtinfo: format information corresponding to the active @format
+ * @meta_format: active V4L2 metadata format
+ * @meta_fmtinfo: format information corresponding to the active @meta_format
  * @queue: vb2 buffers queue
  * @sequence: V4L2 buffers sequence number
  * @queued_bufs: list of queued buffers
@@ -59,6 +62,8 @@ struct xvip_dma {
 	struct mutex lock;
 	struct v4l2_pix_format format;
 	const struct xvip_dma_format *fmtinfo;
+	struct v4l2_meta_format meta_format;
+	const struct xvip_dma_format *meta_fmtinfo;
 
 	struct vb2_queue queue;
 	unsigned int sequence;

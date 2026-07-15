@@ -41,7 +41,13 @@
 
 static inline bool xvip_dma_is_s2mm(const struct xvip_dma *dma)
 {
-	return dma->queue.type == V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	return dma->queue.type == V4L2_BUF_TYPE_VIDEO_CAPTURE ||
+	       dma->queue.type == V4L2_BUF_TYPE_META_CAPTURE;
+}
+
+static inline bool xvip_dma_is_meta(const struct xvip_dma *dma)
+{
+	return dma->queue.type == V4L2_BUF_TYPE_META_CAPTURE;
 }
 
 struct xvip_dma_format {
@@ -65,10 +71,28 @@ static const struct xvip_dma_format xvip_dma_video_formats[] = {
 	{ MEDIA_BUS_FMT_Y12_1X12, V4L2_PIX_FMT_Y12 },
 };
 
+/* Line based metadata formats, one byte per data unit. */
+static const struct xvip_dma_format xvip_dma_meta_formats[] = {
+	{ MEDIA_BUS_FMT_META_8, V4L2_META_FMT_GENERIC_8 },
+};
+
 static const struct xvip_dma_format *xvip_dma_get_format_by_fourcc(u32 fourcc)
 {
 	for (unsigned int i = 0; i < ARRAY_SIZE(xvip_dma_video_formats); ++i) {
 		const struct xvip_dma_format *format = &xvip_dma_video_formats[i];
+
+		if (format->fourcc == fourcc)
+			return format;
+	}
+
+	return NULL;
+}
+
+static const struct xvip_dma_format *
+xvip_dma_get_meta_format_by_fourcc(u32 fourcc)
+{
+	for (unsigned int i = 0; i < ARRAY_SIZE(xvip_dma_meta_formats); ++i) {
+		const struct xvip_dma_format *format = &xvip_dma_meta_formats[i];
 
 		if (format->fourcc == fourcc)
 			return format;
@@ -103,11 +127,19 @@ static int xvip_dma_verify_format(struct xvip_dma *dma,
 
 	fmt = v4l2_subdev_state_get_format(state, pad);
 
-	if (!fmt ||
-	    dma->fmtinfo->code != fmt->code ||
-	    dma->format.height != fmt->height ||
-	    dma->format.width != fmt->width)
+	if (!fmt) {
 		ret = -EINVAL;
+	} else if (xvip_dma_is_meta(dma)) {
+		if (dma->meta_fmtinfo->code != fmt->code ||
+		    dma->meta_format.height != fmt->height ||
+		    dma->meta_format.width != fmt->width)
+			ret = -EINVAL;
+	} else {
+		if (dma->fmtinfo->code != fmt->code ||
+		    dma->format.height != fmt->height ||
+		    dma->format.width != fmt->width)
+			ret = -EINVAL;
+	}
 
 	v4l2_subdev_unlock_state(state);
 
@@ -363,6 +395,14 @@ struct xvip_dma_buffer {
 
 #define to_xvip_dma_buffer(vb)	container_of(vb, struct xvip_dma_buffer, buf)
 
+static unsigned int xvip_dma_buffer_size(const struct xvip_dma *dma)
+{
+	if (xvip_dma_is_meta(dma))
+		return dma->meta_format.buffersize;
+
+	return dma->format.sizeimage;
+}
+
 static void xvip_dma_complete(void *param)
 {
 	struct xvip_dma_buffer *buf = param;
@@ -375,7 +415,7 @@ static void xvip_dma_complete(void *param)
 	buf->buf.field = V4L2_FIELD_NONE;
 	buf->buf.sequence = dma->sequence++;
 	buf->buf.vb2_buf.timestamp = ktime_get_ns();
-	vb2_set_plane_payload(&buf->buf.vb2_buf, 0, dma->format.sizeimage);
+	vb2_set_plane_payload(&buf->buf.vb2_buf, 0, xvip_dma_buffer_size(dma));
 	vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_DONE);
 }
 
@@ -388,10 +428,10 @@ xvip_dma_queue_setup(struct vb2_queue *vq,
 
 	/* Make sure the image size is large enough. */
 	if (*nplanes)
-		return sizes[0] < dma->format.sizeimage ? -EINVAL : 0;
+		return sizes[0] < xvip_dma_buffer_size(dma) ? -EINVAL : 0;
 
 	*nplanes = 1;
-	sizes[0] = dma->format.sizeimage;
+	sizes[0] = xvip_dma_buffer_size(dma);
 
 	return 0;
 }
@@ -411,8 +451,6 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 {
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
 	struct xvip_dma *dma = vb2_get_drv_priv(vb->vb2_queue);
-	const struct v4l2_format_info *finfo =
-		v4l2_format_info(dma->format.pixelformat);
 	struct xvip_dma_buffer *buf = to_xvip_dma_buffer(vbuf);
 	struct dma_async_tx_descriptor *desc;
 	dma_addr_t addr = vb2_dma_contig_plane_dma_addr(vb, 0);
@@ -435,9 +473,22 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 	}
 
 	xt->frame_size = 1;
-	xt->sgl[0].size = dma->format.width * finfo->bpp[0] / finfo->bpp_div[0];
-	xt->sgl[0].icg = dma->format.bytesperline - xt->sgl[0].size;
-	xt->numf = dma->format.height;
+
+	if (xvip_dma_is_meta(dma)) {
+		/* The metadata formats use one byte per data unit. */
+		xt->sgl[0].size = dma->meta_format.width;
+		xt->sgl[0].icg = dma->meta_format.bytesperline -
+				 xt->sgl[0].size;
+		xt->numf = dma->meta_format.height;
+	} else {
+		const struct v4l2_format_info *finfo =
+			v4l2_format_info(dma->format.pixelformat);
+
+		xt->sgl[0].size = dma->format.width * finfo->bpp[0] /
+				  finfo->bpp_div[0];
+		xt->sgl[0].icg = dma->format.bytesperline - xt->sgl[0].size;
+		xt->numf = dma->format.height;
+	}
 
 	desc = dmaengine_prep_interleaved_dma(dma->dma, xt, flags);
 	if (!desc) {
@@ -687,6 +738,161 @@ xvip_dma_set_format(struct file *file, void *fh, struct v4l2_format *format)
 	return 0;
 }
 
+static int
+xvip_dma_enum_meta_format(struct file *file, void *fh, struct v4l2_fmtdesc *f)
+{
+	unsigned int index = f->index;
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(xvip_dma_meta_formats); ++i) {
+		const struct xvip_dma_format *format = &xvip_dma_meta_formats[i];
+
+		if (f->mbus_code && f->mbus_code != format->code)
+			continue;
+
+		if (index-- == 0) {
+			f->pixelformat = format->fourcc;
+			f->flags = V4L2_FMT_FLAG_META_LINE_BASED;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
+static int
+xvip_dma_get_meta_format(struct file *file, void *fh,
+			 struct v4l2_format *format)
+{
+	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
+	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
+
+	format->fmt.meta = dma->meta_format;
+
+	return 0;
+}
+
+static void
+__xvip_dma_try_meta_format(struct xvip_dma *dma,
+			   struct v4l2_meta_format *meta,
+			   const struct xvip_dma_format **fmtinfo)
+{
+	const struct xvip_dma_format *info;
+	unsigned int min_width;
+	unsigned int max_width;
+
+	info = xvip_dma_get_meta_format_by_fourcc(meta->dataformat);
+	if (!info)
+		info = &xvip_dma_meta_formats[0];
+
+	meta->dataformat = info->fourcc;
+
+	/*
+	 * The metadata formats use one byte per data unit, so the width is
+	 * also the line size in bytes. Align it to the transfer alignment
+	 * requirements, like the video formats. The line stride is not
+	 * configurable: lines are stored contiguously, and bytesperline is
+	 * computed by the driver.
+	 */
+	min_width = roundup(XVIP_DMA_MIN_WIDTH, dma->align);
+	max_width = rounddown(XVIP_DMA_MAX_WIDTH, dma->align);
+
+	meta->width = clamp(rounddown(meta->width, dma->align),
+			    min_width, max_width);
+	meta->height = clamp(meta->height, XVIP_DMA_MIN_HEIGHT,
+			     XVIP_DMA_MAX_HEIGHT);
+
+	meta->bytesperline = meta->width;
+	meta->buffersize = meta->bytesperline * meta->height;
+
+	if (fmtinfo)
+		*fmtinfo = info;
+}
+
+static int
+xvip_dma_try_meta_format(struct file *file, void *fh,
+			 struct v4l2_format *format)
+{
+	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
+	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
+
+	__xvip_dma_try_meta_format(dma, &format->fmt.meta, NULL);
+	return 0;
+}
+
+static int
+xvip_dma_set_meta_format(struct file *file, void *fh,
+			 struct v4l2_format *format)
+{
+	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
+	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
+	const struct xvip_dma_format *info;
+
+	__xvip_dma_try_meta_format(dma, &format->fmt.meta, &info);
+
+	if (vb2_is_busy(&dma->queue))
+		return -EBUSY;
+
+	dma->meta_format = format->fmt.meta;
+	dma->meta_fmtinfo = info;
+
+	return 0;
+}
+
+static bool xvip_dma_type_supported(struct xvip_dma *dma, u32 type)
+{
+	switch (type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+		return dma->video.device_caps & V4L2_CAP_VIDEO_CAPTURE;
+	case V4L2_BUF_TYPE_META_CAPTURE:
+		return dma->video.device_caps & V4L2_CAP_META_CAPTURE;
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return dma->video.device_caps & V4L2_CAP_VIDEO_OUTPUT;
+	default:
+		return false;
+	}
+}
+
+/*
+ * The S2MM video nodes support both video and metadata capture. The vb2 queue
+ * has a single buffer type, so switch it to the requested type when buffers
+ * are allocated.
+ */
+static int
+xvip_dma_ioctl_reqbufs(struct file *file, void *fh,
+		       struct v4l2_requestbuffers *p)
+{
+	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
+	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
+	int ret;
+
+	if (!xvip_dma_type_supported(dma, p->type))
+		return -EINVAL;
+
+	ret = vb2_queue_change_type(&dma->queue, p->type);
+	if (ret)
+		return ret;
+
+	return vb2_ioctl_reqbufs(file, fh, p);
+}
+
+static int
+xvip_dma_ioctl_create_bufs(struct file *file, void *fh,
+			   struct v4l2_create_buffers *p)
+{
+	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
+	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
+	int ret;
+
+	if (!xvip_dma_type_supported(dma, p->format.type))
+		return -EINVAL;
+
+	ret = vb2_queue_change_type(&dma->queue, p->format.type);
+	if (ret)
+		return ret;
+
+	return vb2_ioctl_create_bufs(file, fh, p);
+}
+
 static const struct v4l2_ioctl_ops xvip_dma_ioctl_ops = {
 	.vidioc_querycap		= xvip_dma_querycap,
 	.vidioc_enum_fmt_vid_cap	= xvip_dma_enum_format,
@@ -697,11 +903,15 @@ static const struct v4l2_ioctl_ops xvip_dma_ioctl_ops = {
 	.vidioc_s_fmt_vid_out		= xvip_dma_set_format,
 	.vidioc_try_fmt_vid_cap		= xvip_dma_try_format,
 	.vidioc_try_fmt_vid_out		= xvip_dma_try_format,
-	.vidioc_reqbufs			= vb2_ioctl_reqbufs,
+	.vidioc_enum_fmt_meta_cap	= xvip_dma_enum_meta_format,
+	.vidioc_g_fmt_meta_cap		= xvip_dma_get_meta_format,
+	.vidioc_s_fmt_meta_cap		= xvip_dma_set_meta_format,
+	.vidioc_try_fmt_meta_cap	= xvip_dma_try_meta_format,
+	.vidioc_reqbufs			= xvip_dma_ioctl_reqbufs,
 	.vidioc_querybuf		= vb2_ioctl_querybuf,
 	.vidioc_qbuf			= vb2_ioctl_qbuf,
 	.vidioc_dqbuf			= vb2_ioctl_dqbuf,
-	.vidioc_create_bufs		= vb2_ioctl_create_bufs,
+	.vidioc_create_bufs		= xvip_dma_ioctl_create_bufs,
 	.vidioc_expbuf			= vb2_ioctl_expbuf,
 	.vidioc_streamon		= vb2_ioctl_streamon,
 	.vidioc_streamoff		= vb2_ioctl_streamoff,
@@ -742,6 +952,13 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	dma->format.colorspace = V4L2_COLORSPACE_SRGB;
 	dma->format.field = V4L2_FIELD_NONE;
 
+	dma->meta_fmtinfo = &xvip_dma_meta_formats[0];
+	dma->meta_format.dataformat = dma->meta_fmtinfo->fourcc;
+	dma->meta_format.width = XVIP_DMA_DEF_WIDTH;
+	dma->meta_format.height = 1;
+	dma->meta_format.bytesperline = XVIP_DMA_DEF_WIDTH;
+	dma->meta_format.buffersize = XVIP_DMA_DEF_WIDTH;
+
 	/* Initialize the media entity... */
 	dma->pad.flags = type == V4L2_BUF_TYPE_VIDEO_CAPTURE
 		       ? MEDIA_PAD_FL_SINK : MEDIA_PAD_FL_SOURCE;
@@ -767,7 +984,8 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	dma->video.lock = &dma->lock;
 	dma->video.device_caps = V4L2_CAP_STREAMING | V4L2_CAP_IO_MC;
 	if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		dma->video.device_caps |= V4L2_CAP_VIDEO_CAPTURE;
+		dma->video.device_caps |= V4L2_CAP_VIDEO_CAPTURE |
+					  V4L2_CAP_META_CAPTURE;
 	else
 		dma->video.device_caps |= V4L2_CAP_VIDEO_OUTPUT;
 

@@ -200,9 +200,10 @@ static int xvip_pipeline_start_stop(struct media_pipeline *pipe, bool start)
  * The pipeline is shared between all the MM2S and S2MM DMA engines connected
  * to it. While the stream state of DMA engines can be controlled
  * independently, pipelines have a shared stream state that enable or disable
- * all entities in the pipeline. For this reason the pipeline is only started
- * when the last DMA engine in the pipeline starts streaming, and stopped when
- * the last DMA engine stops streaming.
+ * all entities in the pipeline. The subdevs may only stream while every DMA
+ * engine in the pipeline is streaming. For this reason the pipeline is only
+ * started when the last DMA engine in the pipeline starts streaming, and
+ * stopped when the first DMA engine stops streaming.
  *
  * Return: 0 if successful, or the return value of the failed
  * v4l2_subdev_enable_streams() operation otherwise. Stopping the pipeline
@@ -246,8 +247,12 @@ static int xvip_pipeline_set_stream(struct xvip_dma *dma, bool on)
 				dma->streaming = false;
 		}
 	} else {
-		/* Stop the pipeline when the last DMA engine stops. */
-		if (num_streaming == 0)
+		/*
+		 * Stop the pipeline when the first DMA engine stops: this DMA
+		 * engine leaving the fully streaming state means all the
+		 * others are still streaming.
+		 */
+		if (num_streaming == num_dmas - 1)
 			xvip_pipeline_start_stop(pipe, false);
 	}
 

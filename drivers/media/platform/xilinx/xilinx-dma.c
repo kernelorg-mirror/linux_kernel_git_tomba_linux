@@ -186,11 +186,12 @@ static int xvip_dma_set_remote_stream(struct xvip_dma *dma, bool enable)
 static int xvip_pipeline_start_stop(struct media_pipeline *pipe, bool start)
 {
 	struct media_pipeline_pad_iter iter;
+	struct xvip_dma *failed_dma;
 	struct media_pad *pad;
+	int ret;
 
 	media_pipeline_for_each_pad(pipe, &iter, pad) {
 		struct xvip_dma *dma;
-		int ret;
 
 		if (pad->entity->function != MEDIA_ENT_F_IO_V4L)
 			continue;
@@ -201,11 +202,34 @@ static int xvip_pipeline_start_stop(struct media_pipeline *pipe, bool start)
 			continue;
 
 		ret = xvip_dma_set_remote_stream(dma, start);
-		if (start && ret < 0)
-			return ret;
+		if (start && ret < 0) {
+			failed_dma = dma;
+			goto error;
+		}
 	}
 
 	return 0;
+
+error:
+	/* Disable the remote subdevs that were already enabled. */
+	media_pipeline_for_each_pad(pipe, &iter, pad) {
+		struct xvip_dma *dma;
+
+		if (pad->entity->function != MEDIA_ENT_F_IO_V4L)
+			continue;
+
+		dma = to_xvip_dma(media_entity_to_video_device(pad->entity));
+
+		if (dma == failed_dma)
+			break;
+
+		if (!xvip_dma_is_s2mm(dma))
+			continue;
+
+		xvip_dma_set_remote_stream(dma, false);
+	}
+
+	return ret;
 }
 
 /**
@@ -290,11 +314,10 @@ static int xvip_pipeline_set_stream(struct xvip_dma *dma, bool on)
 static int xvip_pipeline_validate(struct media_pipeline *pipe)
 {
 	struct media_pipeline_pad_iter iter;
-	unsigned int num_mm2s = 0;
 	unsigned int num_s2mm = 0;
 	struct media_pad *pad;
 
-	/* Locate the video nodes in the pipeline. */
+	/* Count the S2MM video nodes in the pipeline. */
 	media_pipeline_for_each_pad(pipe, &iter, pad) {
 		struct xvip_dma *dma;
 
@@ -305,12 +328,13 @@ static int xvip_pipeline_validate(struct media_pipeline *pipe)
 
 		if (xvip_dma_is_s2mm(dma))
 			num_s2mm++;
-		else
-			num_mm2s++;
 	}
 
-	/* We need exactly one S2MM and zero or one MM2S DMA. */
-	if (num_s2mm != 1 || num_mm2s > 1)
+	/*
+	 * Subdev streaming is initiated from the S2MM video nodes, so the
+	 * pipeline must contain at least one.
+	 */
+	if (num_s2mm == 0)
 		return -EPIPE;
 
 	return 0;

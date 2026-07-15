@@ -18,10 +18,12 @@
 #include <linux/of.h>
 #include <linux/of_graph.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/xilinx-v4l2-controls.h>
 
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
+#include <media/v4l2-mc.h>
 #include <media/v4l2-subdev.h>
 
 #include <dt-bindings/media/xilinx-vip.h>
@@ -171,6 +173,7 @@ xtpg_of_get_format(struct device_node *node)
 /**
  * struct xtpg_device - Xilinx Test Pattern Generator device structure
  * @subdev: V4L2 subdevice
+ * @notifier: Async notifier for the upstream subdev
  * @dev: (OF) device
  * @iomem: device I/O register space remapped to kernel virtual memory
  * @clk: video core clock
@@ -190,6 +193,7 @@ xtpg_of_get_format(struct device_node *node)
  */
 struct xtpg_device {
 	struct v4l2_subdev subdev;
+	struct v4l2_async_notifier notifier;
 	struct device *dev;
 	void __iomem *iomem;
 	struct clk *clk;
@@ -900,6 +904,7 @@ static struct v4l2_ctrl_config xtpg_ctrls[] = {
  */
 
 static const struct media_entity_operations xtpg_media_ops = {
+	.get_fwnode_pad = v4l2_subdev_get_fwnode_pad_1_to_1,
 	.link_validate = v4l2_subdev_link_validate,
 };
 
@@ -978,6 +983,55 @@ static int xtpg_parse_of(struct xtpg_device *xtpg)
 		xtpg->has_input = true;
 
 	return 0;
+}
+
+static int xtpg_notify_bound(struct v4l2_async_notifier *notifier,
+			     struct v4l2_subdev *sd,
+			     struct v4l2_async_connection *asc)
+{
+	struct xtpg_device *xtpg =
+		container_of(notifier, struct xtpg_device, notifier);
+
+	return v4l2_create_fwnode_links_to_pad(sd, &xtpg->pads[0],
+					       MEDIA_LNK_FL_ENABLED |
+					       MEDIA_LNK_FL_IMMUTABLE);
+}
+
+static const struct v4l2_async_notifier_operations xtpg_notify_ops = {
+	.bound = xtpg_notify_bound,
+};
+
+static int xtpg_register_notifier(struct xtpg_device *xtpg)
+{
+	struct v4l2_async_connection *asc;
+	struct fwnode_handle *ep;
+	int ret;
+
+	/* Port 0 is the sink port only when the TPG has an input port. */
+	if (xtpg->npads != 2)
+		return 0;
+
+	ep = fwnode_graph_get_endpoint_by_id(dev_fwnode(xtpg->dev), 0, 0,
+					     FWNODE_GRAPH_ENDPOINT_NEXT);
+	if (!ep)
+		return 0;
+
+	v4l2_async_subdev_nf_init(&xtpg->notifier, &xtpg->subdev);
+	xtpg->notifier.ops = &xtpg_notify_ops;
+
+	asc = v4l2_async_nf_add_fwnode_remote(&xtpg->notifier, ep,
+					      struct v4l2_async_connection);
+	fwnode_handle_put(ep);
+	if (IS_ERR(asc)) {
+		v4l2_async_nf_cleanup(&xtpg->notifier);
+		return PTR_ERR(asc);
+	}
+
+	ret = v4l2_async_nf_register(&xtpg->notifier);
+	if (ret)
+		v4l2_async_nf_cleanup(&xtpg->notifier);
+
+	return ret;
 }
 
 static int xtpg_probe(struct platform_device *pdev)
@@ -1098,6 +1152,10 @@ static int xtpg_probe(struct platform_device *pdev)
 
 	xtpg_print_version(xtpg);
 
+	ret = xtpg_register_notifier(xtpg);
+	if (ret < 0)
+		goto error;
+
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to register subdev\n");
@@ -1107,6 +1165,8 @@ static int xtpg_probe(struct platform_device *pdev)
 	return 0;
 
 error:
+	v4l2_async_nf_unregister(&xtpg->notifier);
+	v4l2_async_nf_cleanup(&xtpg->notifier);
 	v4l2_ctrl_handler_free(&xtpg->ctrl_handler);
 	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
@@ -1119,6 +1179,8 @@ static void xtpg_remove(struct platform_device *pdev)
 	struct xtpg_device *xtpg = platform_get_drvdata(pdev);
 	struct v4l2_subdev *subdev = &xtpg->subdev;
 
+	v4l2_async_nf_unregister(&xtpg->notifier);
+	v4l2_async_nf_cleanup(&xtpg->notifier);
 	v4l2_async_unregister_subdev(subdev);
 	v4l2_ctrl_handler_free(&xtpg->ctrl_handler);
 	v4l2_subdev_cleanup(subdev);

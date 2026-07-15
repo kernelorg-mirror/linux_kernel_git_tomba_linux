@@ -214,6 +214,7 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  * @datatype: Data type filter
  * @lock: mutex for accessing this structure
  * @pads: media pads
+ * @enabled_sink_streams: sink streams currently enabled
  * @enable_active_lanes: If number of active lanes can be modified
  * @en_vcx: If more than 4 VC are enabled
  *
@@ -233,6 +234,7 @@ struct xcsi2rxss_state {
 	/* used to protect access to this struct */
 	struct mutex lock;
 	struct media_pad pads[XCSI_MEDIA_PADS];
+	u64 enabled_sink_streams;
 	bool enable_active_lanes;
 	bool en_vcx;
 };
@@ -462,7 +464,7 @@ static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 }
 
 static int xcsi2rxss_set_remote_streams(struct xcsi2rxss_state *state,
-					 bool enable)
+					u64 streams_mask, bool enable)
 {
 	struct media_pad *remote;
 	struct v4l2_subdev *subdev;
@@ -475,50 +477,43 @@ static int xcsi2rxss_set_remote_streams(struct xcsi2rxss_state *state,
 
 	if (enable)
 		return v4l2_subdev_enable_streams(subdev, remote->index,
-						  BIT_ULL(0));
+						  streams_mask);
 
-	return v4l2_subdev_disable_streams(subdev, remote->index, BIT_ULL(0));
+	return v4l2_subdev_disable_streams(subdev, remote->index,
+					   streams_mask);
 }
 
-static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
+static int xcsi2rxss_start_core(struct xcsi2rxss_state *state)
 {
-	int ret = 0;
+	int ret;
 
 	/* enable core */
 	xcsi2rxss_set(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
 
 	ret = xcsi2rxss_soft_reset(state);
-	if (ret)
+	if (ret) {
+		xcsi2rxss_clr(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
 		return ret;
+	}
 
 	/* enable interrupts */
 	xcsi2rxss_clr(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
 	xcsi2rxss_write(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
 	xcsi2rxss_set(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
 
-	ret = xcsi2rxss_set_remote_streams(state, true);
-	if (ret) {
-		/* disable interrupts */
-		xcsi2rxss_clr(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
-		xcsi2rxss_clr(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
-
-		/* disable core */
-		xcsi2rxss_clr(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
-	}
-
-	return ret;
+	return 0;
 }
 
-static void xcsi2rxss_stop_stream(struct xcsi2rxss_state *state)
+static void xcsi2rxss_stop_core(struct xcsi2rxss_state *state)
 {
-	xcsi2rxss_set_remote_streams(state, false);
-
 	/* disable interrupts */
 	xcsi2rxss_clr(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
 	xcsi2rxss_clr(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
 
 	/* disable core */
 	xcsi2rxss_clr(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
+
+	xcsi2rxss_hard_reset(state);
 }
 
 /**
@@ -625,11 +620,35 @@ static int xcsi2rxss_enable_streams(struct v4l2_subdev *sd,
 				    u32 pad, u64 streams_mask)
 {
 	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
-	int ret;
+	u64 streams = streams_mask;
+	u64 sink_streams;
+	int ret = 0;
+
+	sink_streams = v4l2_subdev_state_xlate_streams(sd_state,
+						       XCSI_PAD_SOURCE,
+						       XCSI_PAD_SINK,
+						       &streams);
 
 	mutex_lock(&xcsi2rxss->lock);
-	xcsi2rxss_reset_event_counters(xcsi2rxss);
-	ret = xcsi2rxss_start_stream(xcsi2rxss);
+
+	if (!xcsi2rxss->enabled_sink_streams) {
+		xcsi2rxss_reset_event_counters(xcsi2rxss);
+
+		ret = xcsi2rxss_start_core(xcsi2rxss);
+		if (ret)
+			goto unlock;
+	}
+
+	ret = xcsi2rxss_set_remote_streams(xcsi2rxss, sink_streams, true);
+	if (ret) {
+		if (!xcsi2rxss->enabled_sink_streams)
+			xcsi2rxss_stop_core(xcsi2rxss);
+		goto unlock;
+	}
+
+	xcsi2rxss->enabled_sink_streams |= sink_streams;
+
+unlock:
 	mutex_unlock(&xcsi2rxss->lock);
 
 	return ret;
@@ -640,32 +659,90 @@ static int xcsi2rxss_disable_streams(struct v4l2_subdev *sd,
 				     u32 pad, u64 streams_mask)
 {
 	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
+	u64 streams = streams_mask;
+	u64 sink_streams;
+
+	sink_streams = v4l2_subdev_state_xlate_streams(sd_state,
+						       XCSI_PAD_SOURCE,
+						       XCSI_PAD_SINK,
+						       &streams);
 
 	mutex_lock(&xcsi2rxss->lock);
-	xcsi2rxss_stop_stream(xcsi2rxss);
-	xcsi2rxss_hard_reset(xcsi2rxss);
+
+	xcsi2rxss_set_remote_streams(xcsi2rxss, sink_streams, false);
+
+	xcsi2rxss->enabled_sink_streams &= ~sink_streams;
+
+	if (!xcsi2rxss->enabled_sink_streams)
+		xcsi2rxss_stop_core(xcsi2rxss);
+
 	mutex_unlock(&xcsi2rxss->lock);
 
 	return 0;
 }
 
+static int __xcsi2rxss_set_routing(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_state *sd_state,
+				   struct v4l2_subdev_krouting *routing)
+{
+	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
+	const struct v4l2_mbus_framefmt format = {
+		.code = xcsi2rxss_get_nth_mbus(xcsi2rxss->datatype, 0),
+		.field = V4L2_FIELD_NONE,
+		.colorspace = V4L2_COLORSPACE_SRGB,
+		.width = XCSI_DEFAULT_WIDTH,
+		.height = XCSI_DEFAULT_HEIGHT,
+	};
+	int ret;
+
+	/*
+	 * The subsystem passes every stream through unmodified, so routes
+	 * map sink streams 1:1 to source streams.
+	 */
+	ret = v4l2_subdev_routing_validate(sd, routing,
+					   V4L2_SUBDEV_ROUTING_ONLY_1_TO_1);
+	if (ret)
+		return ret;
+
+	return v4l2_subdev_set_routing_with_fmt(sd, sd_state, routing,
+						&format);
+}
+
+static int xcsi2rxss_set_routing(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *sd_state,
+				 enum v4l2_subdev_format_whence which,
+				 struct v4l2_subdev_krouting *routing)
+{
+	if (which == V4L2_SUBDEV_FORMAT_ACTIVE &&
+	    media_entity_is_streaming(&sd->entity))
+		return -EBUSY;
+
+	return __xcsi2rxss_set_routing(sd, sd_state, routing);
+}
+
 static int xcsi2rxss_init_state(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *sd_state)
 {
-	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
-	struct v4l2_mbus_framefmt *format;
-	unsigned int i;
+	struct v4l2_subdev_route routes[] = {
+		{
+			.sink_pad = XCSI_PAD_SINK,
+			.sink_stream = 0,
+			.source_pad = XCSI_PAD_SOURCE,
+			.source_stream = 0,
+			.flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE,
+		},
+	};
+	struct v4l2_subdev_krouting routing = {
+		.num_routes = ARRAY_SIZE(routes),
+		.routes = routes,
+	};
 
-	for (i = 0; i < XCSI_MEDIA_PADS; i++) {
-		format = v4l2_subdev_state_get_format(sd_state, i);
-		format->code = xcsi2rxss_get_nth_mbus(xcsi2rxss->datatype, 0);
-		format->field = V4L2_FIELD_NONE;
-		format->colorspace = V4L2_COLORSPACE_SRGB;
-		format->width = XCSI_DEFAULT_WIDTH;
-		format->height = XCSI_DEFAULT_HEIGHT;
-	}
-
-	return 0;
+	/*
+	 * Default to a single route for a single-stream (virtual channel 0)
+	 * pipeline. This keeps the subsystem usable without routing setup,
+	 * also with stream-unaware upstream and downstream entities.
+	 */
+	return __xcsi2rxss_set_routing(sd, sd_state, &routing);
 }
 
 static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
@@ -678,12 +755,10 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 
 	/*
 	 * Only the sink pad format can be set. The source pad always mirrors
-	 * the sink pad, so report its current format unchanged.
+	 * the routed sink stream, so report its current format unchanged.
 	 */
-	if (fmt->pad == XCSI_PAD_SOURCE) {
-		fmt->format = *v4l2_subdev_state_get_format(sd_state, fmt->pad);
-		return 0;
-	}
+	if (fmt->pad == XCSI_PAD_SOURCE)
+		return v4l2_subdev_get_fmt(sd, sd_state, fmt);
 
 	/*
 	 * Only the format->code parameter matters for CSI as the CSI format
@@ -701,11 +776,23 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 							  0);
 	}
 
-	/* Store the format on the sink pad and propagate it to the source pad. */
-	__format = v4l2_subdev_state_get_format(sd_state, XCSI_PAD_SINK);
+	/*
+	 * Store the format on the sink stream and propagate it to the routed
+	 * source stream.
+	 */
+	__format = v4l2_subdev_state_get_format(sd_state, fmt->pad,
+						fmt->stream);
+	if (!__format)
+		return -EINVAL;
+
 	*__format = fmt->format;
 
-	__format = v4l2_subdev_state_get_format(sd_state, XCSI_PAD_SOURCE);
+	__format = v4l2_subdev_state_get_opposite_stream_format(sd_state,
+								fmt->pad,
+								fmt->stream);
+	if (!__format)
+		return -EINVAL;
+
 	*__format = fmt->format;
 
 	return 0;
@@ -718,6 +805,27 @@ static int xcsi2rxss_enum_mbus_code(struct v4l2_subdev *sd,
 	struct xcsi2rxss_state *state = to_xcsi2rxssstate(sd);
 	u32 dt, n;
 	int ret = 0;
+
+	/*
+	 * The media bus code on the source pad is identical to the routed
+	 * sink stream.
+	 */
+	if (code->pad == XCSI_PAD_SOURCE) {
+		const struct v4l2_mbus_framefmt *format;
+
+		if (code->index > 0)
+			return -EINVAL;
+
+		format = v4l2_subdev_state_get_opposite_stream_format(sd_state,
+								      code->pad,
+								      code->stream);
+		if (!format)
+			return -EINVAL;
+
+		code->code = format->code;
+
+		return 0;
+	}
 
 	/* RAW8 dt packets are available in all DT configurations */
 	if (code->index < 4) {
@@ -743,7 +851,8 @@ static int xcsi2rxss_enum_mbus_code(struct v4l2_subdev *sd,
 
 static const struct media_entity_operations xcsi2rxss_media_ops = {
 	.get_fwnode_pad = v4l2_subdev_get_fwnode_pad_1_to_1,
-	.link_validate = v4l2_subdev_link_validate
+	.link_validate = v4l2_subdev_link_validate,
+	.has_pad_interdep = v4l2_subdev_has_pad_interdep,
 };
 
 static const struct v4l2_subdev_core_ops xcsi2rxss_core_ops = {
@@ -755,6 +864,7 @@ static const struct v4l2_subdev_pad_ops xcsi2rxss_pad_ops = {
 	.set_fmt = xcsi2rxss_set_format,
 	.enum_mbus_code = xcsi2rxss_enum_mbus_code,
 	.link_validate = v4l2_subdev_link_validate_default,
+	.set_routing = xcsi2rxss_set_routing,
 	.enable_streams = xcsi2rxss_enable_streams,
 	.disable_streams = xcsi2rxss_disable_streams,
 };
@@ -980,7 +1090,8 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	subdev->internal_ops = &xcsi2rxss_internal_ops;
 	subdev->dev = dev;
 	strscpy(subdev->name, dev_name(dev), sizeof(subdev->name));
-	subdev->flags |= V4L2_SUBDEV_FL_HAS_EVENTS | V4L2_SUBDEV_FL_HAS_DEVNODE;
+	subdev->flags |= V4L2_SUBDEV_FL_HAS_EVENTS | V4L2_SUBDEV_FL_HAS_DEVNODE |
+			 V4L2_SUBDEV_FL_STREAMS;
 	subdev->entity.function = MEDIA_ENT_F_VID_IF_BRIDGE;
 	subdev->entity.ops = &xcsi2rxss_media_ops;
 	v4l2_set_subdevdata(subdev, xcsi2rxss);

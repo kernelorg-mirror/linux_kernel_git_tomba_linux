@@ -150,6 +150,15 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 
 		remote_pad = &remote->pads[link.remote_port];
 
+		/* Skip links already created by the remote subdev at bind time. */
+		if (media_entity_find_link(local_pad, remote_pad)) {
+			dev_dbg(xdev->dev, "skipping existing %s:%u -> %s:%u link\n",
+				local->name, local_pad->index,
+				remote->name, remote_pad->index);
+			v4l2_fwnode_put_link(&link);
+			continue;
+		}
+
 		v4l2_fwnode_put_link(&link);
 
 		/* Create the media link. */

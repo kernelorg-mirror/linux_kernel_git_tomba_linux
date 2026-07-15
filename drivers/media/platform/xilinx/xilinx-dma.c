@@ -16,6 +16,7 @@
 #include <linux/of.h>
 #include <linux/slab.h>
 
+#include <media/v4l2-common.h>
 #include <media/v4l2-dev.h>
 #include <media/v4l2-fh.h>
 #include <media/v4l2-ioctl.h>
@@ -662,13 +663,10 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	spin_lock_init(&dma->queued_lock);
 
 	dma->fmtinfo = xvip_dma_get_format_by_fourcc(V4L2_PIX_FMT_YUYV);
-	dma->format.pixelformat = dma->fmtinfo->fourcc;
+	v4l2_fill_pixfmt(&dma->format, dma->fmtinfo->fourcc,
+			 XVIP_DMA_DEF_WIDTH, XVIP_DMA_DEF_HEIGHT);
 	dma->format.colorspace = V4L2_COLORSPACE_SRGB;
 	dma->format.field = V4L2_FIELD_NONE;
-	dma->format.width = XVIP_DMA_DEF_WIDTH;
-	dma->format.height = XVIP_DMA_DEF_HEIGHT;
-	dma->format.bytesperline = dma->format.width * dma->fmtinfo->bpp;
-	dma->format.sizeimage = dma->format.bytesperline * dma->format.height;
 
 	/* Initialize the media entity... */
 	dma->pad.flags = type == V4L2_BUF_TYPE_VIDEO_CAPTURE

@@ -26,6 +26,7 @@
 
 #define XCSI_PAD_SINK		0
 #define XCSI_PAD_SOURCE		1
+#define XCSI_PAD_SOURCE_EMB	2
 
 /* Register map */
 #define XCSI_CCR_OFFSET		0x00
@@ -116,8 +117,10 @@
 /*
  * Sink pad connected to sensor source pad.
  * Source pad connected to next module like demosaic.
+ * The optional embedded data source pad carries the subsystem's embedded
+ * data output.
  */
-#define XCSI_MEDIA_PADS		2
+#define XCSI_MEDIA_PADS		3
 #define XCSI_DEFAULT_WIDTH	1920
 #define XCSI_DEFAULT_HEIGHT	1080
 
@@ -227,6 +230,7 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
 	{ MIPI_CSI2_DT_RAW16, MEDIA_BUS_FMT_SGRBG16_1X16 },
 	{ MIPI_CSI2_DT_RAW16, MEDIA_BUS_FMT_Y16_1X16 },
 	{ MIPI_CSI2_DT_RAW20, 0 },
+	{ MIPI_CSI2_DT_EMBEDDED_8B, MEDIA_BUS_FMT_META_8 },
 };
 
 /**
@@ -242,6 +246,7 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  * @datatype: Data type filter
  * @pads: media pads
  * @enabled_sink_streams: sink streams currently enabled
+ * @has_embdata: If the embedded data source port is present
  * @enable_active_lanes: If number of active lanes can be modified
  * @en_vcx: If more than 4 VC are enabled
  * @is_cphy: true if C-PHY mode, false if D-PHY mode
@@ -261,6 +266,7 @@ struct xcsi2rxss_state {
 	u32 datatype;
 	struct media_pad pads[XCSI_MEDIA_PADS];
 	u64 enabled_sink_streams;
+	bool has_embdata;
 	bool enable_active_lanes;
 	bool en_vcx;
 	bool is_cphy;
@@ -716,8 +722,7 @@ static int xcsi2rxss_enable_streams(struct v4l2_subdev *sd,
 
 	subdev = media_entity_to_v4l2_subdev(remote->entity);
 
-	sink_streams = v4l2_subdev_state_xlate_streams(sd_state,
-						       XCSI_PAD_SOURCE,
+	sink_streams = v4l2_subdev_state_xlate_streams(sd_state, pad,
 						       XCSI_PAD_SINK,
 						       &streams);
 
@@ -758,8 +763,7 @@ static int xcsi2rxss_disable_streams(struct v4l2_subdev *sd,
 	u64 streams = streams_mask;
 	u64 sink_streams;
 
-	sink_streams = v4l2_subdev_state_xlate_streams(sd_state,
-						       XCSI_PAD_SOURCE,
+	sink_streams = v4l2_subdev_state_xlate_streams(sd_state, pad,
 						       XCSI_PAD_SINK,
 						       &streams);
 
@@ -803,7 +807,9 @@ static int __xcsi2rxss_set_routing(struct v4l2_subdev *sd,
 
 	/*
 	 * The subsystem passes every stream through unmodified, so routes
-	 * map sink streams 1:1 to source streams.
+	 * map sink streams 1:1 to source streams. The hardware routes
+	 * embedded data packets to the embedded data output on its own;
+	 * nothing to configure for routes to the embedded data pad either.
 	 */
 	ret = v4l2_subdev_routing_validate(sd, routing,
 					   V4L2_SUBDEV_ROUTING_ONLY_1_TO_1);
@@ -874,10 +880,10 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 	u32 dt;
 
 	/*
-	 * Only the sink pad format can be set. The source pad always mirrors
-	 * the routed sink stream, so report its current format unchanged.
+	 * Only the sink pad format can be set. The source pads always mirror
+	 * the routed sink stream, so report their current format unchanged.
 	 */
-	if (fmt->pad == XCSI_PAD_SOURCE)
+	if (fmt->pad != XCSI_PAD_SINK)
 		return v4l2_subdev_get_fmt(sd, sd_state, fmt);
 
 	/*
@@ -887,9 +893,12 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 	 * RAW8 is supported in all datatypes. So if requested media bus format
 	 * is of RAW8 type, then allow to be set. In case core is configured to
 	 * other RAW, YUV422 8/10 or RGB888, set appropriate media bus format.
+	 * Embedded data packets pass through regardless of the configured
+	 * pixel data type, so metadata formats are always allowed too.
 	 */
 	dt = xcsi2rxss_get_dt(fmt->format.code);
-	if (dt != xcsi2rxss->datatype && dt != MIPI_CSI2_DT_RAW8) {
+	if (dt != xcsi2rxss->datatype && dt != MIPI_CSI2_DT_RAW8 &&
+	    dt != MIPI_CSI2_DT_EMBEDDED_8B) {
 		dev_dbg(xcsi2rxss->dev, "Unsupported media bus format");
 		/* set the default format for the data type */
 		fmt->format.code = xcsi2rxss_get_nth_mbus(xcsi2rxss->datatype,
@@ -935,10 +944,10 @@ static int xcsi2rxss_enum_mbus_code(struct v4l2_subdev *sd,
 	int ret = 0;
 
 	/*
-	 * The media bus code on the source pad is identical to the routed
+	 * The media bus code on the source pads is identical to the routed
 	 * sink stream.
 	 */
-	if (code->pad == XCSI_PAD_SOURCE) {
+	if (code->pad != XCSI_PAD_SINK) {
 		const struct v4l2_mbus_framefmt *format;
 
 		if (code->index > 0)
@@ -1115,6 +1124,15 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 
 	fwnode_handle_put(ep);
 
+	/* The embedded data source port is optional. */
+	ep = fwnode_graph_get_endpoint_by_id(dev_fwnode(dev),
+					     XCSI_PAD_SOURCE_EMB, 0,
+					     FWNODE_GRAPH_ENDPOINT_NEXT);
+	if (ep) {
+		xcsi2rxss->has_embdata = true;
+		fwnode_handle_put(ep);
+	}
+
 	dev_dbg(dev, "phy mode %s, vcx %s, %u data %s (%s), data type 0x%02x\n",
 		xcsi2rxss->is_cphy ? "C-PHY" : "D-PHY",
 		xcsi2rxss->en_vcx ? "enabled" : "disabled",
@@ -1191,6 +1209,7 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	/* Initialize media pads */
 	xcsi2rxss->pads[XCSI_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 	xcsi2rxss->pads[XCSI_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
+	xcsi2rxss->pads[XCSI_PAD_SOURCE_EMB].flags = MEDIA_PAD_FL_SOURCE;
 
 	/* Initialize V4L2 subdevice and media entity */
 	subdev = &xcsi2rxss->subdev;
@@ -1204,7 +1223,8 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	subdev->entity.ops = &xcsi2rxss_media_ops;
 	v4l2_set_subdevdata(subdev, xcsi2rxss);
 
-	ret = media_entity_pads_init(&subdev->entity, XCSI_MEDIA_PADS,
+	ret = media_entity_pads_init(&subdev->entity,
+				     xcsi2rxss->has_embdata ? 3 : 2,
 				     xcsi2rxss->pads);
 	if (ret < 0)
 		goto err_clk_disable;

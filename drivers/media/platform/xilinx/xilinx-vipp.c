@@ -353,8 +353,6 @@ static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
 			goto err_notifier_cleanup;
 		}
 
-		fwnode_handle_put(ep);
-
 		/* Skip entities that we have already processed. */
 		if (remote == of_fwnode_handle(xdev->dev->of_node) ||
 		    xvip_graph_find_entity(xdev, remote)) {

@@ -845,6 +845,103 @@ static int xcsi2rxss_enum_mbus_code(struct v4l2_subdev *sd,
 	return ret;
 }
 
+static int xcsi2rxss_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
+				    struct v4l2_mbus_frame_desc *fd)
+{
+	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
+	struct v4l2_mbus_frame_desc remote_fd;
+	struct v4l2_subdev_state *sd_state;
+	struct v4l2_subdev_route *route;
+	struct media_pad *remote;
+	bool have_remote_fd = false;
+	int ret;
+
+	if (pad != XCSI_PAD_SOURCE)
+		return -EINVAL;
+
+	remote = media_pad_remote_pad_first(&xcsi2rxss->pads[XCSI_PAD_SINK]);
+	if (!remote || !is_media_entity_v4l2_subdev(remote->entity))
+		return -EPIPE;
+
+	/*
+	 * Ask the upstream subdev which virtual channel and data type each
+	 * stream carries. Stream-unaware sources don't implement
+	 * get_frame_desc; fall back to a fixed VC == sink stream mapping for
+	 * them.
+	 */
+	ret = v4l2_subdev_call(media_entity_to_v4l2_subdev(remote->entity),
+			       pad, get_frame_desc, remote->index, &remote_fd);
+	if (!ret) {
+		if (remote_fd.type != V4L2_MBUS_FRAME_DESC_TYPE_CSI2)
+			return -EINVAL;
+		have_remote_fd = true;
+	} else if (ret != -ENOIOCTLCMD && ret != -ENODEV) {
+		return ret;
+	}
+
+	ret = 0;
+
+	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_CSI2;
+
+	sd_state = v4l2_subdev_lock_and_get_active_state(sd);
+
+	for_each_active_route(&sd_state->routing, route) {
+		struct v4l2_mbus_frame_desc_entry *entry;
+
+		if (route->source_pad != pad)
+			continue;
+
+		if (fd->num_entries == V4L2_FRAME_DESC_ENTRY_MAX) {
+			ret = -ENOSPC;
+			break;
+		}
+
+		entry = &fd->entry[fd->num_entries];
+
+		if (have_remote_fd) {
+			const struct v4l2_mbus_frame_desc_entry *remote_entry = NULL;
+			unsigned int i;
+
+			for (i = 0; i < remote_fd.num_entries; i++) {
+				if (remote_fd.entry[i].stream ==
+				    route->sink_stream) {
+					remote_entry = &remote_fd.entry[i];
+					break;
+				}
+			}
+
+			if (!remote_entry) {
+				dev_dbg(xcsi2rxss->dev,
+					"sink stream %u not in the remote frame descriptor\n",
+					route->sink_stream);
+				ret = -EPIPE;
+				break;
+			}
+
+			/* The subsystem passes streams through unmodified. */
+			*entry = *remote_entry;
+			entry->stream = route->source_stream;
+		} else {
+			const struct v4l2_mbus_framefmt *format;
+
+			format = v4l2_subdev_state_get_format(sd_state,
+							      route->sink_pad,
+							      route->sink_stream);
+
+			entry->stream = route->source_stream;
+			entry->pixelcode = format->code;
+			entry->bus.csi2.vc = route->sink_stream;
+			entry->bus.csi2.dt = xcsi2rxss_get_dt(format->code);
+		}
+
+		fd->num_entries++;
+	}
+
+	v4l2_subdev_unlock_state(sd_state);
+
+	return ret;
+}
+
 /* -----------------------------------------------------------------------------
  * Media Operations
  */
@@ -867,6 +964,7 @@ static const struct v4l2_subdev_pad_ops xcsi2rxss_pad_ops = {
 	.set_routing = xcsi2rxss_set_routing,
 	.enable_streams = xcsi2rxss_enable_streams,
 	.disable_streams = xcsi2rxss_disable_streams,
+	.get_frame_desc = xcsi2rxss_get_frame_desc,
 };
 
 static const struct v4l2_subdev_ops xcsi2rxss_ops = {

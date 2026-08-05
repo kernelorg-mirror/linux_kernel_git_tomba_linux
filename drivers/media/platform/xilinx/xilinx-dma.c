@@ -88,6 +88,64 @@ static const struct xvip_dma_format *xvip_dma_get_format_by_fourcc(u32 fourcc)
 	return NULL;
 }
 
+/**
+ * xvip_dma_default_format - Return the DMA engines' default format
+ * @format: Where to store the format
+ *
+ * Return the media bus format matching the default pixel format of the DMA
+ * engines. Used by the MM2S subdevice to default to the same format as the
+ * video node it is connected to.
+ */
+void xvip_dma_default_format(struct v4l2_mbus_framefmt *format)
+{
+	const struct xvip_dma_format *info =
+		xvip_dma_get_format_by_fourcc(V4L2_PIX_FMT_YUYV);
+
+	*format = (struct v4l2_mbus_framefmt) {
+		.code = info->code,
+		.width = XVIP_DMA_DEF_WIDTH,
+		.height = XVIP_DMA_DEF_HEIGHT,
+		.field = V4L2_FIELD_NONE,
+		.colorspace = V4L2_COLORSPACE_SRGB,
+	};
+}
+
+/**
+ * xvip_dma_enum_mbus_code - Enumerate the media bus codes the DMA supports
+ * @index: Zero-based index of the code to return
+ * @code: Where to store the media bus code
+ *
+ * Enumerate the media bus codes of the video formats supported by the DMA
+ * engines, skipping the codes that map to more than one pixel format. Used by
+ * the MM2S subdevice, which exposes the DMA engine's formats on its pads.
+ *
+ * Return: 0 if successful, or -EINVAL if @index is out of range.
+ */
+int xvip_dma_enum_mbus_code(unsigned int index, u32 *code)
+{
+	for (unsigned int i = 0; i < ARRAY_SIZE(xvip_dma_video_formats); ++i) {
+		bool duplicate = false;
+
+		for (unsigned int j = 0; j < i; ++j) {
+			if (xvip_dma_video_formats[j].code ==
+			    xvip_dma_video_formats[i].code) {
+				duplicate = true;
+				break;
+			}
+		}
+
+		if (duplicate)
+			continue;
+
+		if (index-- == 0) {
+			*code = xvip_dma_video_formats[i].code;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
 static const struct xvip_dma_format *
 xvip_dma_get_meta_format_by_fourcc(u32 fourcc)
 {

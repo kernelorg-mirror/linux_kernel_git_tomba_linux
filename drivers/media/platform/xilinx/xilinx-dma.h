@@ -19,11 +19,13 @@
 
 #include <media/media-entity.h>
 #include <media/v4l2-dev.h>
+#include <media/v4l2-mediabus.h>
 #include <media/videobuf2-v4l2.h>
 
 struct dma_chan;
 struct xvip_composite_device;
 struct xvip_dma_format;
+struct xvip_mm2s;
 
 /**
  * struct xvip_dma - Video DMA channel
@@ -32,6 +34,8 @@ struct xvip_dma_format;
  * @pad: media pad for the video device entity
  * @xdev: composite device the DMA channel belongs to
  * @port: composite device DT node port number for the DMA channel
+ * @mm2s: subdevice representing this DMA channel in the media graph, NULL for
+ *	  S2MM channels
  * @streaming: whether the DMA engine is streaming, protected by the composite
  *	       device pipeline_lock
  * @lock: protects the @format, @fmtinfo, @meta_format, @meta_fmtinfo and
@@ -56,6 +60,7 @@ struct xvip_dma {
 
 	struct xvip_composite_device *xdev;
 	unsigned int port;
+	struct xvip_mm2s *mm2s;
 
 	bool streaming;
 
@@ -80,5 +85,8 @@ struct xvip_dma {
 int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 		  enum v4l2_buf_type type, unsigned int port);
 void xvip_dma_cleanup(struct xvip_dma *dma);
+
+void xvip_dma_default_format(struct v4l2_mbus_framefmt *format);
+int xvip_dma_enum_mbus_code(unsigned int index, u32 *code);
 
 #endif /* __XILINX_VIP_DMA_H__ */

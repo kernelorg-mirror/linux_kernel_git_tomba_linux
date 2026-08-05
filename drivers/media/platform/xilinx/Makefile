@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 
-xilinx-video-objs += xilinx-dma.o xilinx-vipp.o
+xilinx-video-objs += xilinx-dma.o xilinx-mm2s.o xilinx-vipp.o
 
 obj-$(CONFIG_VIDEO_XILINX) += xilinx-video.o
 obj-$(CONFIG_VIDEO_XILINX_CSI2RXSS) += xilinx-csi2rxss.o

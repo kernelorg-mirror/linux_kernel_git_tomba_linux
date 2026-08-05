@@ -22,6 +22,7 @@
 #include <media/v4l2-fwnode.h>
 
 #include "xilinx-dma.h"
+#include "xilinx-mm2s.h"
 #include "xilinx-vipp.h"
 
 /*
@@ -133,38 +134,57 @@ static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
 		dev_dbg(xdev->dev, "creating link for DMA engine %s\n",
 			dma->video.name);
 
-		/* Find the remote entity. */
-		ent = xvip_graph_find_entity(xdev, link.remote_node);
-		if (!ent) {
-			dev_err(xdev->dev, "no entity found for %pOF\n",
-				to_of_node(link.remote_node));
+		if (dma->mm2s) {
+			/*
+			 * MM2S DMA engines are represented in the graph by a
+			 * subdevice of their own, and the video node links to
+			 * that subdevice. The link to the IP core connected to
+			 * the port is created by the IP core's driver when the
+			 * MM2S subdevice binds to its notifier, like for any
+			 * other subdev-to-subdev link.
+			 */
 			v4l2_fwnode_put_link(&link);
-			ret = -ENODEV;
-			break;
-		}
 
-		if (link.remote_port >= ent->entity->num_pads) {
-			dev_err(xdev->dev, "invalid port number %u on %pOF\n",
-				link.remote_port,
-				to_of_node(link.remote_node));
-			v4l2_fwnode_put_link(&link);
-			ret = -EINVAL;
-			break;
-		}
+			if (!dma->mm2s->subdev.v4l2_dev) {
+				dev_err(xdev->dev,
+					"MM2S subdev for port %u not bound, is the connected IP core's driver creating its links?\n",
+					dma->port);
+				ret = -ENODEV;
+				break;
+			}
 
-		if (dma->pad.flags & MEDIA_PAD_FL_SOURCE) {
 			source = &dma->video.entity;
 			source_pad = &dma->pad;
-			sink = ent->entity;
-			sink_pad = &sink->pads[link.remote_port];
+			sink = &dma->mm2s->subdev.entity;
+			sink_pad = &sink->pads[XVIP_MM2S_PAD_SINK];
 		} else {
+			/* Find the remote entity. */
+			ent = xvip_graph_find_entity(xdev, link.remote_node);
+			if (!ent) {
+				dev_err(xdev->dev, "no entity found for %pOF\n",
+					to_of_node(link.remote_node));
+				v4l2_fwnode_put_link(&link);
+				ret = -ENODEV;
+				break;
+			}
+
+			if (link.remote_port >= ent->entity->num_pads) {
+				dev_err(xdev->dev,
+					"invalid port number %u on %pOF\n",
+					link.remote_port,
+					to_of_node(link.remote_node));
+				v4l2_fwnode_put_link(&link);
+				ret = -EINVAL;
+				break;
+			}
+
 			source = ent->entity;
 			source_pad = &source->pads[link.remote_port];
 			sink = &dma->video.entity;
 			sink_pad = &dma->pad;
-		}
 
-		v4l2_fwnode_put_link(&link);
+			v4l2_fwnode_put_link(&link);
+		}
 
 		/* Create the media link. */
 		dev_dbg(xdev->dev, "creating %s:%u -> %s:%u link\n",
@@ -323,6 +343,29 @@ static int xvip_graph_dma_init_one(struct xvip_composite_device *xdev,
 			 ? V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_META_CAPTURE
 			 : V4L2_CAP_VIDEO_OUTPUT;
 
+	/*
+	 * MM2S DMA engines feed a video IP core, whose driver expects a subdev
+	 * on the other end of its sink endpoint. Create one to represent the
+	 * DMA engine, so that the IP core drivers don't have to care whether
+	 * they are fed by an IP core or by a DMA engine.
+	 */
+	if (type == V4L2_BUF_TYPE_VIDEO_OUTPUT) {
+		struct xvip_mm2s *mm2s;
+
+		mm2s = devm_kzalloc(xdev->dev, sizeof(*mm2s), GFP_KERNEL);
+		if (!mm2s)
+			return -ENOMEM;
+
+		ret = xvip_mm2s_init(xdev, mm2s, index);
+		if (ret < 0) {
+			dev_err(xdev->dev, "%pOF MM2S subdev init failed\n",
+				node);
+			return ret;
+		}
+
+		dma->mm2s = mm2s;
+	}
+
 	return 0;
 }
 
@@ -356,6 +399,8 @@ static void xvip_graph_cleanup(struct xvip_composite_device *xdev)
 	v4l2_async_nf_cleanup(&xdev->notifier);
 
 	list_for_each_entry_safe(dma, dmap, &xdev->dmas, list) {
+		if (dma->mm2s)
+			xvip_mm2s_cleanup(dma->mm2s);
 		xvip_dma_cleanup(dma);
 		list_del(&dma->list);
 	}

@@ -704,7 +704,7 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	dma->video.release = video_device_release_empty;
 	dma->video.ioctl_ops = &xvip_dma_ioctl_ops;
 	dma->video.lock = &dma->lock;
-	dma->video.device_caps = V4L2_CAP_STREAMING;
+	dma->video.device_caps = V4L2_CAP_STREAMING | V4L2_CAP_IO_MC;
 	if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
 		dma->video.device_caps |= V4L2_CAP_VIDEO_CAPTURE;
 	else

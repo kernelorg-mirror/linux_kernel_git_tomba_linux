@@ -88,7 +88,7 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 		/* Get the next endpoint and parse its link. */
 		ep = fwnode_graph_get_next_endpoint(entity->asd.match.fwnode,
 						    ep);
-		if (ep == NULL)
+		if (!ep)
 			break;
 
 		dev_dbg(xdev->dev, "processing endpoint %pfwf\n", ep);
@@ -130,7 +130,7 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 
 		/* Find the remote entity. */
 		ent = xvip_graph_find_entity(xdev, link.remote_node);
-		if (ent == NULL) {
+		if (!ent) {
 			dev_err(xdev->dev, "no entity found for %pfwf\n",
 				link.remote_node);
 			v4l2_fwnode_put_link(&link);
@@ -158,8 +158,8 @@ static int xvip_graph_build_one(struct xvip_composite_device *xdev,
 			remote->name, remote_pad->index);
 
 		ret = media_create_pad_link(local, local_pad->index,
-					       remote, remote_pad->index,
-					       link_flags);
+					    remote, remote_pad->index,
+					    link_flags);
 		if (ret < 0) {
 			dev_err(xdev->dev,
 				"failed to create %s:%u -> %s:%u link\n",
@@ -214,7 +214,7 @@ static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
 
 		/* Find the DMA engine. */
 		dma = xvip_graph_find_dma(xdev, link.local_port);
-		if (dma == NULL) {
+		if (!dma) {
 			dev_err(xdev->dev, "no DMA engine found for port %u\n",
 				link.local_port);
 			v4l2_fwnode_put_link(&link);
@@ -227,7 +227,7 @@ static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
 
 		/* Find the remote entity. */
 		ent = xvip_graph_find_entity(xdev, link.remote_node);
-		if (ent == NULL) {
+		if (!ent) {
 			dev_err(xdev->dev, "no entity found for %pOF\n",
 				to_of_node(link.remote_node));
 			v4l2_fwnode_put_link(&link);
@@ -264,8 +264,8 @@ static int xvip_graph_build_dma(struct xvip_composite_device *xdev)
 			sink->name, sink_pad->index);
 
 		ret = media_create_pad_link(source, source_pad->index,
-					       sink, sink_pad->index,
-					       link_flags);
+					    sink, sink_pad->index,
+					    link_flags);
 		if (ret < 0) {
 			dev_err(xdev->dev,
 				"failed to create %s:%u -> %s:%u link\n",
@@ -339,13 +339,13 @@ static int xvip_graph_parse_one(struct xvip_composite_device *xdev,
 		struct xvip_graph_entity *xge;
 
 		ep = fwnode_graph_get_next_endpoint(fwnode, ep);
-		if (ep == NULL)
+		if (!ep)
 			break;
 
 		dev_dbg(xdev->dev, "handling endpoint %pfwf\n", ep);
 
 		remote = fwnode_graph_get_remote_port_parent(ep);
-		if (remote == NULL) {
+		if (!remote) {
 			ret = -EINVAL;
 			goto err_notifier_cleanup;
 		}
@@ -427,7 +427,7 @@ static int xvip_graph_dma_init_one(struct xvip_composite_device *xdev,
 		return -EINVAL;
 
 	dma = devm_kzalloc(xdev->dev, sizeof(*dma), GFP_KERNEL);
-	if (dma == NULL)
+	if (!dma)
 		return -ENOMEM;
 
 	ret = xvip_dma_init(xdev, dma, type, index);
@@ -450,7 +450,7 @@ static int xvip_graph_dma_init(struct xvip_composite_device *xdev)
 	int ret = 0;
 
 	ports = of_get_child_by_name(xdev->dev->of_node, "ports");
-	if (ports == NULL) {
+	if (!ports) {
 		dev_err(xdev->dev, "ports node not present\n");
 		return -EINVAL;
 	}

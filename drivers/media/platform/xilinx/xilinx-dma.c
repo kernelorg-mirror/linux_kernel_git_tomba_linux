@@ -481,8 +481,7 @@ xvip_dma_querycap(struct file *file, void *fh, struct v4l2_capability *cap)
 	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
 
-	cap->capabilities = dma->xdev->v4l2_caps | V4L2_CAP_STREAMING |
-			    V4L2_CAP_DEVICE_CAPS;
+	cap->capabilities |= dma->xdev->v4l2_caps;
 
 	strscpy(cap->driver, "xilinx-vipp", sizeof(cap->driver));
 	strscpy(cap->card, dma->video.name, sizeof(cap->card));

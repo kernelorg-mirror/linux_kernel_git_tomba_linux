@@ -512,8 +512,6 @@ xvip_dma_querycap(struct file *file, void *fh, struct v4l2_capability *cap)
 
 	strscpy(cap->driver, "xilinx-vipp", sizeof(cap->driver));
 	strscpy(cap->card, dma->video.name, sizeof(cap->card));
-	snprintf(cap->bus_info, sizeof(cap->bus_info), "platform:%pOFn:%u",
-		 dma->xdev->dev->of_node, dma->port);
 
 	return 0;
 }

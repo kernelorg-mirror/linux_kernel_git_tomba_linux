@@ -24,18 +24,18 @@
 #include "xilinx-vip.h"
 #include "xilinx-vtc.h"
 
-#define XTPG_CTRL_STATUS_SLAVE_ERROR		(1 << 16)
-#define XTPG_CTRL_IRQ_SLAVE_ERROR		(1 << 16)
+#define XTPG_CTRL_STATUS_SLAVE_ERROR		BIT(16)
+#define XTPG_CTRL_IRQ_SLAVE_ERROR		BIT(16)
 
 #define XTPG_PATTERN_CONTROL			0x0100
 #define XTPG_PATTERN_MASK			(0xf << 0)
-#define XTPG_PATTERN_CONTROL_CROSS_HAIRS	(1 << 4)
-#define XTPG_PATTERN_CONTROL_MOVING_BOX		(1 << 5)
+#define XTPG_PATTERN_CONTROL_CROSS_HAIRS	BIT(4)
+#define XTPG_PATTERN_CONTROL_MOVING_BOX		BIT(5)
 #define XTPG_PATTERN_CONTROL_COLOR_MASK_SHIFT	6
 #define XTPG_PATTERN_CONTROL_COLOR_MASK_MASK	(0xf << 6)
-#define XTPG_PATTERN_CONTROL_STUCK_PIXEL	(1 << 9)
-#define XTPG_PATTERN_CONTROL_NOISE		(1 << 10)
-#define XTPG_PATTERN_CONTROL_MOTION		(1 << 12)
+#define XTPG_PATTERN_CONTROL_STUCK_PIXEL	BIT(9)
+#define XTPG_PATTERN_CONTROL_NOISE		BIT(10)
+#define XTPG_PATTERN_CONTROL_MOTION		BIT(12)
 #define XTPG_MOTION_SPEED			0x0104
 #define XTPG_CROSS_HAIRS			0x0108
 #define XTPG_CROSS_HAIRS_ROW_SHIFT		0
@@ -328,7 +328,8 @@ static int xtpg_enum_frame_size(struct v4l2_subdev *subdev,
 
 	/* Min / max values for pad 0 is always fixed in both one and two pads
 	 * modes. In two pads mode, the source pad(= 1) size is identical to
-	 * the sink pad size */
+	 * the sink pad size
+	 */
 	if (fse->pad == 0) {
 		fse->min_width = XVIP_MIN_WIDTH;
 		fse->max_width = XVIP_MAX_WIDTH;
@@ -835,9 +836,9 @@ static int xtpg_probe(struct platform_device *pdev)
 					 V4L2_CID_HBLANK, XTPG_MIN_HBLANK,
 					 XTPG_MAX_HBLANK, 1, 100);
 	xtpg->pattern = v4l2_ctrl_new_std_menu_items(&xtpg->ctrl_handler,
-					&xtpg_ctrl_ops, V4L2_CID_TEST_PATTERN,
-					ARRAY_SIZE(xtpg_pattern_strings) - 1,
-					1, 9, xtpg_pattern_strings);
+						     &xtpg_ctrl_ops, V4L2_CID_TEST_PATTERN,
+						     ARRAY_SIZE(xtpg_pattern_strings) - 1,
+						     1, 9, xtpg_pattern_strings);
 
 	for (i = 0; i < ARRAY_SIZE(xtpg_ctrls); i++)
 		v4l2_ctrl_new_custom(&xtpg->ctrl_handler, &xtpg_ctrls[i], NULL);

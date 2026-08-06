@@ -518,23 +518,24 @@ xvip_dma_querycap(struct file *file, void *fh, struct v4l2_capability *cap)
 	return 0;
 }
 
-/* FIXME: without this callback function, some applications are not configured
- * with correct formats, and it results in frames in wrong format. Whether this
- * callback needs to be required is not clearly defined, so it should be
- * clarified through the mailing list.
- */
 static int
 xvip_dma_enum_format(struct file *file, void *fh, struct v4l2_fmtdesc *f)
 {
-	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
-	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
+	unsigned int index = f->index;
 
-	if (f->index > 0)
-		return -EINVAL;
+	for (unsigned int i = 0; i < ARRAY_SIZE(xvip_dma_video_formats); ++i) {
+		const struct xvip_dma_format *format = &xvip_dma_video_formats[i];
 
-	f->pixelformat = dma->format.pixelformat;
+		if (f->mbus_code && f->mbus_code != format->code)
+			continue;
 
-	return 0;
+		if (index-- == 0) {
+			f->pixelformat = format->fourcc;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
 }
 
 static int

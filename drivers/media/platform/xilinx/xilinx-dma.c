@@ -626,6 +626,7 @@ xvip_dma_set_format(struct file *file, void *fh, struct v4l2_format *format)
 static const struct v4l2_ioctl_ops xvip_dma_ioctl_ops = {
 	.vidioc_querycap		= xvip_dma_querycap,
 	.vidioc_enum_fmt_vid_cap	= xvip_dma_enum_format,
+	.vidioc_enum_fmt_vid_out	= xvip_dma_enum_format,
 	.vidioc_g_fmt_vid_cap		= xvip_dma_get_format,
 	.vidioc_g_fmt_vid_out		= xvip_dma_get_format,
 	.vidioc_s_fmt_vid_cap		= xvip_dma_set_format,

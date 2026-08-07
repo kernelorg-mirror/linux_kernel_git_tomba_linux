@@ -491,6 +491,7 @@ static int xg_probe(struct platform_device *pdev)
 
 	/* Init Media Entity */
 	subdev->entity.ops = &xg_media_ops;
+	subdev->entity.function = MEDIA_ENT_F_PROC_VIDEO_LUT;
 	rval = media_entity_pads_init(&subdev->entity, 2, xg->pads);
 	if (rval < 0)
 		goto media_error;

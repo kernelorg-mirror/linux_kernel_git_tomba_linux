@@ -352,8 +352,8 @@ static const struct v4l2_subdev_internal_ops xvsw_internal_ops = {
  * Media Operations
  */
 
-static bool xvsw_has_route(struct media_entity *entity, unsigned int pad0,
-			   unsigned int pad1)
+static bool xvsw_has_pad_interdep(struct media_entity *entity,
+				  unsigned int pad0, unsigned int pad1)
 {
 	struct xvswitch_device *xvsw =
 		container_of(entity, struct xvswitch_device, subdev.entity);
@@ -375,7 +375,7 @@ static bool xvsw_has_route(struct media_entity *entity, unsigned int pad0,
 
 static const struct media_entity_operations xvsw_media_ops = {
 	.link_validate = v4l2_subdev_link_validate,
-	.has_route = xvsw_has_route,
+	.has_pad_interdep = xvsw_has_pad_interdep,
 };
 
 /* -----------------------------------------------------------------------------

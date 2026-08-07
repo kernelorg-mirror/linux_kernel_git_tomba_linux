@@ -378,6 +378,7 @@ static int xdmsc_probe(struct platform_device *pdev)
 
 	/* Init Media Entity */
 	subdev->entity.ops = &xdmsc_media_ops;
+	subdev->entity.function = MEDIA_ENT_F_PROC_VIDEO_PIXEL_ENC_CONV;
 	rval = media_entity_pads_init(&subdev->entity, 2, xdmsc->pads);
 	if (rval < 0)
 		goto media_error;

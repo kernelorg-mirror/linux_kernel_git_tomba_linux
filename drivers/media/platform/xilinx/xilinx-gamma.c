@@ -539,7 +539,7 @@ static void xg_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xg->xvip.subdev;
 
 	v4l2_async_unregister_subdev(subdev);
-	/* Add entry to cleanup v4l2 control handle */
+	v4l2_ctrl_handler_free(&xg->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 	xvip_cleanup_resources(&xg->xvip);
 }

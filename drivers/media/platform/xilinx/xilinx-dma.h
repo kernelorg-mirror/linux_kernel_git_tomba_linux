@@ -25,6 +25,7 @@
 
 struct dma_chan;
 struct xvip_composite_device;
+struct xvip_dma_meta_format;
 struct xvip_video_format;
 
 /**
@@ -86,13 +87,17 @@ static inline struct xvip_pipeline *to_xvip_pipeline(struct video_device *vdev)
  * @xdev: composite device the DMA channel belongs to
  * @pipe: pipeline belonging to the DMA channel
  * @port: composite device DT node port number for the DMA channel
- * @lock: protects the @format, @fmtinfo and @queue fields
+ * @lock: protects the @format, @fmtinfo, @meta_format, @meta_fmtinfo and
+ *	  @queue fields
  * @format: active V4L2 pixel format
  * @r: crop rectangle parameters
  * @fmtinfo: format information corresponding to the active @format
+ * @meta_format: active V4L2 metadata format
+ * @meta_fmtinfo: format information corresponding to the active @meta_format
  * @poss_v4l2_fmts: All possible v4l formats supported
  * @poss_v4l2_fmt_cnt: number of supported v4l formats
- * @queue: vb2 buffers queue
+ * @queue: vb2 buffers queue, its type selects between @format and
+ *	   @meta_format
  * @sequence: V4L2 buffers sequence number
  * @queued_bufs: list of queued buffers
  * @queued_lock: protects the buf_queued list
@@ -123,6 +128,8 @@ struct xvip_dma {
 	struct v4l2_format format;
 	struct v4l2_rect r;
 	const struct xvip_video_format *fmtinfo;
+	struct v4l2_format meta_format;
+	const struct xvip_dma_meta_format *meta_fmtinfo;
 	u32 *poss_v4l2_fmts;
 	u32 poss_v4l2_fmt_cnt;
 

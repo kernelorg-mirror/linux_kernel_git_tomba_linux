@@ -33,6 +33,7 @@
 #include "xilinx-vipp.h"
 
 #define XVIP_DMA_DEF_FORMAT		V4L2_PIX_FMT_YUYV
+#define XVIP_DMA_DEF_META_FORMAT	V4L2_META_FMT_GENERIC_8
 #define XVIP_DMA_DEF_WIDTH		1920
 #define XVIP_DMA_DEF_HEIGHT		1080
 #define XVIP_DMA_DEF_WIDTH_ALIGN	2
@@ -57,9 +58,53 @@ static const struct xvip_xdma_ops xvip_xdma_ops_ai_layout = {
 	.get_width_align = xilinx_ai_xdma_get_width_align,
 };
 
+/**
+ * struct xvip_dma_meta_format - Line based metadata format
+ * @code: media bus format code on the connected subdev pad
+ * @fourcc: V4L2 metadata format 4CC
+ *
+ * The DMA engine moves metadata as opaque bytes, one byte per data unit, so
+ * unlike the video formats there is nothing to look up in the DMA backend and
+ * no entry in the struct xvip_video_format table.
+ */
+struct xvip_dma_meta_format {
+	u32 code;
+	u32 fourcc;
+};
+
+static const struct xvip_dma_meta_format xvip_dma_meta_formats[] = {
+	{ MEDIA_BUS_FMT_META_8, V4L2_META_FMT_GENERIC_8 },
+};
+
 /* -----------------------------------------------------------------------------
  * Helper functions
  */
+
+/*
+ * The S2MM video nodes capture either video or metadata. A vb2 queue has a
+ * single buffer type, so the queue type is what selects between the two, and
+ * it is the only thing that may be used to tell the modes apart: dma->format
+ * is fixed to a video type at init time and keeps describing the video format
+ * while the node is in metadata mode.
+ */
+static inline bool xvip_dma_is_meta(const struct xvip_dma *dma)
+{
+	return dma->queue.type == V4L2_BUF_TYPE_META_CAPTURE;
+}
+
+static const struct xvip_dma_meta_format *
+xvip_dma_get_meta_format_by_fourcc(u32 fourcc)
+{
+	for (unsigned int i = 0; i < ARRAY_SIZE(xvip_dma_meta_formats); ++i) {
+		const struct xvip_dma_meta_format *format =
+			&xvip_dma_meta_formats[i];
+
+		if (format->fourcc == fourcc)
+			return format;
+	}
+
+	return NULL;
+}
 
 static struct v4l2_subdev *
 xvip_dma_remote_subdev(struct media_pad *local, u32 *pad)
@@ -91,6 +136,18 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
 	ret = v4l2_subdev_call(subdev, pad, get_fmt, NULL, &fmt);
 	if (ret < 0)
 		return ret == -ENOIOCTLCMD ? -EINVAL : ret;
+
+	if (xvip_dma_is_meta(dma)) {
+		const struct v4l2_meta_format *meta = &dma->meta_format.fmt.meta;
+
+		/* Metadata capture has no cropping. */
+		if (dma->meta_fmtinfo->code != fmt.format.code ||
+		    meta->width != fmt.format.width ||
+		    meta->height != fmt.format.height)
+			return -EINVAL;
+
+		return 0;
+	}
 
 	if (dma->fmtinfo->code != fmt.format.code)
 		return -EINVAL;
@@ -396,6 +453,14 @@ static void xvip_dma_complete(void *param)
 	buf->buf.sequence = dma->sequence++;
 	buf->buf.vb2_buf.timestamp = ktime_get_ns();
 
+	if (xvip_dma_is_meta(dma)) {
+		/* Metadata buffers are single plane and never interlaced. */
+		vb2_set_plane_payload(&buf->buf.vb2_buf, 0,
+				      dma->meta_format.fmt.meta.buffersize);
+		vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_DONE);
+		return;
+	}
+
 	/*
 	 * Field-ID comes from the framebuffer (xilinx_frmbuf) DMA driver only.
 	 * On an AI layout formatter channel, xilinx_xdma_get_fid() resolves no
@@ -444,6 +509,23 @@ xvip_dma_queue_setup(struct vb2_queue *vq,
 	struct xvip_dma *dma = vb2_get_drv_priv(vq);
 	unsigned int i;
 	int sizeimage;
+
+	/*
+	 * Metadata case: single plane, and the size comes from the metadata
+	 * format. This has to be tested before the multiplanar case, as
+	 * dma->format.type still describes the video format here.
+	 */
+	if (xvip_dma_is_meta(dma)) {
+		unsigned int buffersize = dma->meta_format.fmt.meta.buffersize;
+
+		if (*nplanes)
+			return sizes[0] < buffersize ? -EINVAL : 0;
+
+		*nplanes = 1;
+		sizes[0] = buffersize;
+
+		return 0;
+	}
 
 	/* Multi planar case: Make sure the image size is large enough */
 	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
@@ -504,7 +586,8 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 	u32 bpl;
 
 	if (dma->queue.type == V4L2_BUF_TYPE_VIDEO_CAPTURE ||
-	    dma->queue.type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
+	    dma->queue.type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE ||
+	    dma->queue.type == V4L2_BUF_TYPE_META_CAPTURE) {
 		flags = DMA_PREP_INTERRUPT | DMA_CTRL_ACK;
 		dma->xt.dir = DMA_DEV_TO_MEM;
 		dma->xt.src_sgl = false;
@@ -519,11 +602,25 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 		dma->xt.src_start = addr;
 	}
 
-	/*
-	 * DMA IP supports only 2 planes, so one datachunk is sufficient
-	 * to get start address of 2nd plane
-	 */
-	if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
+	if (xvip_dma_is_meta(dma)) {
+		const struct v4l2_meta_format *meta = &dma->meta_format.fmt.meta;
+
+		/*
+		 * Metadata is transferred as opaque bytes, one byte per data
+		 * unit, so there is no video format to configure in the DMA
+		 * backend and the geometry is expressed directly in bytes.
+		 * Lines are stored contiguously, hence a zero dst_icg.
+		 */
+		dma->xt.frame_size = 1;
+		dma->sgl.size = meta->width;
+		dma->sgl.icg = meta->bytesperline - meta->width;
+		dma->xt.numf = meta->height;
+		dma->sgl.dst_icg = 0;
+	} else if (V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {
+		/*
+		 * DMA IP supports only 2 planes, so one datachunk is
+		 * sufficient to get start address of 2nd plane
+		 */
 		struct v4l2_pix_format_mplane *pix_mp;
 		size_t size;
 
@@ -665,6 +762,26 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 
 	dma->sequence = 0;
 	dma->prev_fid = ~0;
+
+	/*
+	 * Metadata capture programs the transfer geometry in bytes and never
+	 * configures a video format in the DMA backend, as opaque bytes have
+	 * no pixel format to program. That is only correct for plain dmaengine
+	 * channels (AXI VDMA), which take the interleaved template verbatim.
+	 * The video-aware backends instead scale the transfer by the last
+	 * configured video format, which would silently mis-size it, so refuse
+	 * metadata capture there. Only they answer this query.
+	 */
+	if (xvip_dma_is_meta(dma)) {
+		u32 fmt_cnt, *fmts;
+
+		if (!dma->xdma->get_v4l2_vid_fmts(dma->dma, &fmt_cnt, &fmts)) {
+			dev_err(dma->xdev->dev,
+				"metadata capture unsupported on this DMA\n");
+			ret = -EINVAL;
+			goto error;
+		}
+	}
 
 	/*
 	 * Start streaming on the pipeline. No link touching an entity in the
@@ -1224,12 +1341,179 @@ xvip_dma_set_format(struct file *file, void *fh, struct v4l2_format *format)
 }
 
 static int
+xvip_dma_enum_meta_format(struct file *file, void *fh, struct v4l2_fmtdesc *f)
+{
+	unsigned int index = f->index;
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(xvip_dma_meta_formats); ++i) {
+		const struct xvip_dma_meta_format *format =
+			&xvip_dma_meta_formats[i];
+
+		if (f->mbus_code && f->mbus_code != format->code)
+			continue;
+
+		if (index-- == 0) {
+			f->pixelformat = format->fourcc;
+			f->flags = V4L2_FMT_FLAG_META_LINE_BASED;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
+static int
+xvip_dma_get_meta_format(struct file *file, void *fh,
+			 struct v4l2_format *format)
+{
+	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
+	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
+
+	format->fmt.meta = dma->meta_format.fmt.meta;
+
+	return 0;
+}
+
+static void
+__xvip_dma_try_meta_format(struct xvip_dma *dma, struct v4l2_format *format,
+			   const struct xvip_dma_meta_format **fmtinfo)
+{
+	struct v4l2_meta_format *meta = &format->fmt.meta;
+	const struct xvip_dma_meta_format *info;
+	unsigned int min_width;
+	unsigned int max_width;
+
+	info = xvip_dma_get_meta_format_by_fourcc(meta->dataformat);
+	if (!info)
+		info = &xvip_dma_meta_formats[0];
+
+	meta->dataformat = info->fourcc;
+
+	/*
+	 * The metadata formats use one byte per data unit, so the width is
+	 * also the line size in bytes. Align it like the video formats, and
+	 * round the line stride up to the DMA transfer alignment.
+	 *
+	 * Unlike the video path, the application supplied bytesperline is not
+	 * honored as a requested padding: for metadata capture the fields
+	 * below the data format are outputs computed by the driver.
+	 */
+	min_width = roundup(XVIP_DMA_MIN_WIDTH, dma->width_align);
+	max_width = rounddown(XVIP_DMA_MAX_WIDTH, dma->width_align);
+
+	meta->width = clamp(rounddown(meta->width, dma->width_align),
+			    min_width, max_width);
+	meta->height = clamp(meta->height, XVIP_DMA_MIN_HEIGHT,
+			     XVIP_DMA_MAX_HEIGHT);
+
+	meta->bytesperline = roundup(meta->width, dma->align);
+	meta->buffersize = meta->bytesperline * meta->height;
+
+	if (fmtinfo)
+		*fmtinfo = info;
+}
+
+static int
+xvip_dma_try_meta_format(struct file *file, void *fh,
+			 struct v4l2_format *format)
+{
+	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
+	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
+
+	__xvip_dma_try_meta_format(dma, format, NULL);
+
+	return 0;
+}
+
+static int
+xvip_dma_set_meta_format(struct file *file, void *fh,
+			 struct v4l2_format *format)
+{
+	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
+	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
+	const struct xvip_dma_meta_format *info;
+
+	__xvip_dma_try_meta_format(dma, format, &info);
+
+	if (vb2_is_busy(&dma->queue))
+		return -EBUSY;
+
+	dma->meta_format.fmt.meta = format->fmt.meta;
+	dma->meta_fmtinfo = info;
+
+	return 0;
+}
+
+static bool xvip_dma_type_supported(struct xvip_dma *dma, u32 type)
+{
+	switch (type) {
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
+		return dma->video.device_caps & V4L2_CAP_VIDEO_CAPTURE;
+	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
+		return dma->video.device_caps & V4L2_CAP_VIDEO_CAPTURE_MPLANE;
+	case V4L2_BUF_TYPE_META_CAPTURE:
+		return dma->video.device_caps & V4L2_CAP_META_CAPTURE;
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
+		return dma->video.device_caps & V4L2_CAP_VIDEO_OUTPUT;
+	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
+		return dma->video.device_caps & V4L2_CAP_VIDEO_OUTPUT_MPLANE;
+	default:
+		return false;
+	}
+}
+
+/*
+ * The S2MM video nodes support both video and metadata capture. The vb2 queue
+ * has a single buffer type, so switch it to the requested type when buffers
+ * are allocated.
+ */
+static int
+xvip_dma_ioctl_reqbufs(struct file *file, void *fh,
+		       struct v4l2_requestbuffers *p)
+{
+	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
+	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
+	int ret;
+
+	if (!xvip_dma_type_supported(dma, p->type))
+		return -EINVAL;
+
+	ret = vb2_queue_change_type(&dma->queue, p->type);
+	if (ret)
+		return ret;
+
+	return vb2_ioctl_reqbufs(file, fh, p);
+}
+
+static int
+xvip_dma_ioctl_create_bufs(struct file *file, void *fh,
+			   struct v4l2_create_buffers *p)
+{
+	struct v4l2_fh *vfh = file_to_v4l2_fh(file);
+	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
+	int ret;
+
+	if (!xvip_dma_type_supported(dma, p->format.type))
+		return -EINVAL;
+
+	ret = vb2_queue_change_type(&dma->queue, p->format.type);
+	if (ret)
+		return ret;
+
+	return vb2_ioctl_create_bufs(file, fh, p);
+}
+
+static int
 xvip_dma_g_selection(struct file *file, void *fh, struct v4l2_selection *sel)
 {
 	struct v4l2_fh *vfh = file->private_data;
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
 	u32 width, height;
 	bool crop_frame = false;
+
+	/* Metadata capture has no cropping or composing. */
+	if (xvip_dma_is_meta(dma))
+		return -EINVAL;
 
 	switch (sel->target) {
 	case V4L2_SEL_TGT_COMPOSE:
@@ -1287,6 +1571,10 @@ xvip_dma_s_selection(struct file *file, void *fh, struct v4l2_selection *sel)
 	struct xvip_dma *dma = to_xvip_dma(vfh->vdev);
 	u32 width, height;
 
+	/* Metadata capture has no cropping or composing. */
+	if (xvip_dma_is_meta(dma))
+		return -EINVAL;
+
 	switch (sel->target) {
 	case V4L2_SEL_TGT_COMPOSE:
 		/* COMPOSE target is only valid for capture buftype */
@@ -1339,13 +1627,17 @@ static const struct v4l2_ioctl_ops xvip_dma_ioctl_ops = {
 	.vidioc_try_fmt_vid_cap_mplane	= xvip_dma_try_format,
 	.vidioc_try_fmt_vid_out		= xvip_dma_try_format,
 	.vidioc_try_fmt_vid_out_mplane	= xvip_dma_try_format,
+	.vidioc_enum_fmt_meta_cap	= xvip_dma_enum_meta_format,
+	.vidioc_g_fmt_meta_cap		= xvip_dma_get_meta_format,
+	.vidioc_s_fmt_meta_cap		= xvip_dma_set_meta_format,
+	.vidioc_try_fmt_meta_cap	= xvip_dma_try_meta_format,
 	.vidioc_s_selection		= xvip_dma_s_selection,
 	.vidioc_g_selection		= xvip_dma_g_selection,
-	.vidioc_reqbufs			= vb2_ioctl_reqbufs,
+	.vidioc_reqbufs			= xvip_dma_ioctl_reqbufs,
 	.vidioc_querybuf		= vb2_ioctl_querybuf,
 	.vidioc_qbuf			= vb2_ioctl_qbuf,
 	.vidioc_dqbuf			= vb2_ioctl_dqbuf,
-	.vidioc_create_bufs		= vb2_ioctl_create_bufs,
+	.vidioc_create_bufs		= xvip_dma_ioctl_create_bufs,
 	.vidioc_expbuf			= vb2_ioctl_expbuf,
 	.vidioc_streamon		= vb2_ioctl_streamon,
 	.vidioc_streamoff		= vb2_ioctl_streamoff,
@@ -1580,6 +1872,17 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 
 	dma->align = BIT(dma->dma->device->copy_align);
 
+	/*
+	 * Initialize the default metadata format. This needs the DMA channel
+	 * alignment constraints, so it can't be done together with the video
+	 * format above.
+	 */
+	dma->meta_format.type = V4L2_BUF_TYPE_META_CAPTURE;
+	dma->meta_format.fmt.meta.dataformat = XVIP_DMA_DEF_META_FORMAT;
+	dma->meta_format.fmt.meta.width = XVIP_DMA_DEF_WIDTH;
+	dma->meta_format.fmt.meta.height = 1;
+	__xvip_dma_try_meta_format(dma, &dma->meta_format, &dma->meta_fmtinfo);
+
 	ret = v4l2_ctrl_handler_init(&dma->ctrl_handler,
 				     ARRAY_SIZE(xvip_dma_ctrls));
 	if (ret < 0) {
@@ -1636,12 +1939,19 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	dma->video.ioctl_ops = &xvip_dma_ioctl_ops;
 	dma->video.lock = &dma->lock;
 	dma->video.device_caps = V4L2_CAP_STREAMING;
+	/*
+	 * The S2MM nodes are dual-purpose: the CSI-2 RX subsystem's embedded
+	 * data output ends up in a DMA engine just like the video streams.
+	 * Metadata output on the MM2S nodes is not supported.
+	 */
 	switch (dma->format.type) {
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE:
-		dma->video.device_caps |= V4L2_CAP_VIDEO_CAPTURE_MPLANE;
+		dma->video.device_caps |= V4L2_CAP_VIDEO_CAPTURE_MPLANE |
+					  V4L2_CAP_META_CAPTURE;
 		break;
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
-		dma->video.device_caps |= V4L2_CAP_VIDEO_CAPTURE;
+		dma->video.device_caps |= V4L2_CAP_VIDEO_CAPTURE |
+					  V4L2_CAP_META_CAPTURE;
 		break;
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE:
 		dma->video.device_caps |= V4L2_CAP_VIDEO_OUTPUT_MPLANE;

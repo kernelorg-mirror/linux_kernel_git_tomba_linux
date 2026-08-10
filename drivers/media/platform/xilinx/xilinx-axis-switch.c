@@ -571,6 +571,7 @@ static int xvsw_probe(struct platform_device *pdev)
 	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	v4l2_set_subdevdata(subdev, xvsw);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	subdev->entity.function = MEDIA_ENT_F_VID_MUX;
 	subdev->entity.ops = &xvsw_media_ops;
 
 	ret = media_entity_pads_init(&subdev->entity, npads, xvsw->pads);

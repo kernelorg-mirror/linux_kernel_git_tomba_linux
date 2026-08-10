@@ -518,7 +518,7 @@ static int xg_probe(struct platform_device *pdev)
 	rval = v4l2_async_register_subdev(subdev);
 	if (rval < 0) {
 		dev_err(&pdev->dev, "failed to register subdev");
-		goto v4l2_subdev_error;
+		goto ctrl_error;
 	}
 	dev_info(&pdev->dev,
 		 "Xilinx %d-bit Video Gamma Correction LUT registered",
@@ -526,7 +526,6 @@ static int xg_probe(struct platform_device *pdev)
 	return 0;
 ctrl_error:
 	v4l2_ctrl_handler_free(&xg->ctrl_handler);
-v4l2_subdev_error:
 	media_entity_cleanup(&subdev->entity);
 media_error:
 	xvip_cleanup_resources(&xg->xvip);

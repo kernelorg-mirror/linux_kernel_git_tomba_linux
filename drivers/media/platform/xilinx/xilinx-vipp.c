@@ -458,9 +458,11 @@ static int xvip_graph_dma_init_one(struct xvip_composite_device *xdev,
 	list_add_tail(&dma->list, &xdev->dmas);
 
 	if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE)
-		xdev->v4l2_caps |= V4L2_CAP_VIDEO_CAPTURE_MPLANE;
+		xdev->v4l2_caps |= V4L2_CAP_VIDEO_CAPTURE_MPLANE |
+				   V4L2_CAP_META_CAPTURE;
 	else if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		xdev->v4l2_caps |= V4L2_CAP_VIDEO_CAPTURE;
+		xdev->v4l2_caps |= V4L2_CAP_VIDEO_CAPTURE |
+				   V4L2_CAP_META_CAPTURE;
 	else if (type == V4L2_BUF_TYPE_VIDEO_OUTPUT)
 		xdev->v4l2_caps |= V4L2_CAP_VIDEO_OUTPUT;
 	else if (type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)

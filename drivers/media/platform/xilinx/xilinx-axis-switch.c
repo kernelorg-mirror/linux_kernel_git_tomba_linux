@@ -38,7 +38,6 @@
  * @subdev: The v4l2 subdev structure
  * @pads: media pads
  * @routing: sink pad connected to each source pad (-1 if none)
- * @formats: active V4L2 media bus formats on sink pads
  * @nsinks: number of sink pads (1 to 8)
  * @nsources: number of source pads (2 to 8)
  * @tdest_routing: Whether TDEST routing is enabled
@@ -51,7 +50,6 @@ struct xvswitch_device {
 	struct v4l2_subdev subdev;
 	struct media_pad *pads;
 	int routing[MAX_VSW_SRCS];
-	struct v4l2_mbus_framefmt *formats;
 	u32 nsinks;
 	u32 nsources;
 	bool tdest_routing;
@@ -124,26 +122,26 @@ static int xvsw_s_stream(struct v4l2_subdev *subdev, int enable)
  * V4L2 Subdevice Pad Operations
  */
 
-static struct v4l2_mbus_framefmt *
-xvsw_get_pad_format(struct xvswitch_device *xvsw,
-		    struct v4l2_subdev_state *sd_state,
-		    unsigned int pad, u32 which)
+static int xvsw_init_state(struct v4l2_subdev *subdev,
+			   struct v4l2_subdev_state *sd_state)
 {
-	struct v4l2_mbus_framefmt *get_fmt;
+	struct xvswitch_device *xvsw = to_xvsw(subdev);
+	unsigned int npads = xvsw->nsinks + xvsw->nsources;
+	unsigned int i;
 
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		get_fmt = v4l2_subdev_state_get_format(sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		get_fmt = &xvsw->formats[pad];
-		break;
-	default:
-		get_fmt = NULL;
-		break;
+	for (i = 0; i < npads; i++) {
+		struct v4l2_mbus_framefmt *format;
+
+		format = v4l2_subdev_state_get_format(sd_state, i);
+
+		format->code = MEDIA_BUS_FMT_RGB888_1X24;
+		format->field = V4L2_FIELD_NONE;
+		format->colorspace = V4L2_COLORSPACE_SRGB;
+		format->width = XVIP_MAX_WIDTH;
+		format->height = XVIP_MAX_HEIGHT;
 	}
 
-	return get_fmt;
+	return 0;
 }
 
 static int xvsw_get_format(struct v4l2_subdev *subdev,
@@ -152,7 +150,6 @@ static int xvsw_get_format(struct v4l2_subdev *subdev,
 {
 	struct xvswitch_device *xvsw = to_xvsw(subdev);
 	int pad = fmt->pad;
-	struct v4l2_mbus_framefmt *get_fmt;
 
 	/*
 	 * If control reg routing and pad is source pad then
@@ -168,11 +165,7 @@ static int xvsw_get_format(struct v4l2_subdev *subdev,
 		}
 	}
 
-	get_fmt = xvsw_get_pad_format(xvsw, sd_state, pad, fmt->which);
-	if (!get_fmt)
-		return -EINVAL;
-
-	fmt->format = *get_fmt;
+	fmt->format = *v4l2_subdev_state_get_format(sd_state, pad);
 
 	return 0;
 }
@@ -210,16 +203,12 @@ static int xvsw_set_format(struct v4l2_subdev *subdev,
 		 */
 
 		/* get sink pad format */
-		sinkformat = xvsw_get_pad_format(xvsw, sd_state, 0, fmt->which);
-		if (!sinkformat)
-			return -EINVAL;
+		sinkformat = v4l2_subdev_state_get_format(sd_state, 0);
 
 		fmt->format = *sinkformat;
 
 		/* set sink pad format on source pad */
-		format = xvsw_get_pad_format(xvsw, sd_state, fmt->pad, fmt->which);
-		if (!format)
-			return -EINVAL;
+		format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 
 		*format = *sinkformat;
 
@@ -236,9 +225,7 @@ static int xvsw_set_format(struct v4l2_subdev *subdev,
 	 *
 	 * In Control reg routing mode, set format only for sink pads.
 	 */
-	format = xvsw_get_pad_format(xvsw, sd_state, fmt->pad, fmt->which);
-	if (!format)
-		return -EINVAL;
+	format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 
 	format->code = fmt->format.code;
 	format->width = fmt->format.width;
@@ -315,16 +302,6 @@ done:
 	return ret;
 }
 
-static int xvsw_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	return 0;
-}
-
-static int xvsw_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	return 0;
-}
-
 static struct v4l2_subdev_video_ops xvsw_video_ops = {
 	.s_stream = xvsw_s_stream,
 };
@@ -344,8 +321,7 @@ static struct v4l2_subdev_ops xvsw_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops xvsw_internal_ops = {
-	.open = xvsw_open,
-	.close = xvsw_close,
+	.init_state = xvsw_init_state,
 };
 
 /* -----------------------------------------------------------------------------
@@ -474,7 +450,7 @@ static int xvsw_probe(struct platform_device *pdev)
 	struct xvswitch_device *xvsw;
 	struct resource *res;
 	unsigned int npads;
-	unsigned int i, padcount;
+	unsigned int i;
 	int ret;
 
 	xvsw = devm_kzalloc(&pdev->dev, sizeof(*xvsw), GFP_KERNEL);
@@ -510,32 +486,6 @@ static int xvsw_probe(struct platform_device *pdev)
 
 	for (; i < npads; ++i)
 		xvsw->pads[i].flags = MEDIA_PAD_FL_SOURCE;
-
-	padcount = xvsw->tdest_routing ? npads : xvsw->nsinks;
-
-	/*
-	 * In case of tdest routing, allocate format per pad.
-	 * source pad format has to match one of the sink pads in tdest routing.
-	 *
-	 * Otherwise only allocate for sinks as sources will
-	 * get the same pad format and corresponding sink.
-	 * set format on src pad will return corresponding sinks data.
-	 */
-	xvsw->formats = devm_kzalloc(&pdev->dev,
-				     padcount * sizeof(*xvsw->formats),
-				     GFP_KERNEL);
-	if (!xvsw->formats) {
-		dev_err(xvsw->dev, "No memory to allocate formats!\n");
-		return -ENOMEM;
-	}
-
-	for (i = 0; i < padcount; i++) {
-		xvsw->formats[i].code = MEDIA_BUS_FMT_RGB888_1X24;
-		xvsw->formats[i].field = V4L2_FIELD_NONE;
-		xvsw->formats[i].colorspace = V4L2_COLORSPACE_SRGB;
-		xvsw->formats[i].width = XVIP_MAX_WIDTH;
-		xvsw->formats[i].height = XVIP_MAX_HEIGHT;
-	}
 
 	/*
 	 * Initialize the routing table if none are connected.
@@ -576,19 +526,25 @@ static int xvsw_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto clk_error;
 
+	ret = v4l2_subdev_init_finalize(subdev);
+	if (ret < 0)
+		goto error_media;
+
 	platform_set_drvdata(pdev, xvsw);
 
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to register subdev\n");
-		goto error;
+		goto error_subdev;
 	}
 
 	dev_info(xvsw->dev, "Xilinx AXI4-Stream Switch found!\n");
 
 	return 0;
 
-error:
+error_subdev:
+	v4l2_subdev_cleanup(subdev);
+error_media:
 	media_entity_cleanup(&subdev->entity);
 clk_error:
 	if (!xvsw->tdest_routing)
@@ -603,6 +559,7 @@ static void xvsw_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xvsw->subdev;
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 	if (!xvsw->tdest_routing)
 		clk_disable_unprepare(xvsw->saxi_ctlclk);

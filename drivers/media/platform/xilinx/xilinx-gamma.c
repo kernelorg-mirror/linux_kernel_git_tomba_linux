@@ -370,8 +370,8 @@ static int xg_parse_of(struct xgamma_dev *xg)
 {
 	struct device *dev = xg->xvip.dev;
 	struct device_node *node = dev->of_node;
-	struct device_node *ports;
-	struct device_node *port;
+	struct device_node *ports __free(device_node) =
+		of_get_child_by_name(node, "ports");
 	u32 port_id = 0;
 	int rval;
 
@@ -395,12 +395,8 @@ static int xg_parse_of(struct xgamma_dev *xg)
 		return -EINVAL;
 	}
 
-	ports = of_get_child_by_name(node, "ports");
-	if (!ports)
-		ports = node;
-
 	/* Get the format description for each pad */
-	for_each_child_of_node(ports, port) {
+	for_each_child_of_node_scoped(ports ? ports : node, port) {
 		if (port->name && (of_node_cmp(port->name, "port") == 0)) {
 			rval = of_property_read_u32(port, "reg", &port_id);
 			if (rval < 0) {

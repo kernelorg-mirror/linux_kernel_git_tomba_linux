@@ -705,7 +705,7 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 		dma->sgl.icg = bpl - dma->sgl.size;
 		dma->xt.numf = dma->r.height;
 
-		dev_dbg(dma->xdev->dev,
+		/*dev_dbg(dma->xdev->dev,
 			"pix height: %u, width: %u, dma height: %u, width: %u\n",
 			pix_mp->height, pix_mp->width, dma->r.height, dma->r.width);
 		dev_dbg(dma->xdev->dev,
@@ -713,7 +713,7 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 			bpl, padding_factor_nume, padding_factor_deno, bpl_nume, bpl_deno);
 		dev_dbg(dma->xdev->dev,
 			"xt.frame_size: %zu, sgl_size: %zu, ICG: %zu, numframes: %zu\n",
-			dma->xt.frame_size, dma->sgl.size, dma->sgl.icg, dma->xt.numf);
+			dma->xt.frame_size, dma->sgl.size, dma->sgl.icg, dma->xt.numf);*/
 		/*
 		 * dst_icg is the number of bytes to jump after last luma addr
 		 * and before first chroma addr

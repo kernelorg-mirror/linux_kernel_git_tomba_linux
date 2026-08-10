@@ -89,11 +89,18 @@ xvip_graph_find_entity_from_media(struct xvip_composite_device *xdev,
 {
 	struct xvip_graph_entity *xvip_entity;
 	struct v4l2_async_connection *asd;
+	struct list_head *lists[] = {
+		&xdev->notifier.done_list,
+		&xdev->notifier.waiting_list
+	};
+	unsigned int i;
 
-	list_for_each_entry(asd, &xdev->notifier.waiting_list, asc_entry) {
-		xvip_entity = to_xvip_entity(asd);
-		if (xvip_entity->entity == entity)
-			return xvip_entity;
+	for (i = 0; i < ARRAY_SIZE(lists); i++) {
+		list_for_each_entry(asd, lists[i], asc_entry) {
+			xvip_entity = to_xvip_entity(asd);
+			if (xvip_entity->entity == entity)
+				return xvip_entity;
+		}
 	}
 
 	return NULL;

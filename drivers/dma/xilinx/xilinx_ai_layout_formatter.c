@@ -1640,6 +1640,10 @@ static int xilinx_ai_layout_formatter_chan_probe(struct xilinx_ai_layout_formatt
 	else
 		chan->write_addr = write_addr;
 
+	err = dma_set_mask_and_coherent(xdev->dev, DMA_BIT_MASK(dma_addr_size));
+	if (err)
+		return dev_err_probe(xdev->dev, err, "failed to set DMA mask\n");
+
 	spin_lock_init(&chan->lock);
 	INIT_LIST_HEAD(&chan->pending_list);
 	INIT_LIST_HEAD(&chan->done_list);

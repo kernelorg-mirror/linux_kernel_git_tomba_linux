@@ -1560,7 +1560,7 @@ int xvip_dma_init(struct xvip_composite_device *xdev, struct xvip_dma *dma,
 	dma->queue.mem_ops = &vb2_dma_contig_memops;
 	dma->queue.timestamp_flags = V4L2_BUF_FLAG_TIMESTAMP_MONOTONIC
 				   | V4L2_BUF_FLAG_TSTAMP_SRC_EOF;
-	dma->queue.dev = dma->xdev->dev;
+	dma->queue.dev = dma->dma->device->dev;
 	ret = vb2_queue_init(&dma->queue);
 	if (ret < 0) {
 		dev_err(dma->xdev->dev, "failed to initialize VB2 queue\n");

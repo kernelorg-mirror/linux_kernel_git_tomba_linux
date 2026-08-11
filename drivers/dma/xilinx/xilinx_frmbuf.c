@@ -19,6 +19,7 @@
 #include <linux/bitops.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
+#include <linux/dma-mapping.h>
 #include <linux/dma/xilinx_frmbuf.h>
 #include <linux/dmapool.h>
 #include <linux/gpio/consumer.h>
@@ -2053,6 +2054,14 @@ static int xilinx_frmbuf_chan_probe(struct xilinx_frmbuf_device *xdev,
 		chan->write_addr = writeq_addr;
 	else
 		chan->write_addr = write_addr;
+
+	err = dma_set_mask_and_coherent(xdev->dev,
+					chan->write_addr == writeq_addr ?
+					DMA_BIT_MASK(64) : DMA_BIT_MASK(32));
+	if (err) {
+		dev_err(xdev->dev, "DMA mask error %d\n", err);
+		return err;
+	}
 
 	if (xdev->cfg->flags & XILINX_FID_PROP)
 		chan->hw_fid = of_property_read_bool(node, "xlnx,fid");

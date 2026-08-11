@@ -241,10 +241,8 @@ static int xvsw_set_format(struct v4l2_subdev *subdev,
 		return -EINVAL;
 
 	format->code = fmt->format.code;
-	format->width = clamp_t(unsigned int, fmt->format.width,
-				XVIP_MIN_WIDTH, XVIP_MAX_WIDTH);
-	format->height = clamp_t(unsigned int, fmt->format.height,
-				 XVIP_MIN_HEIGHT, XVIP_MAX_HEIGHT);
+	format->width = fmt->format.width;
+	format->height = fmt->format.height;
 	format->field = V4L2_FIELD_NONE;
 	format->colorspace = V4L2_COLORSPACE_SRGB;
 

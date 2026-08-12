@@ -572,6 +572,68 @@ static int xvip_dma_buffer_prepare(struct vb2_buffer *vb)
 	return 0;
 }
 
+/*
+ * Prepare the transfer described by the interleaved template.
+ *
+ * DMA engines that implement 2D transfers (AXI VDMA, and the video aware
+ * framebuffer and AI layout formatter backends) take the template verbatim.
+ *
+ * Plain 1D engines (AXI DMA) have no notion of a line stride, so translate the
+ * template into one vector per line. Each line then gets a buffer descriptor of
+ * its own, which is required as each line is a separate AXI4-Stream packet and
+ * a packet ends the descriptor it is written to: a single descriptor spanning
+ * the whole buffer would be terminated by the first end of line and leave the
+ * rest of the buffer untouched. One vector per line also copes with the
+ * opposite case of a single packet spanning the whole buffer, as a packet may
+ * span several descriptors. This needs an AXI DMA instance built with the
+ * scatter-gather engine, as the driver can only program a single segment at a
+ * time otherwise.
+ *
+ * Only single chunk templates can be translated, as a 1D engine cannot express
+ * the multiple chunks of a multi-planar video transfer.
+ */
+static struct dma_async_tx_descriptor *
+xvip_dma_prep_desc(struct xvip_dma *dma, u32 flags)
+{
+	struct dma_async_tx_descriptor *desc;
+	struct dma_vec single_vec;
+	struct dma_vec *vecs;
+	size_t stride;
+
+	if (dma->dma->device->device_prep_interleaved_dma)
+		return dmaengine_prep_interleaved_dma(dma->dma, &dma->xt, flags);
+
+	if (dma->xt.dir != DMA_DEV_TO_MEM || dma->xt.frame_size != 1) {
+		dev_err(dma->xdev->dev, "Unsupported transfer on 1D DMA\n");
+		return NULL;
+	}
+
+	stride = dma->sgl.size + dma->sgl.icg;
+
+	if (dma->xt.numf == 1) {
+		single_vec.addr = dma->xt.dst_start;
+		single_vec.len = dma->sgl.size;
+		vecs = &single_vec;
+	} else {
+		vecs = kcalloc(dma->xt.numf, sizeof(*vecs), GFP_KERNEL);
+		if (!vecs)
+			return NULL;
+
+		for (size_t i = 0; i < dma->xt.numf; ++i) {
+			vecs[i].addr = dma->xt.dst_start + i * stride;
+			vecs[i].len = dma->sgl.size;
+		}
+	}
+
+	desc = dmaengine_prep_peripheral_dma_vec(dma->dma, vecs, dma->xt.numf,
+						 DMA_DEV_TO_MEM, flags);
+
+	if (vecs != &single_vec)
+		kfree(vecs);
+
+	return desc;
+}
+
 static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 {
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
@@ -709,7 +771,7 @@ static void xvip_dma_buffer_queue(struct vb2_buffer *vb)
 		dma->sgl.dst_icg = dst_icg;
 	}
 
-	desc = dmaengine_prep_interleaved_dma(dma->dma, &dma->xt, flags);
+	desc = xvip_dma_prep_desc(dma, flags);
 	if (!desc) {
 		dev_err(dma->xdev->dev, "Failed to prepare DMA transfer\n");
 		vb2_buffer_done(&buf->buf.vb2_buf, VB2_BUF_STATE_ERROR);
@@ -767,7 +829,7 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	 * Metadata capture programs the transfer geometry in bytes and never
 	 * configures a video format in the DMA backend, as opaque bytes have
 	 * no pixel format to program. That is only correct for plain dmaengine
-	 * channels (AXI VDMA), which take the interleaved template verbatim.
+	 * channels (AXI DMA, AXI VDMA), which transfer the geometry as given.
 	 * The video-aware backends instead scale the transfer by the last
 	 * configured video format, which would silently mis-size it, so refuse
 	 * metadata capture there. Only they answer this query.

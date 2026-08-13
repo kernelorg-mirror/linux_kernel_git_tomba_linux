@@ -102,6 +102,7 @@ static inline struct xvip_pipeline *to_xvip_pipeline(struct video_device *vdev)
  * @xt: dma interleaved template for dma configuration
  * @sgl: data chunk structure for dma_interleaved_template
  * @prev_fid: Previous Field ID
+ * @remote_streaming: the subdev connected to the DMA has been started
  * @low_latency_cap: Low latency capture mode
  * @layout_formatter: DMA channel is AI layout formatter device
  * @xdma: Read-only ops table for this channel (framebuffer vs AI layout formatter)
@@ -138,6 +139,7 @@ struct xvip_dma {
 	struct data_chunk sgl;
 
 	u32 prev_fid;
+	bool remote_streaming;
 	u32 low_latency_cap;
 	bool layout_formatter;
 	const struct xvip_xdma_ops *xdma;

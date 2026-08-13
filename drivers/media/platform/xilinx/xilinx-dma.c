@@ -111,6 +111,177 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  */
 
 /**
+ * xvip_dma_set_remote_stream - Start or stop the subdev connected to a DMA
+ * @dma: The DMA engine
+ * @start: Start (when true) or stop (when false) the subdev
+ *
+ * Start or stop streaming on the subdev directly connected to the DMA video
+ * node. The subdev is responsible for propagating the stream state further up
+ * the pipeline towards the source.
+ *
+ * Return: 0 if successful, -EPIPE if no subdev is connected to the DMA, or the
+ * return value of the failed v4l2_subdev_enable_streams() operation otherwise.
+ */
+static int xvip_dma_set_remote_stream(struct xvip_dma *dma, bool start)
+{
+	struct v4l2_subdev *subdev;
+	u32 pad;
+	int ret;
+
+	if (dma->remote_streaming == start)
+		return 0;
+
+	subdev = xvip_dma_remote_subdev(&dma->pad, &pad);
+	if (!subdev)
+		return -EPIPE;
+
+	if (start)
+		ret = v4l2_subdev_enable_streams(subdev, pad, BIT_ULL(0));
+	else
+		ret = v4l2_subdev_disable_streams(subdev, pad, BIT_ULL(0));
+
+	if (ret < 0) {
+		dev_err(dma->xdev->dev, "failed to %s %s: %d\n",
+			start ? "start" : "stop", subdev->name, ret);
+		return ret;
+	}
+
+	dma->remote_streaming = start;
+
+	return 0;
+}
+
+/*
+ * A subdev with no enabled link on any of its source pads ends the pipeline,
+ * for instance a memory-based scene change detection channel. No consumer
+ * starts it.
+ */
+static bool xvip_entity_is_pipeline_sink(struct media_entity *entity)
+{
+	unsigned int i;
+
+	if (!is_media_entity_v4l2_subdev(entity))
+		return false;
+
+	for (i = 0; i < entity->num_pads; ++i) {
+		struct media_pad *pad = &entity->pads[i];
+
+		if ((pad->flags & MEDIA_PAD_FL_SOURCE) &&
+		    media_pad_remote_pad_first(pad))
+			return false;
+	}
+
+	return true;
+}
+
+/**
+ * xvip_subdev_set_sink_stream - Start or stop a subdev that ends the pipeline
+ * @pipe: The pipeline
+ * @subdev: The subdev
+ * @start: Start (when true) or stop (when false) the subdev
+ *
+ * v4l2_subdev_enable_streams() can't address a subdev that ends the pipeline,
+ * as it operates on source pads and the subdev has none in use. Start it with
+ * the .s_stream() operation instead, from where its driver propagates the
+ * stream state to the subdev connected to its sink pad, if any, the same way
+ * the subdevs started by the capture DMA engines do.
+ *
+ * Return: 0 if successful, or the return value of the failed .s_stream()
+ * operation otherwise.
+ */
+static int xvip_subdev_set_sink_stream(struct xvip_pipeline *pipe,
+				       struct v4l2_subdev *subdev, bool start)
+{
+	int ret;
+
+	ret = v4l2_subdev_call(subdev, video, s_stream, start);
+	if (ret < 0) {
+		dev_err(pipe->xdev->dev, "failed to %s %s: %d\n",
+			start ? "start" : "stop", subdev->name, ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+/*
+ * Start or stop the pipeline end that @pad belongs to, if it is one: the subdev
+ * connected to a capture DMA engine, or a subdev without consumer. Entities
+ * with several pads are handled on their first pad only.
+ */
+static int xvip_pipeline_set_pad_stream(struct xvip_pipeline *pipe,
+					struct media_pad *pad, bool start)
+{
+	struct media_entity *entity = pad->entity;
+	struct v4l2_subdev *subdev;
+
+	if (entity->function == MEDIA_ENT_F_IO_V4L) {
+		struct xvip_dma *dma;
+
+		dma = to_xvip_dma(media_entity_to_video_device(entity));
+
+		/* Output DMA engines feed the pipeline, they don't start it. */
+		if (!(dma->pad.flags & MEDIA_PAD_FL_SINK))
+			return 0;
+
+		return xvip_dma_set_remote_stream(dma, start);
+	}
+
+	if (pad->index != 0 || !xvip_entity_is_pipeline_sink(entity))
+		return 0;
+
+	subdev = media_entity_to_v4l2_subdev(entity);
+
+	return xvip_subdev_set_sink_stream(pipe, subdev, start);
+}
+
+/**
+ * xvip_pipeline_start_stop - Start or stop streaming on a pipeline
+ * @pipe: The pipeline
+ * @start: Start (when true) or stop (when false) the pipeline
+ *
+ * Start or stop the pipeline from its ends: the subdevs connected to the
+ * capture DMA engines, and the subdevs that have no consumer at all, such as
+ * the memory-based scene change detection channels. Each of them propagates
+ * the stream state up to the source of its branch. The output DMA engines are
+ * skipped: they feed the pipeline, and the subdevs connected to them are
+ * started from the other end of their branch, as the stream state is
+ * propagated from the consumer to the producer.
+ *
+ * Return: 0 if successful, or the return value of the failed
+ * v4l2_subdev_enable_streams() or .s_stream() operation otherwise. Stopping
+ * never fails.
+ */
+static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
+{
+	struct media_pipeline_pad_iter iter;
+	struct media_pad *failed = NULL;
+	struct media_pad *pad;
+	int ret = 0;
+
+	media_pipeline_for_each_pad(&pipe->pipe, &iter, pad) {
+		ret = xvip_pipeline_set_pad_stream(pipe, pad, start);
+		if (ret < 0 && start) {
+			failed = pad;
+			break;
+		}
+	}
+
+	if (!failed)
+		return 0;
+
+	/* Stop what has been started before the failure. */
+	media_pipeline_for_each_pad(&pipe->pipe, &iter, pad) {
+		if (pad == failed)
+			break;
+
+		xvip_pipeline_set_pad_stream(pipe, pad, false);
+	}
+
+	return ret;
+}
+
+/**
  * xvip_pipeline_set_stream - Enable/disable streaming on a pipeline
  * @pipe: The pipeline
  * @on: Turn the stream on when true or off when false
@@ -120,8 +291,7 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  * independently, pipelines have a shared stream state that enable or disable
  * all entities in the pipeline. For this reason the pipeline uses a streaming
  * counter that tracks the number of DMA engines that have requested the stream
- * to be enabled. This will walk the graph starting from each DMA and enable or
- * disable the entities in the path.
+ * to be enabled.
  *
  * When called with the @on argument set to true, this function will increment
  * the pipeline streaming count. If the streaming count reaches the number of
@@ -132,28 +302,27 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  * decrement the pipeline streaming count and disable all entities in the
  * pipeline when the streaming count reaches zero.
  *
- * Return: 0 if successful, or the return value of the failed video::s_stream
- * operation otherwise. Stopping the pipeline never fails. The pipeline state is
- * not updated when the operation fails.
+ * Return: 0 if successful, or the return value of the failed
+ * v4l2_subdev_enable_streams() operation otherwise. Stopping the pipeline never
+ * fails. The pipeline state is not updated when the operation fails.
  */
 static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe, bool on)
 {
-	struct xvip_composite_device *xdev;
 	int ret = 0;
 
 	mutex_lock(&pipe->lock);
-	xdev = pipe->xdev;
 
 	if (on) {
-		if (pipe->stream_count == pipe->num_dmas - 1 || xdev->atomic_streamon) {
-			ret = xvip_graph_pipeline_start_stop(xdev, pipe, true);
+		if (pipe->stream_count == pipe->num_dmas - 1 ||
+		    pipe->xdev->atomic_streamon) {
+			ret = xvip_pipeline_start_stop(pipe, true);
 			if (ret < 0)
 				goto done;
 		}
 		pipe->stream_count++;
 	} else {
 		if (--pipe->stream_count == 0)
-			xvip_graph_pipeline_start_stop(xdev, pipe, false);
+			xvip_pipeline_start_stop(pipe, false);
 	}
 
 done:

@@ -28,8 +28,8 @@
  * @dmas: list of DMA channels at the pipeline output and input
  * @v4l2_caps: V4L2 capabilities of the whole device (see VIDIOC_QUERYCAP)
  * @lock: This is to ensure all dma path entities acquire same pipeline object
- * @atomic_streamon: Indicates that multi dma media pipe will get enabled
- *  with single dma start
+ * @atomic_streamon: Give each DMA engine an independent stream state, instead
+ *  of sharing it with all the DMA engines of its pipeline
  */
 struct xvip_composite_device {
 	struct v4l2_device v4l2_dev;

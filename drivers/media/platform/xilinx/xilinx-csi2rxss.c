@@ -49,6 +49,9 @@
 #define XCSI_ISR_OFFSET		0x24
 #define XCSI_IER_OFFSET		0x28
 
+#define XCSI_VCSELR_OFFSET	0x2c
+#define XCSI_VCSELR_VCSEL	GENMASK(15, 0)
+
 #define XCSI_ISR_FR		BIT(31)
 #define XCSI_ISR_VCXFE		BIT(30)
 #define XCSI_ISR_YUV420		BIT(28)
@@ -629,6 +632,73 @@ static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+/*
+ * Get the mask of the virtual channels that carry the given sink streams, from
+ * the frame descriptor of the source. Default to all the virtual channels if
+ * the source doesn't report one, or if it doesn't describe every stream: the
+ * core must not filter out data that a stream carries.
+ */
+static u16 xcsi2rxss_get_vc_mask(struct xcsi2rxss_state *state,
+				 u64 streams_mask)
+{
+	struct v4l2_mbus_frame_desc fd;
+	struct v4l2_subdev *subdev;
+	struct media_pad *remote;
+	u64 found_streams = 0;
+	u16 vc_mask = 0;
+	unsigned int i;
+	int ret;
+
+	remote = media_pad_remote_pad_first(&state->pads[XCSI_PAD_SINK]);
+	if (!remote || !is_media_entity_v4l2_subdev(remote->entity))
+		return XCSI_VCSELR_VCSEL;
+
+	subdev = media_entity_to_v4l2_subdev(remote->entity);
+
+	ret = v4l2_subdev_call(subdev, pad, get_frame_desc, remote->index, &fd);
+	if (ret || fd.type != V4L2_MBUS_FRAME_DESC_TYPE_CSI2)
+		return XCSI_VCSELR_VCSEL;
+
+	for (i = 0; i < fd.num_entries; ++i) {
+		const struct v4l2_mbus_frame_desc_entry *entry = &fd.entry[i];
+
+		if (!(streams_mask & BIT_ULL(entry->stream)))
+			continue;
+
+		found_streams |= BIT_ULL(entry->stream);
+		vc_mask |= BIT(entry->bus.csi2.vc);
+	}
+
+	if (found_streams != streams_mask) {
+		dev_dbg(state->dev,
+			"streams %#llx not described by the frame descriptor\n",
+			streams_mask & ~found_streams);
+		return XCSI_VCSELR_VCSEL;
+	}
+
+	return vc_mask;
+}
+
+/*
+ * Program the virtual channels the core accepts. The packets of the other
+ * virtual channels are dropped, instead of filling the stream line buffer up
+ * and taking the core down, when no entity downstream consumes them.
+ *
+ * This only has an effect on cores synthesized to allow all the virtual
+ * channels. The others filter by virtual channel on their own, and the register
+ * reads back its reset value.
+ */
+static void xcsi2rxss_set_vc_mask(struct xcsi2rxss_state *state,
+				  u64 streams_mask)
+{
+	u16 vc_mask = xcsi2rxss_get_vc_mask(state, streams_mask);
+
+	dev_dbg(state->dev, "streams %#llx: accepting virtual channels %#x\n",
+		streams_mask, vc_mask);
+
+	xcsi2rxss_write(state, XCSI_VCSELR_OFFSET, vc_mask);
+}
+
 static int xcsi2rxss_enable_streams(struct v4l2_subdev *sd,
 				    struct v4l2_subdev_state *sd_state,
 				    u32 pad, u64 streams_mask)
@@ -671,10 +741,17 @@ static int xcsi2rxss_enable_streams(struct v4l2_subdev *sd,
 		return -EIO;
 	}
 
+	/* Accept the packets of the new streams before the source sends them. */
+	xcsi2rxss_set_vc_mask(xcsi2rxss,
+			      xcsi2rxss->enabled_sink_streams | sink_streams);
+
 	ret = v4l2_subdev_enable_streams(subdev, remote->index, sink_streams);
 	if (ret) {
 		if (!xcsi2rxss->enabled_sink_streams)
 			xcsi2rxss_stop_core(xcsi2rxss);
+		else
+			xcsi2rxss_set_vc_mask(xcsi2rxss,
+					      xcsi2rxss->enabled_sink_streams);
 
 		return ret;
 	}
@@ -698,6 +775,15 @@ static int xcsi2rxss_disable_streams(struct v4l2_subdev *sd,
 						       XCSI_PAD_SINK,
 						       &streams);
 
+	/*
+	 * Drop the packets of the streams being disabled before the entities
+	 * downstream of them stop, as they have nothing left to consume them.
+	 * A virtual channel is kept as long as any of the streams it carries is
+	 * still enabled.
+	 */
+	xcsi2rxss->enabled_sink_streams &= ~sink_streams;
+	xcsi2rxss_set_vc_mask(xcsi2rxss, xcsi2rxss->enabled_sink_streams);
+
 	remote = media_pad_remote_pad_first(&xcsi2rxss->pads[XCSI_PAD_SINK]);
 	if (remote && is_media_entity_v4l2_subdev(remote->entity)) {
 		struct v4l2_subdev *subdev;
@@ -706,8 +792,6 @@ static int xcsi2rxss_disable_streams(struct v4l2_subdev *sd,
 		v4l2_subdev_disable_streams(subdev, remote->index,
 					    sink_streams);
 	}
-
-	xcsi2rxss->enabled_sink_streams &= ~sink_streams;
 
 	if (!xcsi2rxss->enabled_sink_streams)
 		xcsi2rxss_stop_core(xcsi2rxss);

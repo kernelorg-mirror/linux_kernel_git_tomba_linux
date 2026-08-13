@@ -690,6 +690,70 @@ int xvip_enum_frame_size(struct v4l2_subdev *subdev,
 }
 EXPORT_SYMBOL_GPL(xvip_enum_frame_size);
 
+/**
+ * xvip_enable_remote_stream - Start the subdevice connected to a sink pad
+ * @subdev: V4L2 subdevice
+ * @pad: sink pad connected to the subdevice to start
+ * @streams_mask: mask of the streams to start
+ *
+ * Enable the given streams on the subdevice connected to the given sink pad, to
+ * propagate the stream state to the upstream part of the pipeline. This is
+ * meant to be called from the .enable_streams() operation.
+ *
+ * The pad may be connected to a video node instead of a subdevice, when the
+ * pipeline is fed from memory by a DMA engine. There is nothing to propagate
+ * in that case, videobuf2 starts the DMA engine through the video node.
+ *
+ * Return: 0 on success, or a negative error code otherwise. -EPIPE is returned
+ * if nothing is connected to the pad.
+ */
+int xvip_enable_remote_stream(struct v4l2_subdev *subdev, unsigned int pad,
+			      u64 streams_mask)
+{
+	struct media_pad *remote;
+
+	remote = media_pad_remote_pad_first(&subdev->entity.pads[pad]);
+	if (!remote)
+		return -EPIPE;
+
+	if (!is_media_entity_v4l2_subdev(remote->entity))
+		return 0;
+
+	return v4l2_subdev_enable_streams(media_entity_to_v4l2_subdev(remote->entity),
+					  remote->index, streams_mask);
+}
+EXPORT_SYMBOL_GPL(xvip_enable_remote_stream);
+
+/**
+ * xvip_disable_remote_stream - Stop the subdevice connected to a sink pad
+ * @subdev: V4L2 subdevice
+ * @pad: sink pad connected to the subdevice to stop
+ * @streams_mask: mask of the streams to stop
+ *
+ * Disable the given streams on the subdevice connected to the given sink pad.
+ * This is the counterpart of xvip_enable_remote_stream(), meant to be called
+ * from the .disable_streams() operation.
+ *
+ * Return: 0 on success, or a negative error code otherwise. -EPIPE is returned
+ * if nothing is connected to the pad.
+ */
+int xvip_disable_remote_stream(struct v4l2_subdev *subdev, unsigned int pad,
+			       u64 streams_mask)
+{
+	struct media_pad *remote;
+
+	remote = media_pad_remote_pad_first(&subdev->entity.pads[pad]);
+	if (!remote)
+		return -EPIPE;
+
+	if (!is_media_entity_v4l2_subdev(remote->entity))
+		return 0;
+
+	return v4l2_subdev_disable_streams(media_entity_to_v4l2_subdev(remote->entity),
+					   remote->index, streams_mask);
+}
+EXPORT_SYMBOL_GPL(xvip_disable_remote_stream);
+
 MODULE_AUTHOR("Laurent Pinchart <laurent.pinchart@ideasonboard.com>");
 MODULE_DESCRIPTION("Xilinx Video IP Core");
 MODULE_LICENSE("GPL");

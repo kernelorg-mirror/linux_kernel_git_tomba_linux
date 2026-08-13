@@ -634,6 +634,8 @@ err_disable_interrupts:
 err_disable_core:
 	xcsi2rxss_clr(xcsi2rxss, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
 
+	xcsi2rxss_hard_reset(xcsi2rxss);
+
 	return ret;
 }
 

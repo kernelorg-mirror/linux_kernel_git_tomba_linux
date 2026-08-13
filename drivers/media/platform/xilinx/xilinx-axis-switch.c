@@ -98,6 +98,18 @@ static int xvsw_get_sink_pad(struct v4l2_subdev_state *state, u32 pad,
 	return -EPIPE;
 }
 
+/* Only valid in control register routing mode. */
+static void xvsw_disable_all_ports(struct xvswitch_device *xvsw)
+{
+	unsigned int i;
+
+	for (i = 0; i < xvsw->nsources; i++)
+		xvswitch_write(xvsw, XVSW_MI_MUX_REG_BASE + (i * 4),
+			       XVSW_MI_MUX_DISABLE_MASK);
+
+	xvswitch_write(xvsw, XVSW_CTRL_REG, XVSW_CTRL_REG_UPDATE_MASK);
+}
+
 static void xvsw_set_pad_stream(struct xvswitch_device *xvsw, u32 pad,
 				u32 sink_pad, bool enable)
 {
@@ -546,6 +558,8 @@ static int xvsw_probe(struct platform_device *pdev)
 			clk_disable_unprepare(xvsw->aclk);
 			return ret;
 		}
+
+		xvsw_disable_all_ports(xvsw);
 	}
 
 	subdev = &xvsw->subdev;

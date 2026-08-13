@@ -204,6 +204,49 @@ static int xvip_subdev_set_sink_stream(struct xvip_pipeline *pipe,
 	return 0;
 }
 
+/**
+ * xvip_dma_set_remote_sink_stream - Start the subdev an output DMA engine ends in
+ * @pipe: The pipeline
+ * @dma: The DMA engine
+ * @start: Start (when true) or stop (when false) the subdev
+ *
+ * Counterpart of xvip_dma_set_remote_stream() for the output DMA engines. An
+ * output DMA engine feeds the pipeline and has no subdev to enable through a
+ * source pad, but the branch it feeds may end in a subdev instead of a capture
+ * DMA engine, in which case nothing else starts that subdev.
+ *
+ * Only the subdev connected to the video node is considered, as the pipeline is
+ * started from its ends. A branch that ends in a subdev further downstream is
+ * not covered.
+ *
+ * Return: 0 if successful, -EPIPE if no subdev is connected to the DMA, or the
+ * return value of the failed .s_stream() operation otherwise.
+ */
+static int xvip_dma_set_remote_sink_stream(struct xvip_pipeline *pipe,
+					   struct xvip_dma *dma, bool start)
+{
+	struct v4l2_subdev *subdev;
+	int ret;
+
+	if (dma->remote_streaming == start)
+		return 0;
+
+	subdev = xvip_dma_remote_subdev(&dma->pad, NULL);
+	if (!subdev)
+		return -EPIPE;
+
+	if (!xvip_entity_is_pipeline_sink(&subdev->entity))
+		return 0;
+
+	ret = xvip_subdev_set_sink_stream(pipe, subdev, start);
+	if (ret)
+		return ret;
+
+	dma->remote_streaming = start;
+
+	return 0;
+}
+
 /*
  * Start or stop the pipeline end that @pad belongs to, if it is one: the subdev
  * connected to a capture DMA engine, or a subdev without consumer. Entities
@@ -284,6 +327,7 @@ static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
 /**
  * xvip_pipeline_set_stream - Enable/disable streaming on a pipeline
  * @pipe: The pipeline
+ * @dma: The DMA engine whose stream state changed
  * @on: Turn the stream on when true or off when false
  *
  * The pipeline is shared between all DMA engines connect at its input and
@@ -302,19 +346,37 @@ static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
  * decrement the pipeline streaming count and disable all entities in the
  * pipeline when the streaming count reaches zero.
  *
+ * Designs that don't need the shared stream state set the xlnx,atomic_streamon
+ * property. Each DMA engine then starts and stops the subdev connected to it in
+ * its own streamon and streamoff, independently of the other DMA engines of the
+ * pipeline.
+ *
  * Return: 0 if successful, or the return value of the failed
  * v4l2_subdev_enable_streams() operation otherwise. Stopping the pipeline never
  * fails. The pipeline state is not updated when the operation fails.
  */
-static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe, bool on)
+static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe,
+				    struct xvip_dma *dma, bool on)
 {
 	int ret = 0;
+
+	if (pipe->xdev->atomic_streamon) {
+		/*
+		 * A capture DMA engine starts the subdev connected to it, which
+		 * propagates the stream state up to the source of its branch.
+		 * An output DMA engine feeds its branch and has nothing to
+		 * propagate to, unless the branch ends in a subdev.
+		 */
+		if (dma->pad.flags & MEDIA_PAD_FL_SINK)
+			return xvip_dma_set_remote_stream(dma, on);
+
+		return xvip_dma_set_remote_sink_stream(pipe, dma, on);
+	}
 
 	mutex_lock(&pipe->lock);
 
 	if (on) {
-		if (pipe->stream_count == pipe->num_dmas - 1 ||
-		    pipe->xdev->atomic_streamon) {
+		if (pipe->stream_count == pipe->num_dmas - 1) {
 			ret = xvip_pipeline_start_stop(pipe, true);
 			if (ret < 0)
 				goto done;
@@ -760,7 +822,7 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 		dma_async_issue_pending(dma->dma);
 
 		/* Start the pipeline. */
-		ret = xvip_pipeline_set_stream(pipe, true);
+		ret = xvip_pipeline_set_stream(pipe, dma, true);
 		if (ret < 0)
 			goto error_stop;
 	} else {
@@ -798,7 +860,7 @@ static void xvip_dma_stop_streaming(struct vb2_queue *vq)
 	struct xvip_dma_buffer *buf, *nbuf;
 
 	/* Stop the pipeline. */
-	xvip_pipeline_set_stream(pipe, false);
+	xvip_pipeline_set_stream(pipe, dma, false);
 
 	/* Stop and reset the DMA engine. */
 	dmaengine_terminate_all(dma->dma);
@@ -1456,7 +1518,7 @@ static int xvip_dma_s_ctrl(struct v4l2_ctrl *ctl)
 				dma_async_issue_pending(dma->dma);
 
 				/* Start the pipeline. */
-				ret = xvip_pipeline_set_stream(pipe, true);
+				ret = xvip_pipeline_set_stream(pipe, dma, true);
 				if (ret < 0) {
 					dev_err(dma->xdev->dev, "Failed to set stream\n");
 					media_pipeline_stop(dma->video.entity.pads);

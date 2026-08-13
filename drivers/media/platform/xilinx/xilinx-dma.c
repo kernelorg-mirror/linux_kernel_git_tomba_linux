@@ -1179,7 +1179,7 @@ __xvip_dma_try_format(struct xvip_dma *dma,
 	if (IS_ERR(info))
 		info = xvip_get_format_by_fourcc(XVIP_DMA_DEF_FORMAT);
 
-	dev_dbg(dma->xdev->dev, "fourcc: 0x%08x\n", info->fourcc);
+	//dev_dbg(dma->xdev->dev, "fourcc: 0x%08x\n", info->fourcc);
 
 	if (xvip_is_tile_format(info->fourcc, &tile_size) &&
 	    V4L2_TYPE_IS_MULTIPLANAR(dma->format.type)) {

@@ -143,6 +143,10 @@ int xvip_enum_mbus_code(struct v4l2_subdev *subdev,
 int xvip_enum_frame_size(struct v4l2_subdev *subdev,
 			 struct v4l2_subdev_state *sd_state,
 			 struct v4l2_subdev_frame_size_enum *fse);
+int xvip_enable_remote_stream(struct v4l2_subdev *subdev, unsigned int pad,
+			      u64 streams_mask);
+int xvip_disable_remote_stream(struct v4l2_subdev *subdev, unsigned int pad,
+			       u64 streams_mask);
 
 static inline u32 xvip_read(struct xvip_device *xvip, u32 addr)
 {

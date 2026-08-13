@@ -718,30 +718,29 @@ static void xcsc_set_size(struct xcsc_dev *xcsc)
 	xcsc_write(xcsc, XV_CSC_HEIGHT, height);
 }
 
-static int xcsc_s_stream(struct v4l2_subdev *subdev, int enable)
+static void xcsc_stop_stream(struct xcsc_dev *xcsc)
+{
+	/* Reset the Global IP Reset through PS GPIO */
+	gpiod_set_value_cansleep(xcsc->rst_gpio, XCSC_RESET_ASSERT);
+	gpiod_set_value_cansleep(xcsc->rst_gpio, XCSC_RESET_DEASSERT);
+
+	/* Reset the active controls */
+	xcsc->brightness_active	= 120;
+	xcsc->contrast_active = 0;
+	xcsc->red_gain_active = 120;
+	xcsc->blue_gain_active = 120;
+	xcsc->green_gain_active = 120;
+	xcsc_copy_coeff(xcsc->shadow_coeff, rgb_unity_matrix);
+}
+
+static int xcsc_enable_streams(struct v4l2_subdev *subdev,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
 {
 	struct xcsc_dev *xcsc = to_csc(subdev);
-	struct v4l2_subdev_state *state;
+	int ret;
 
-	dev_dbg(xcsc->xvip.dev, "%s : Stream %s", __func__,
-		enable ? "On" : "Off");
-	if (!enable) {
-		/* Reset the Global IP Reset through PS GPIO */
-		gpiod_set_value_cansleep(xcsc->rst_gpio, XCSC_RESET_ASSERT);
-		gpiod_set_value_cansleep(xcsc->rst_gpio, XCSC_RESET_DEASSERT);
-
-		/* Reset the active controls */
-		xcsc->brightness_active	= 120;
-		xcsc->contrast_active = 0;
-		xcsc->red_gain_active = 120;
-		xcsc->blue_gain_active = 120;
-		xcsc->green_gain_active = 120;
-		xcsc_copy_coeff(xcsc->shadow_coeff, rgb_unity_matrix);
-
-		return 0;
-	}
-
-	state = v4l2_subdev_lock_and_get_active_state(subdev);
+	dev_dbg(xcsc->xvip.dev, "%s : Stream On", __func__);
 
 	/* Set the controls */
 	xcsc_set_brightness(xcsc);
@@ -756,9 +755,6 @@ static int xcsc_s_stream(struct v4l2_subdev *subdev, int enable)
 	xcsc_write(xcsc, XV_CSC_CLAMPMIN, XCSC_CLAMP_MIN_ZERO);
 	xcsc_set_size(xcsc);
 	xcsc_write_coeff(xcsc);
-
-	v4l2_subdev_unlock_state(state);
-
 #ifdef DEBUG
 	xcsc_print_coeff(xcsc);
 	dev_dbg(xcsc->xvip.dev, "cft_in = %d cft_out = %d",
@@ -773,12 +769,30 @@ static int xcsc_s_stream(struct v4l2_subdev *subdev, int enable)
 #endif
 	/* Start VPSS CSC IP */
 	xcsc_write(xcsc, XV_CSC_AP_CTRL, XCSC_STREAM_ON);
+
+	ret = xvip_enable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+	if (ret) {
+		xcsc_stop_stream(xcsc);
+		return ret;
+	}
+
 	return 0;
 }
 
-static const struct v4l2_subdev_video_ops xcsc_video_ops = {
-	.s_stream = xcsc_s_stream,
-};
+static int xcsc_disable_streams(struct v4l2_subdev *subdev,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xcsc_dev *xcsc = to_csc(subdev);
+
+	dev_dbg(xcsc->xvip.dev, "%s : Stream Off", __func__);
+
+	xvip_disable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+
+	xcsc_stop_stream(xcsc);
+
+	return 0;
+}
 
 static int xcsc_init_state(struct v4l2_subdev *subdev,
 			   struct v4l2_subdev_state *sd_state)
@@ -857,10 +871,11 @@ static const struct v4l2_subdev_pad_ops xcsc_pad_ops = {
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xcsc_set_format,
+	.enable_streams = xcsc_enable_streams,
+	.disable_streams = xcsc_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xcsc_ops = {
-	.video = &xcsc_video_ops,
 	.pad = &xcsc_pad_ops
 };
 

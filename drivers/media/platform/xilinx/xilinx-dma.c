@@ -111,6 +111,101 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  */
 
 /**
+ * xvip_dma_set_remote_stream - Start or stop the subdev connected to a DMA
+ * @dma: The DMA engine
+ * @start: Start (when true) or stop (when false) the subdev
+ *
+ * Start or stop streaming on the subdev directly connected to the DMA video
+ * node. The subdev is responsible for propagating the stream state further up
+ * the pipeline towards the source.
+ *
+ * Return: 0 if successful, -EPIPE if no subdev is connected to the DMA, or the
+ * return value of the failed v4l2_subdev_enable_streams() operation otherwise.
+ */
+static int xvip_dma_set_remote_stream(struct xvip_dma *dma, bool start)
+{
+	struct v4l2_subdev *subdev;
+	u32 pad;
+	int ret;
+
+	if (dma->remote_streaming == start)
+		return 0;
+
+	subdev = xvip_dma_remote_subdev(&dma->pad, &pad);
+	if (!subdev)
+		return -EPIPE;
+
+	if (start)
+		ret = v4l2_subdev_enable_streams(subdev, pad, BIT_ULL(0));
+	else
+		ret = v4l2_subdev_disable_streams(subdev, pad, BIT_ULL(0));
+
+	if (ret < 0) {
+		dev_err(dma->xdev->dev, "failed to %s %s: %d\n",
+			start ? "start" : "stop", subdev->name, ret);
+		return ret;
+	}
+
+	dma->remote_streaming = start;
+
+	return 0;
+}
+
+/**
+ * xvip_pipeline_start_stop - Start or stop streaming on a pipeline
+ * @pipe: The pipeline
+ * @start: Start (when true) or stop (when false) the pipeline
+ *
+ * Start or stop the subdevs connected to the capture DMA engines of the
+ * pipeline. The output DMA engines are skipped: they feed the pipeline, and the
+ * subdevs connected to them are started by the capture DMA engine at the other
+ * end, as the stream state is propagated from the consumer to the producer.
+ *
+ * Return: 0 if successful, or the return value of the failed
+ * v4l2_subdev_enable_streams() operation otherwise. Stopping never fails.
+ */
+static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
+{
+	struct media_pipeline_pad_iter iter;
+	struct media_pad *pad;
+	int ret;
+
+	media_pipeline_for_each_pad(&pipe->pipe, &iter, pad) {
+		struct xvip_dma *dma;
+
+		if (pad->entity->function != MEDIA_ENT_F_IO_V4L)
+			continue;
+
+		dma = to_xvip_dma(media_entity_to_video_device(pad->entity));
+
+		if (!(dma->pad.flags & MEDIA_PAD_FL_SINK))
+			continue;
+
+		ret = xvip_dma_set_remote_stream(dma, start);
+		if (ret < 0 && start)
+			goto error;
+	}
+
+	return 0;
+
+error:
+	/* Stop the subdevs that have been started. */
+	media_pipeline_for_each_pad(&pipe->pipe, &iter, pad) {
+		struct xvip_dma *dma;
+
+		if (pad->entity->function != MEDIA_ENT_F_IO_V4L)
+			continue;
+
+		dma = to_xvip_dma(media_entity_to_video_device(pad->entity));
+
+		if (dma->pad.flags & MEDIA_PAD_FL_SINK)
+			xvip_dma_set_remote_stream(dma, false);
+	}
+
+	return ret;
+}
+
+/**
  * xvip_pipeline_set_stream - Enable/disable streaming on a pipeline
  * @pipe: The pipeline
  * @on: Turn the stream on when true or off when false
@@ -120,8 +215,7 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  * independently, pipelines have a shared stream state that enable or disable
  * all entities in the pipeline. For this reason the pipeline uses a streaming
  * counter that tracks the number of DMA engines that have requested the stream
- * to be enabled. This will walk the graph starting from each DMA and enable or
- * disable the entities in the path.
+ * to be enabled.
  *
  * When called with the @on argument set to true, this function will increment
  * the pipeline streaming count. If the streaming count reaches the number of
@@ -132,28 +226,27 @@ static int xvip_dma_verify_format(struct xvip_dma *dma)
  * decrement the pipeline streaming count and disable all entities in the
  * pipeline when the streaming count reaches zero.
  *
- * Return: 0 if successful, or the return value of the failed video::s_stream
- * operation otherwise. Stopping the pipeline never fails. The pipeline state is
- * not updated when the operation fails.
+ * Return: 0 if successful, or the return value of the failed
+ * v4l2_subdev_enable_streams() operation otherwise. Stopping the pipeline never
+ * fails. The pipeline state is not updated when the operation fails.
  */
 static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe, bool on)
 {
-	struct xvip_composite_device *xdev;
 	int ret = 0;
 
 	mutex_lock(&pipe->lock);
-	xdev = pipe->xdev;
 
 	if (on) {
-		if (pipe->stream_count == pipe->num_dmas - 1 || xdev->atomic_streamon) {
-			ret = xvip_graph_pipeline_start_stop(xdev, pipe, true);
+		if (pipe->stream_count == pipe->num_dmas - 1 ||
+		    pipe->xdev->atomic_streamon) {
+			ret = xvip_pipeline_start_stop(pipe, true);
 			if (ret < 0)
 				goto done;
 		}
 		pipe->stream_count++;
 	} else {
 		if (--pipe->stream_count == 0)
-			xvip_graph_pipeline_start_stop(xdev, pipe, false);
+			xvip_pipeline_start_stop(pipe, false);
 	}
 
 done:

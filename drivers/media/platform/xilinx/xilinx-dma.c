@@ -506,12 +506,34 @@ static void xvip_dma_complete(void *param)
 	struct xvip_dma_buffer *buf = param;
 	struct xvip_dma *dma = buf->dma;
 	int i, sizeimage;
+	bool starved;
 	u32 fid = 0;
 	int status;
 
 	spin_lock(&dma->queued_lock);
 	list_del(&buf->queue);
+	starved = list_empty(&dma->queued_bufs);
 	spin_unlock(&dma->queued_lock);
+
+	/*
+	 * Nothing is left for the DMA engine to transfer. None of the engines
+	 * report the condition and none of them stops on its own: the frame
+	 * buffer and AI layout formatter cores are armed with auto-restart and
+	 * keep transferring with the addresses still programmed in their
+	 * registers, and the VDMA keeps cycling through its frame store
+	 * registers in circular mode. Buffers already given back to userspace
+	 * are thus written to again, and the frames transferred in the meantime
+	 * are lost without any gap in the sequence numbers. Warn, as this is
+	 * silent otherwise.
+	 *
+	 * The low latency capture mode gives buffers back when their transfer
+	 * starts instead of when it completes, so an empty list is its normal
+	 * steady state and says nothing about starvation.
+	 */
+	if (starved && !dma->low_latency_cap)
+		dev_warn_ratelimited(dma->xdev->dev,
+				     "%s: no buffer queued, DMA starved\n",
+				     dma->video.name);
 
 	buf->buf.field = V4L2_FIELD_NONE;
 	buf->buf.sequence = dma->sequence++;

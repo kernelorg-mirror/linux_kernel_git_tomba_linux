@@ -238,70 +238,6 @@ static int xvsw_set_format(struct v4l2_subdev *subdev,
 	return 0;
 }
 
-#if 0
-static int xvsw_get_routing(struct v4l2_subdev *subdev,
-			    struct v4l2_subdev_routing *route)
-{
-	struct xvswitch_device *xvsw = to_xvsw(subdev);
-	unsigned int i;
-	u32 min;
-
-	/* In case of tdest routing, we can't get routing */
-	if (xvsw->tdest_routing)
-		return -EINVAL;
-
-	mutex_lock(&subdev->entity.graph_obj.mdev->graph_mutex);
-
-	if (xvsw->nsources < route->num_routes)
-		min = xvsw->nsources;
-	else
-		min = route->num_routes;
-
-	for (i = 0; i < min; ++i) {
-		route->routes[i].sink_pad = xvsw->routing[i];
-		route->routes[i].source_pad = i;
-	}
-
-	route->num_routes = xvsw->nsources;
-
-	mutex_unlock(&subdev->entity.graph_obj.mdev->graph_mutex);
-
-	return 0;
-}
-#endif
-
-static int xvsw_set_routing(struct v4l2_subdev *subdev,
-			    struct v4l2_subdev_state *state,
-			    enum v4l2_subdev_format_whence which,
-			    struct v4l2_subdev_krouting *route)
-{
-	struct xvswitch_device *xvsw = to_xvsw(subdev);
-	unsigned int i;
-	int ret = 0;
-
-	/* In case of tdest routing, we can't set routing */
-	if (xvsw->tdest_routing)
-		return -EINVAL;
-
-	mutex_lock(&subdev->entity.graph_obj.mdev->graph_mutex);
-
-	if (media_entity_pipeline(&subdev->entity)) {
-		ret = -EBUSY;
-		goto done;
-	}
-
-	for (i = 0; i < xvsw->nsources; ++i)
-		xvsw->routing[i] = -1;
-
-	for (i = 0; i < route->num_routes; ++i)
-		xvsw->routing[route->routes[i].source_pad - xvsw->nsinks] =
-			route->routes[i].sink_pad;
-
-done:
-	mutex_unlock(&subdev->entity.graph_obj.mdev->graph_mutex);
-	return ret;
-}
-
 static struct v4l2_subdev_video_ops xvsw_video_ops = {
 	.s_stream = xvsw_s_stream,
 };
@@ -311,8 +247,6 @@ static struct v4l2_subdev_pad_ops xvsw_pad_ops = {
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = xvsw_get_format,
 	.set_fmt = xvsw_set_format,
-/*	.get_routing = xvsw_get_routing,*/
-	.set_routing = xvsw_set_routing,
 };
 
 static struct v4l2_subdev_ops xvsw_ops = {

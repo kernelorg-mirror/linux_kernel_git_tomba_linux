@@ -121,30 +121,28 @@ static void xg_set_lut_entries(struct xgamma_dev *xg,
 	}
 }
 
-static int xg_s_stream(struct v4l2_subdev *subdev, int enable)
+static void xg_stop_stream(struct xgamma_dev *xg)
+{
+	gpiod_set_value_cansleep(xg->rst_gpio, XGAMMA_RESET_ASSERT);
+	gpiod_set_value_cansleep(xg->rst_gpio, XGAMMA_RESET_DEASSERT);
+}
+
+static int xg_enable_streams(struct v4l2_subdev *subdev,
+			     struct v4l2_subdev_state *state, u32 pad,
+			     u64 streams_mask)
 {
 	struct xgamma_dev *xg = to_xg(subdev);
 	const struct v4l2_mbus_framefmt *format;
-	struct v4l2_subdev_state *state;
+	int ret;
 
-	if (!enable) {
-		dev_dbg(xg->xvip.dev, "%s : Off", __func__);
-		gpiod_set_value_cansleep(xg->rst_gpio, XGAMMA_RESET_ASSERT);
-		gpiod_set_value_cansleep(xg->rst_gpio, XGAMMA_RESET_DEASSERT);
-		return 0;
-	}
 	dev_dbg(xg->xvip.dev, "%s : Started", __func__);
 
-	state = v4l2_subdev_lock_and_get_active_state(subdev);
 	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
 
 	dev_dbg(xg->xvip.dev, "%s : Setting width %d and height %d",
 		__func__, format->width, format->height);
 	xg_write(xg, XGAMMA_WIDTH, format->width);
 	xg_write(xg, XGAMMA_HEIGHT, format->height);
-
-	v4l2_subdev_unlock_state(state);
-
 	xg_write(xg, XGAMMA_VIDEO_FORMAT, XGAMMA_RGB);
 	xg_set_lut_entries(xg, xg->red_lut, XGAMMA_GAMMA_LUT_0_BASE);
 	xg_set_lut_entries(xg, xg->green_lut, XGAMMA_GAMMA_LUT_1_BASE);
@@ -152,12 +150,30 @@ static int xg_s_stream(struct v4l2_subdev *subdev, int enable)
 
 	/* Start GAMMA Correction LUT Video IP */
 	xg_write(xg, XGAMMA_AP_CTRL, XGAMMA_STREAM_ON);
+
+	ret = xvip_enable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+	if (ret) {
+		xg_stop_stream(xg);
+		return ret;
+	}
+
 	return 0;
 }
 
-static const struct v4l2_subdev_video_ops xg_video_ops = {
-	.s_stream = xg_s_stream,
-};
+static int xg_disable_streams(struct v4l2_subdev *subdev,
+			      struct v4l2_subdev_state *state, u32 pad,
+			      u64 streams_mask)
+{
+	struct xgamma_dev *xg = to_xg(subdev);
+
+	dev_dbg(xg->xvip.dev, "%s : Off", __func__);
+
+	xvip_disable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+
+	xg_stop_stream(xg);
+
+	return 0;
+}
 
 static int xg_init_state(struct v4l2_subdev *subdev,
 			 struct v4l2_subdev_state *sd_state)
@@ -222,10 +238,11 @@ static const struct v4l2_subdev_pad_ops xg_pad_ops = {
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xg_set_format,
+	.enable_streams = xg_enable_streams,
+	.disable_streams = xg_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xg_ops = {
-	.video = &xg_video_ops,
 	.pad = &xg_pad_ops,
 };
 

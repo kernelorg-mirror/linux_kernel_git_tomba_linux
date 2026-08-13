@@ -26,12 +26,13 @@ Optional properties:
   If memory is reserved for special use by DMAs then this node
   can be used to refer and use from this reserved memory region.
 
-- xlnx,atomic_streamon: This property is useful for the scenario where some of
-  the upstream entities are being shared with multiple video devices (dma
-  engines) in the same media pipeline. When set, all entities belonging to
-  the media pipeline will get enabled even when any one of the dma engine
-  present in the media  pipeline start streaming, otherwise the entities
-  get enabled only when all dma engines start streaming.
+- xlnx,atomic_streamon: This property is useful for pipelines whose branches
+  should stream independently. When absent, the dma engines of a pipeline
+  share its stream state: the entities of the pipeline get enabled only when
+  all the dma engines of the pipeline have started streaming, and disabled
+  when the last one stops. When set, each dma engine has an independent
+  stream state and starts and stops the branch of the pipeline connected to
+  it, leaving the other branches untouched.
 
 Required port properties:
 

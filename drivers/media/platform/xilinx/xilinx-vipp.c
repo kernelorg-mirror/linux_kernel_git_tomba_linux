@@ -267,21 +267,11 @@ xvip_graph_entity_start_stop_subdev(struct xvip_composite_device *xdev,
 	 * shared between sub-graphs
 	 */
 	if (on) {
-		/* power-on subdevice */
-		ret = v4l2_subdev_call(subdev, core, s_power, 1);
-		if (ret < 0 && ret != -ENOIOCTLCMD) {
-			dev_err(xdev->dev,
-				"s_power on failed on subdev\n");
-			xvip_graph_entity_set_streaming(xdev, entity, 0);
-			return ret;
-		}
-
 		/* stream-on subdevice */
 		ret = v4l2_subdev_call(subdev, video, s_stream, 1);
 		if (ret < 0 && ret != -ENOIOCTLCMD) {
 			dev_err(xdev->dev,
 				"s_stream on failed on subdev\n");
-			v4l2_subdev_call(subdev, core, s_power, 0);
 			xvip_graph_entity_set_streaming(xdev, entity, 0);
 		}
 	} else {
@@ -292,12 +282,6 @@ xvip_graph_entity_start_stop_subdev(struct xvip_composite_device *xdev,
 				"s_stream off failed on subdev\n");
 			xvip_graph_entity_set_streaming(xdev, entity, 1);
 		}
-
-		/* power-off subdevice */
-		ret = v4l2_subdev_call(subdev, core, s_power, 0);
-		if (ret < 0 && ret != -ENOIOCTLCMD)
-			dev_err(xdev->dev,
-				"s_power off failed on subdev\n");
 	}
 
 	if (ret == -ENOIOCTLCMD)

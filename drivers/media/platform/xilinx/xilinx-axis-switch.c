@@ -77,34 +77,40 @@ static inline void xvswitch_write(struct xvswitch_device *xvsw, u32 addr,
  * Streaming
  */
 
-static void xvsw_set_pad_stream(struct xvswitch_device *xvsw,
-				struct v4l2_subdev_state *state, u32 pad,
-				bool enable)
+/*
+ * Get the sink pad that feeds the given source pad. All the streams of a source
+ * pad come from the same sink pad: in TDEST routing mode because there is a
+ * single sink pad, and in control register routing mode because the routing is
+ * validated with V4L2_SUBDEV_ROUTING_NO_SOURCE_STREAM_MIX.
+ */
+static int xvsw_get_sink_pad(struct v4l2_subdev_state *state, u32 pad,
+			     u32 *sink_pad)
 {
-	u32 mux = XVSW_MI_MUX_DISABLE_MASK;
+	struct v4l2_subdev_route *route;
 
+	for_each_active_route(&state->routing, route) {
+		if (route->source_pad == pad) {
+			*sink_pad = route->sink_pad;
+			return 0;
+		}
+	}
+
+	return -EPIPE;
+}
+
+static void xvsw_set_pad_stream(struct xvswitch_device *xvsw, u32 pad,
+				u32 sink_pad, bool enable)
+{
 	/* Nothing to be done in case of TDEST routing */
 	if (xvsw->tdest_routing)
 		return;
 
 	/*
-	 * In control register routing mode, program the master port with the
-	 * slave port it is routed from. Ports without an active route stay
-	 * disabled.
+	 * In control register routing mode, point the master port at the slave
+	 * port it is routed from, or disable it.
 	 */
-	if (enable) {
-		struct v4l2_subdev_route *route;
-
-		for_each_active_route(&state->routing, route) {
-			if (route->source_pad == pad) {
-				mux = route->sink_pad;
-				break;
-			}
-		}
-	}
-
 	xvswitch_write(xvsw, XVSW_MI_MUX_REG_BASE + (pad - xvsw->nsinks) * 4,
-		       mux);
+		       enable ? sink_pad : XVSW_MI_MUX_DISABLE_MASK);
 	xvswitch_write(xvsw, XVSW_CTRL_REG, XVSW_CTRL_REG_UPDATE_MASK);
 }
 
@@ -114,13 +120,31 @@ static int xvsw_enable_streams(struct v4l2_subdev *subdev,
 {
 	struct xvswitch_device *xvsw = to_xvsw(subdev);
 	u64 *enabled = &xvsw->enabled_streams[pad - xvsw->nsinks];
+	u64 sink_streams;
+	u64 streams = streams_mask;
+	u32 sink_pad;
+	int ret;
+
+	ret = xvsw_get_sink_pad(state, pad, &sink_pad);
+	if (ret)
+		return ret;
+
+	sink_streams = v4l2_subdev_state_xlate_streams(state, pad, sink_pad,
+						       &streams);
 
 	/*
 	 * The master port carries all the streams of the pad, it only needs to
 	 * be programmed when the first one starts.
 	 */
 	if (!*enabled)
-		xvsw_set_pad_stream(xvsw, state, pad, true);
+		xvsw_set_pad_stream(xvsw, pad, sink_pad, true);
+
+	ret = xvip_enable_remote_stream(subdev, sink_pad, sink_streams);
+	if (ret) {
+		if (!*enabled)
+			xvsw_set_pad_stream(xvsw, pad, sink_pad, false);
+		return ret;
+	}
 
 	*enabled |= streams_mask;
 
@@ -133,11 +157,34 @@ static int xvsw_disable_streams(struct v4l2_subdev *subdev,
 {
 	struct xvswitch_device *xvsw = to_xvsw(subdev);
 	u64 *enabled = &xvsw->enabled_streams[pad - xvsw->nsinks];
+	u64 streams = streams_mask;
+	u64 sink_streams;
+	u32 sink_pad;
+	int ret;
+
+	ret = xvsw_get_sink_pad(state, pad, &sink_pad);
+	if (ret)
+		return ret;
+
+	sink_streams = v4l2_subdev_state_xlate_streams(state, pad, sink_pad,
+						       &streams);
+
+	/*
+	 * Stopping the source is best effort. Reporting a failure would make
+	 * v4l2_subdev_disable_streams() skip marking the streams as disabled,
+	 * leaving them enabled in the subdev state while the switch has stopped
+	 * forwarding them, after which they can be neither disabled nor enabled
+	 * again.
+	 */
+	ret = xvip_disable_remote_stream(subdev, sink_pad, sink_streams);
+	if (ret)
+		dev_err(xvsw->dev, "failed to stop the source of pad %u: %d\n",
+			pad, ret);
 
 	*enabled &= ~streams_mask;
 
 	if (!*enabled)
-		xvsw_set_pad_stream(xvsw, state, pad, false);
+		xvsw_set_pad_stream(xvsw, pad, sink_pad, false);
 
 	return 0;
 }

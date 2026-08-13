@@ -232,14 +232,12 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  * @events: counter for events
  * @vcx_events: counter for vcx_events
  * @dev: Platform structure
- * @rsubdev: Remote subdev connected to sink pad
  * @rst_gpio: reset to video_aresetn
  * @clks: array of clocks
  * @iomem: Base address of subsystem
  * @max_num_lanes: Maximum number of lanes present
  * @datatype: Data type filter
  * @pads: media pads
- * @streaming: Flag for storing streaming state
  * @enable_active_lanes: If number of active lanes can be modified
  * @en_vcx: If more than 4 VC are enabled
  * @is_cphy: true if C-PHY mode, false if D-PHY mode
@@ -252,14 +250,12 @@ struct xcsi2rxss_state {
 	u32 events[XCSI_NUM_EVENTS];
 	u32 vcx_events[XCSI_VCX_NUM_EVENTS];
 	struct device *dev;
-	struct v4l2_subdev *rsubdev;
 	struct gpio_desc *rst_gpio;
 	struct clk_bulk_data *clks;
 	void __iomem *iomem;
 	u32 max_num_lanes;
 	u32 datatype;
 	struct media_pad pads[XCSI_MEDIA_PADS];
-	bool streaming;
 	bool enable_active_lanes;
 	bool en_vcx;
 	bool is_cphy;
@@ -495,73 +491,6 @@ static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 	return 0;
 }
 
-static struct v4l2_subdev *xcsi2rxss_get_remote_subdev(struct media_pad *local)
-{
-	struct media_pad *remote;
-	struct v4l2_subdev *sd;
-
-	remote = media_pad_remote_pad_first(local);
-	if (!remote || !is_media_entity_v4l2_subdev(remote->entity))
-		sd = NULL;
-	else
-		sd = media_entity_to_v4l2_subdev(remote->entity);
-
-	return sd;
-}
-
-static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
-{
-	int ret = 0;
-
-	/* enable core */
-	xcsi2rxss_set(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
-
-	ret = xcsi2rxss_soft_reset(state);
-	if (ret) {
-		state->streaming = false;
-		return ret;
-	}
-
-	/* enable interrupts */
-	xcsi2rxss_clr(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
-	xcsi2rxss_write(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
-	xcsi2rxss_set(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
-
-	state->streaming = true;
-
-	state->rsubdev =
-		xcsi2rxss_get_remote_subdev(&state->pads[XCSI_PAD_SINK]);
-
-	if (!state->rsubdev) {
-		ret = -ENODEV;
-		goto exit_start_stream;
-	}
-
-exit_start_stream:
-	if (ret) {
-		/* disable interrupts */
-		xcsi2rxss_clr(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
-		xcsi2rxss_clr(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
-
-		/* disable core */
-		xcsi2rxss_clr(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
-		state->streaming = false;
-	}
-
-	return ret;
-}
-
-static void xcsi2rxss_stop_stream(struct xcsi2rxss_state *state)
-{
-	/* disable interrupts */
-	xcsi2rxss_clr(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
-	xcsi2rxss_clr(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
-
-	/* disable core */
-	xcsi2rxss_clr(state, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
-	state->streaming = false;
-}
-
 /**
  * xcsi2rxss_irq_handler - Interrupt handler for CSI-2
  * @irq: IRQ number
@@ -664,28 +593,75 @@ static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static int xcsi2rxss_s_stream(struct v4l2_subdev *sd, int enable)
+static int xcsi2rxss_enable_streams(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *sd_state,
+				    u32 pad, u64 streams_mask)
 {
 	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
-	struct v4l2_subdev_state *state;
-	int ret = 0;
+	struct media_pad *remote;
+	struct v4l2_subdev *subdev;
+	int ret;
 
-	state = v4l2_subdev_lock_and_get_active_state(sd);
+	remote = media_pad_remote_pad_first(&xcsi2rxss->pads[XCSI_PAD_SINK]);
+	if (!remote || !is_media_entity_v4l2_subdev(remote->entity))
+		return -EPIPE;
 
-	if (enable == xcsi2rxss->streaming)
-		goto stream_done;
+	subdev = media_entity_to_v4l2_subdev(remote->entity);
 
-	if (enable) {
-		xcsi2rxss_reset_event_counters(xcsi2rxss);
-		ret = xcsi2rxss_start_stream(xcsi2rxss);
-	} else {
-		xcsi2rxss_stop_stream(xcsi2rxss);
-		xcsi2rxss_hard_reset(xcsi2rxss);
+	xcsi2rxss_reset_event_counters(xcsi2rxss);
+
+	/* enable core */
+	xcsi2rxss_set(xcsi2rxss, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
+
+	ret = xcsi2rxss_soft_reset(xcsi2rxss);
+	if (ret)
+		goto err_disable_core;
+
+	/* enable interrupts */
+	xcsi2rxss_clr(xcsi2rxss, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
+	xcsi2rxss_write(xcsi2rxss, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
+	xcsi2rxss_set(xcsi2rxss, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
+
+	ret = v4l2_subdev_enable_streams(subdev, remote->index, BIT_ULL(0));
+	if (ret)
+		goto err_disable_interrupts;
+
+	return 0;
+
+err_disable_interrupts:
+	xcsi2rxss_clr(xcsi2rxss, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
+	xcsi2rxss_clr(xcsi2rxss, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
+err_disable_core:
+	xcsi2rxss_clr(xcsi2rxss, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
+
+	return ret;
+}
+
+static int xcsi2rxss_disable_streams(struct v4l2_subdev *sd,
+				     struct v4l2_subdev_state *sd_state,
+				     u32 pad, u64 streams_mask)
+{
+	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
+	struct media_pad *remote;
+
+	remote = media_pad_remote_pad_first(&xcsi2rxss->pads[XCSI_PAD_SINK]);
+	if (remote && is_media_entity_v4l2_subdev(remote->entity)) {
+		struct v4l2_subdev *subdev;
+
+		subdev = media_entity_to_v4l2_subdev(remote->entity);
+		v4l2_subdev_disable_streams(subdev, remote->index, BIT_ULL(0));
 	}
 
-stream_done:
-	v4l2_subdev_unlock_state(state);
-	return ret;
+	/* disable interrupts */
+	xcsi2rxss_clr(xcsi2rxss, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
+	xcsi2rxss_clr(xcsi2rxss, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
+
+	/* disable core */
+	xcsi2rxss_clr(xcsi2rxss, XCSI_CCR_OFFSET, XCSI_CCR_ENABLE);
+
+	xcsi2rxss_hard_reset(xcsi2rxss);
+
+	return 0;
 }
 
 static int xcsi2rxss_init_state(struct v4l2_subdev *sd,
@@ -810,20 +786,17 @@ static const struct v4l2_subdev_core_ops xcsi2rxss_core_ops = {
 	.log_status = xcsi2rxss_log_status,
 };
 
-static const struct v4l2_subdev_video_ops xcsi2rxss_video_ops = {
-	.s_stream = xcsi2rxss_s_stream
-};
-
 static const struct v4l2_subdev_pad_ops xcsi2rxss_pad_ops = {
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xcsi2rxss_set_format,
 	.enum_mbus_code = xcsi2rxss_enum_mbus_code,
 	.link_validate = v4l2_subdev_link_validate_default,
+	.enable_streams = xcsi2rxss_enable_streams,
+	.disable_streams = xcsi2rxss_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xcsi2rxss_ops = {
 	.core = &xcsi2rxss_core_ops,
-	.video = &xcsi2rxss_video_ops,
 	.pad = &xcsi2rxss_pad_ops
 };
 

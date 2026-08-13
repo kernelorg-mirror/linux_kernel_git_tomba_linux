@@ -45,8 +45,6 @@ enum xdmsc_bayer_format {
 struct xdmsc_dev {
 	struct xvip_device xvip;
 	struct media_pad pads[2];
-	struct v4l2_mbus_framefmt formats[2];
-	struct v4l2_mbus_framefmt default_formats[2];
 
 	struct gpio_desc *rst_gpio;
 	u32 max_width;
@@ -78,28 +76,6 @@ static inline void xdmsc_write(struct xdmsc_dev *xdmsc, u32 reg, u32 data)
 static inline struct xdmsc_dev *to_xdmsc(struct v4l2_subdev *subdev)
 {
 	return container_of(subdev, struct xdmsc_dev, xvip.subdev);
-}
-
-static struct v4l2_mbus_framefmt
-*__xdmsc_get_pad_format(struct xdmsc_dev *xdmsc,
-			struct v4l2_subdev_state *sd_state,
-			unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *get_fmt;
-
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		get_fmt = v4l2_subdev_state_get_format(sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		get_fmt = &xdmsc->formats[pad];
-		break;
-	default:
-		get_fmt = NULL;
-		break;
-	}
-
-	return get_fmt;
 }
 
 /*
@@ -137,6 +113,8 @@ static int xdmsc_get_bayer_format(u32 code)
 static int xdmsc_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xdmsc_dev *xdmsc = to_xdmsc(subdev);
+	struct v4l2_subdev_state *state;
+	const struct v4l2_mbus_framefmt *format;
 	int bayer_fmt;
 
 	if (!enable) {
@@ -148,15 +126,20 @@ static int xdmsc_s_stream(struct v4l2_subdev *subdev, int enable)
 		return 0;
 	}
 
-	bayer_fmt = xdmsc_get_bayer_format(xdmsc->formats[XVIP_PAD_SINK].code);
-	if (bayer_fmt < 0)
-		return bayer_fmt;
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
+	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
 
-	xdmsc_write(xdmsc, XDEMOSAIC_WIDTH,
-		    xdmsc->formats[XVIP_PAD_SINK].width);
-	xdmsc_write(xdmsc, XDEMOSAIC_HEIGHT,
-		    xdmsc->formats[XVIP_PAD_SINK].height);
+	bayer_fmt = xdmsc_get_bayer_format(format->code);
+	if (bayer_fmt < 0) {
+		v4l2_subdev_unlock_state(state);
+		return bayer_fmt;
+	}
+
+	xdmsc_write(xdmsc, XDEMOSAIC_WIDTH, format->width);
+	xdmsc_write(xdmsc, XDEMOSAIC_HEIGHT, format->height);
 	xdmsc_write(xdmsc, XDEMOSAIC_INPUT_BAYER_FORMAT, bayer_fmt);
+
+	v4l2_subdev_unlock_state(state);
 
 	/* Start Demosaic Video IP */
 	xdmsc_write(xdmsc, XDEMOSAIC_AP_CTRL, XDEMOSAIC_STREAM_ON);
@@ -167,18 +150,28 @@ static const struct v4l2_subdev_video_ops xdmsc_video_ops = {
 	.s_stream = xdmsc_s_stream,
 };
 
-static int xdmsc_get_format(struct v4l2_subdev *subdev,
-			    struct v4l2_subdev_state *sd_state,
-			    struct v4l2_subdev_format *fmt)
+static int xdmsc_init_state(struct v4l2_subdev *subdev,
+			    struct v4l2_subdev_state *sd_state)
 {
-	struct xdmsc_dev *xdmsc = to_xdmsc(subdev);
-	struct v4l2_mbus_framefmt *get_fmt;
+	struct v4l2_mbus_framefmt *sink_fmt, *src_fmt;
 
-	get_fmt = __xdmsc_get_pad_format(xdmsc, sd_state, fmt->pad, fmt->which);
-	if (!get_fmt)
-		return -EINVAL;
+	sink_fmt = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SINK);
+	src_fmt = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SOURCE);
 
-	fmt->format = *get_fmt;
+	sink_fmt->field = V4L2_FIELD_NONE;
+	sink_fmt->colorspace = V4L2_COLORSPACE_SRGB;
+	sink_fmt->width = XDEMOSAIC_DEF_WIDTH;
+	sink_fmt->height = XDEMOSAIC_DEF_HEIGHT;
+	/*
+	 * Sink Pad can be any Bayer format.
+	 * Default Sink Pad format is RGGB.
+	 */
+	sink_fmt->code = MEDIA_BUS_FMT_SRGGB8_1X8;
+
+	*src_fmt = *sink_fmt;
+
+	/* Source Pad has a fixed media bus format of RGB */
+	src_fmt->code = MEDIA_BUS_FMT_RBG888_1X24;
 
 	return 0;
 }
@@ -190,9 +183,7 @@ static int xdmsc_set_format(struct v4l2_subdev *subdev,
 	struct xdmsc_dev *xdmsc = to_xdmsc(subdev);
 	struct v4l2_mbus_framefmt *__format;
 
-	__format = __xdmsc_get_pad_format(xdmsc, sd_state, fmt->pad, fmt->which);
-	if (!__format)
-		return -EINVAL;
+	__format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 
 	*__format = fmt->format;
 
@@ -225,33 +216,14 @@ static int xdmsc_set_format(struct v4l2_subdev *subdev,
 	return 0;
 }
 
-static int xdmsc_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	struct xdmsc_dev *xdmsc = to_xdmsc(subdev);
-	struct v4l2_mbus_framefmt *format;
-
-	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SINK);
-	*format = xdmsc->default_formats[XVIP_PAD_SINK];
-
-	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SOURCE);
-	*format = xdmsc->default_formats[XVIP_PAD_SOURCE];
-	return 0;
-}
-
-static int xdmsc_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	return 0;
-}
-
 static const struct v4l2_subdev_internal_ops xdmsc_internal_ops = {
-	.open = xdmsc_open,
-	.close = xdmsc_close,
+	.init_state = xdmsc_init_state,
 };
 
 static const struct v4l2_subdev_pad_ops xdmsc_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
-	.get_fmt = xdmsc_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xdmsc_set_format,
 };
 
@@ -327,7 +299,6 @@ static int xdmsc_probe(struct platform_device *pdev)
 {
 	struct xdmsc_dev *xdmsc;
 	struct v4l2_subdev *subdev;
-	struct v4l2_mbus_framefmt *def_fmt;
 	int rval;
 
 	xdmsc = devm_kzalloc(&pdev->dev, sizeof(*xdmsc), GFP_KERNEL);
@@ -353,27 +324,6 @@ static int xdmsc_probe(struct platform_device *pdev)
 	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
-	/* Default Formats Initialization */
-	def_fmt = &xdmsc->default_formats[XVIP_PAD_SINK];
-	def_fmt->field = V4L2_FIELD_NONE;
-	def_fmt->colorspace = V4L2_COLORSPACE_SRGB;
-	def_fmt->width = XDEMOSAIC_DEF_WIDTH;
-	def_fmt->height = XDEMOSAIC_DEF_HEIGHT;
-
-	/*
-	 * Sink Pad can be any Bayer format.
-	 * Default Sink Pad format is RGGB.
-	 */
-	def_fmt->code = MEDIA_BUS_FMT_SRGGB8_1X8;
-	xdmsc->formats[XVIP_PAD_SINK] = *def_fmt;
-
-	def_fmt = &xdmsc->default_formats[XVIP_PAD_SOURCE];
-	*def_fmt = xdmsc->default_formats[XVIP_PAD_SINK];
-
-	/* Source Pad has a fixed media bus format of RGB */
-	def_fmt->code = MEDIA_BUS_FMT_RBG888_1X24;
-	xdmsc->formats[XVIP_PAD_SOURCE] = *def_fmt;
-
 	xdmsc->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 	xdmsc->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 
@@ -384,16 +334,22 @@ static int xdmsc_probe(struct platform_device *pdev)
 	if (rval < 0)
 		goto media_error;
 
+	rval = v4l2_subdev_init_finalize(subdev);
+	if (rval < 0)
+		goto v4l2_subdev_error;
+
 	platform_set_drvdata(pdev, xdmsc);
 	rval = v4l2_async_register_subdev(subdev);
 	if (rval < 0) {
 		dev_err(&pdev->dev, "failed to register subdev");
-		goto v4l2_subdev_error;
+		goto subdev_cleanup_error;
 	}
 	dev_info(&pdev->dev,
 		 "Xilinx Video Demosaic Probe Successful");
 	return 0;
 
+subdev_cleanup_error:
+	v4l2_subdev_cleanup(subdev);
 v4l2_subdev_error:
 	media_entity_cleanup(&subdev->entity);
 media_error:
@@ -407,6 +363,7 @@ static void xdmsc_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xdmsc->xvip.subdev;
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 	xvip_cleanup_resources(&xdmsc->xvip);
 }

@@ -138,8 +138,6 @@ rgb_to_ycrcb_unity[XV_CSC_K_MAX_ROWS][XV_CSC_K_MAX_COLUMNS + 1] = {
  * struct xcsc_dev - xilinx vpss csc device structure
  * @xvip: Xilinx Video IP core struct
  * @pads: Media bus pads for VPSS CSC
- * @formats: Current media bus formats
- * @default_formats: Default media bus formats for VPSS CSC
  * @vip_formats: Pointer to DT specified media bus code info
  * @ctrl_handler: V4L2 Control Handler struct
  * @custom_ctrls: Array of pointers to various custom controls
@@ -167,8 +165,6 @@ rgb_to_ycrcb_unity[XV_CSC_K_MAX_ROWS][XV_CSC_K_MAX_COLUMNS + 1] = {
 struct xcsc_dev {
 	struct xvip_device xvip;
 	struct media_pad pads[2];
-	struct v4l2_mbus_framefmt formats[2];
-	struct v4l2_mbus_framefmt default_formats[2];
 	const struct xvip_video_format *vip_formats[2];
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_ctrl *custom_ctrls[XCSC_COLOR_CTRL_COUNT];
@@ -439,11 +435,14 @@ xcsc_rgb_to_ycrcb(struct xcsc_dev *xcsc, s32 *clip_max,
 
 static int xcsc_update_formats(struct xcsc_dev *xcsc)
 {
+	struct v4l2_subdev_state *state;
 	u32 color_in, color_out;
 
+	state = v4l2_subdev_get_locked_active_state(&xcsc->xvip.subdev);
+
 	/* Write In and Out Video Formats */
-	color_in = xcsc->formats[XVIP_PAD_SINK].code;
-	color_out = xcsc->formats[XVIP_PAD_SOURCE].code;
+	color_in = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK)->code;
+	color_out = v4l2_subdev_state_get_format(state, XVIP_PAD_SOURCE)->code;
 
 	switch (color_in) {
 	case MEDIA_BUS_FMT_RBG888_1X24:
@@ -529,36 +528,16 @@ static inline struct xcsc_dev *to_csc(struct v4l2_subdev *subdev)
 	return container_of(subdev, struct xcsc_dev, xvip.subdev);
 }
 
-static struct v4l2_mbus_framefmt *
-__xcsc_get_pad_format(struct xcsc_dev *xcsc,
-		      struct v4l2_subdev_state *sd_state,
-		      unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *format;
-
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_state_get_format(sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		format = &xcsc->formats[pad];
-		break;
-	default:
-		format = NULL;
-		break;
-	}
-
-	return format;
-}
-
 static void
 xcsc_correct_coeff(struct xcsc_dev *xcsc,
 		   s32 temp[XV_CSC_K_MAX_ROWS][XV_CSC_K_MAX_COLUMNS + 1])
 {
 	s32 csc_change[XV_CSC_K_MAX_ROWS][XV_CSC_K_MAX_COLUMNS + 1] = { {0} };
 	s32 csc_extra[XV_CSC_K_MAX_ROWS][XV_CSC_K_MAX_COLUMNS + 1] = { {0} };
-	u32 mbus_in = xcsc->formats[XVIP_PAD_SINK].code;
-	u32 mbus_out = xcsc->formats[XVIP_PAD_SOURCE].code;
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&xcsc->xvip.subdev);
+	u32 mbus_in = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK)->code;
+	u32 mbus_out = v4l2_subdev_state_get_format(state, XVIP_PAD_SOURCE)->code;
 
 #ifdef DEBUG
 	xcsc_log_coeff(xcsc->xvip.dev, temp);
@@ -725,10 +704,14 @@ static void xcsc_set_blue_gain(struct xcsc_dev *xcsc)
 
 static void xcsc_set_size(struct xcsc_dev *xcsc)
 {
+	struct v4l2_subdev_state *state;
+	const struct v4l2_mbus_framefmt *format;
 	u32 width, height;
 
-	width = xcsc->formats[XVIP_PAD_SINK].width;
-	height = xcsc->formats[XVIP_PAD_SINK].height;
+	state = v4l2_subdev_get_locked_active_state(&xcsc->xvip.subdev);
+	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
+	width = format->width;
+	height = format->height;
 	dev_dbg(xcsc->xvip.dev, "%s : Setting width %d and height %d",
 		__func__, width, height);
 	xcsc_write(xcsc, XV_CSC_WIDTH, width);
@@ -738,6 +721,7 @@ static void xcsc_set_size(struct xcsc_dev *xcsc)
 static int xcsc_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xcsc_dev *xcsc = to_csc(subdev);
+	struct v4l2_subdev_state *state;
 
 	dev_dbg(xcsc->xvip.dev, "%s : Stream %s", __func__,
 		enable ? "On" : "Off");
@@ -756,6 +740,9 @@ static int xcsc_s_stream(struct v4l2_subdev *subdev, int enable)
 
 		return 0;
 	}
+
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
+
 	/* Set the controls */
 	xcsc_set_brightness(xcsc);
 	xcsc_set_contrast(xcsc);
@@ -769,6 +756,9 @@ static int xcsc_s_stream(struct v4l2_subdev *subdev, int enable)
 	xcsc_write(xcsc, XV_CSC_CLAMPMIN, XCSC_CLAMP_MIN_ZERO);
 	xcsc_set_size(xcsc);
 	xcsc_write_coeff(xcsc);
+
+	v4l2_subdev_unlock_state(state);
+
 #ifdef DEBUG
 	xcsc_print_coeff(xcsc);
 	dev_dbg(xcsc->xvip.dev, "cft_in = %d cft_out = %d",
@@ -790,18 +780,23 @@ static const struct v4l2_subdev_video_ops xcsc_video_ops = {
 	.s_stream = xcsc_s_stream,
 };
 
-static int xcsc_get_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_state *sd_state,
-			   struct v4l2_subdev_format *fmt)
+static int xcsc_init_state(struct v4l2_subdev *subdev,
+			   struct v4l2_subdev_state *sd_state)
 {
 	struct xcsc_dev *xcsc = to_csc(subdev);
 	struct v4l2_mbus_framefmt *format;
+	unsigned int pad;
 
-	format = __xcsc_get_pad_format(xcsc, sd_state, fmt->pad, fmt->which);
-	if (!format)
-		return -EINVAL;
+	for (pad = 0; pad < ARRAY_SIZE(xcsc->pads); pad++) {
+		format = v4l2_subdev_state_get_format(sd_state, pad);
 
-	fmt->format = *format;
+		format->code = xcsc->vip_formats[pad]->code;
+		format->field = V4L2_FIELD_NONE;
+		format->colorspace = V4L2_COLORSPACE_REC709;
+		format->width = XV_CSC_DEFAULT_WIDTH;
+		format->height = XV_CSC_DEFAULT_HEIGHT;
+	}
+
 	return 0;
 }
 
@@ -813,15 +808,10 @@ static int xcsc_set_format(struct v4l2_subdev *subdev,
 	struct v4l2_mbus_framefmt *__format;
 	struct v4l2_mbus_framefmt *__propagate;
 
-	__format = __xcsc_get_pad_format(xcsc, sd_state, fmt->pad, fmt->which);
-	if (!__format)
-		return -EINVAL;
+	__format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 
 	/* Propagate to Source Pad */
-	__propagate = __xcsc_get_pad_format(xcsc, sd_state,
-					    XVIP_PAD_SOURCE, fmt->which);
-	if (!__propagate)
-		return -EINVAL;
+	__propagate = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SOURCE);
 
 	*__format = fmt->format;
 
@@ -852,15 +842,20 @@ static int xcsc_set_format(struct v4l2_subdev *subdev,
 	__propagate->height = __format->height;
 
 	fmt->format = *__format;
-	xcsc_update_formats(xcsc);
-	dev_info(xcsc->xvip.dev, "VPSS CSC color controls reset to defaults");
+
+	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
+		xcsc_update_formats(xcsc);
+		dev_info(xcsc->xvip.dev,
+			 "VPSS CSC color controls reset to defaults");
+	}
+
 	return 0;
 }
 
 static const struct v4l2_subdev_pad_ops xcsc_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
-	.get_fmt = xcsc_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xcsc_set_format,
 };
 
@@ -962,31 +957,8 @@ static struct v4l2_ctrl_config xcsc_color_ctrls[XCSC_COLOR_CTRL_COUNT] = {
 	},
 };
 
-static int xcsc_open(struct v4l2_subdev *subdev,
-		     struct v4l2_subdev_fh *fh)
-{
-	struct xcsc_dev *xcsc = to_csc(subdev);
-	struct v4l2_mbus_framefmt *format;
-
-	/* Initialize with default formats */
-	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SINK);
-	*format = xcsc->default_formats[XVIP_PAD_SINK];
-
-	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SOURCE);
-	*format = xcsc->default_formats[XVIP_PAD_SOURCE];
-
-	return 0;
-}
-
-static int xcsc_close(struct v4l2_subdev *subdev,
-		      struct v4l2_subdev_fh *fh)
-{
-	return 0;
-}
-
 static const struct v4l2_subdev_internal_ops xcsc_internal_ops = {
-	.open  = xcsc_open,
-	.close = xcsc_close,
+	.init_state = xcsc_init_state,
 };
 
 static const struct media_entity_operations xcsc_media_ops = {
@@ -1090,7 +1062,6 @@ static int xcsc_probe(struct platform_device *pdev)
 {
 	struct xcsc_dev *xcsc;
 	struct v4l2_subdev *subdev;
-	struct v4l2_mbus_framefmt *def_fmt;
 	int rval, itr;
 
 	xcsc = devm_kzalloc(&pdev->dev, sizeof(*xcsc), GFP_KERNEL);
@@ -1118,22 +1089,8 @@ static int xcsc_probe(struct platform_device *pdev)
 	v4l2_set_subdevdata(subdev, xcsc);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
-	/* Default Formats Initialization */
+	/* Default state initialization, the formats are set in .init_state() */
 	xcsc_set_default_state(xcsc);
-	def_fmt = &xcsc->default_formats[XVIP_PAD_SINK];
-	def_fmt->code = xcsc->vip_formats[XVIP_PAD_SINK]->code;
-	def_fmt->field = V4L2_FIELD_NONE;
-	def_fmt->colorspace = V4L2_COLORSPACE_REC709;
-	def_fmt->width = XV_CSC_DEFAULT_WIDTH;
-	def_fmt->height = XV_CSC_DEFAULT_HEIGHT;
-	xcsc->formats[XVIP_PAD_SINK] = *def_fmt;
-	/* Source supports only YUV 444, YUV 422, and RGB */
-	def_fmt = &xcsc->default_formats[XVIP_PAD_SOURCE];
-	*def_fmt = xcsc->default_formats[XVIP_PAD_SINK];
-	def_fmt->code = xcsc->vip_formats[XVIP_PAD_SOURCE]->code;
-	def_fmt->width = XV_CSC_DEFAULT_WIDTH;
-	def_fmt->height = XV_CSC_DEFAULT_HEIGHT;
-	xcsc->formats[XVIP_PAD_SOURCE] = *def_fmt;
 	xcsc->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 	xcsc->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 
@@ -1161,15 +1118,22 @@ static int xcsc_probe(struct platform_device *pdev)
 		dev_err(xcsc->xvip.dev, "Failed to setup control handler");
 		goto ctrl_error;
 	}
+
+	rval = v4l2_subdev_init_finalize(subdev);
+	if (rval < 0)
+		goto ctrl_error;
+
 	platform_set_drvdata(pdev, xcsc);
 	rval = v4l2_async_register_subdev(subdev);
 	if (rval < 0) {
 		dev_err(&pdev->dev, "failed to register subdev\n");
-		goto ctrl_error;
+		goto subdev_error;
 	}
 	dev_info(&pdev->dev, "VPSS CSC %d-bit Color Depth Probe Successful",
 		 xcsc->color_depth);
 	return 0;
+subdev_error:
+	v4l2_subdev_cleanup(subdev);
 ctrl_error:
 	v4l2_ctrl_handler_free(&xcsc->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
@@ -1184,6 +1148,7 @@ static void xcsc_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xcsc->xvip.subdev;
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	v4l2_ctrl_handler_free(&xcsc->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 	xvip_cleanup_resources(&xcsc->xvip);

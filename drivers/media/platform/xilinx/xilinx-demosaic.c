@@ -110,45 +110,57 @@ static int xdmsc_get_bayer_format(u32 code)
 	}
 }
 
-static int xdmsc_s_stream(struct v4l2_subdev *subdev, int enable)
+static void xdmsc_stop_stream(struct xdmsc_dev *xdmsc)
+{
+	gpiod_set_value_cansleep(xdmsc->rst_gpio, XDEMOSAIC_RESET_ASSERT);
+	gpiod_set_value_cansleep(xdmsc->rst_gpio, XDEMOSAIC_RESET_DEASSERT);
+}
+
+static int xdmsc_enable_streams(struct v4l2_subdev *subdev,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
 {
 	struct xdmsc_dev *xdmsc = to_xdmsc(subdev);
-	struct v4l2_subdev_state *state;
 	const struct v4l2_mbus_framefmt *format;
 	int bayer_fmt;
+	int ret;
 
-	if (!enable) {
-		dev_dbg(xdmsc->xvip.dev, "%s : Off", __func__);
-		gpiod_set_value_cansleep(xdmsc->rst_gpio,
-					 XDEMOSAIC_RESET_ASSERT);
-		gpiod_set_value_cansleep(xdmsc->rst_gpio,
-					 XDEMOSAIC_RESET_DEASSERT);
-		return 0;
-	}
-
-	state = v4l2_subdev_lock_and_get_active_state(subdev);
 	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
 
 	bayer_fmt = xdmsc_get_bayer_format(format->code);
-	if (bayer_fmt < 0) {
-		v4l2_subdev_unlock_state(state);
+	if (bayer_fmt < 0)
 		return bayer_fmt;
-	}
 
 	xdmsc_write(xdmsc, XDEMOSAIC_WIDTH, format->width);
 	xdmsc_write(xdmsc, XDEMOSAIC_HEIGHT, format->height);
 	xdmsc_write(xdmsc, XDEMOSAIC_INPUT_BAYER_FORMAT, bayer_fmt);
 
-	v4l2_subdev_unlock_state(state);
-
 	/* Start Demosaic Video IP */
 	xdmsc_write(xdmsc, XDEMOSAIC_AP_CTRL, XDEMOSAIC_STREAM_ON);
+
+	ret = xvip_enable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+	if (ret) {
+		xdmsc_stop_stream(xdmsc);
+		return ret;
+	}
+
 	return 0;
 }
 
-static const struct v4l2_subdev_video_ops xdmsc_video_ops = {
-	.s_stream = xdmsc_s_stream,
-};
+static int xdmsc_disable_streams(struct v4l2_subdev *subdev,
+				 struct v4l2_subdev_state *state, u32 pad,
+				 u64 streams_mask)
+{
+	struct xdmsc_dev *xdmsc = to_xdmsc(subdev);
+
+	dev_dbg(xdmsc->xvip.dev, "%s : Off", __func__);
+
+	xvip_disable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+
+	xdmsc_stop_stream(xdmsc);
+
+	return 0;
+}
 
 static int xdmsc_init_state(struct v4l2_subdev *subdev,
 			    struct v4l2_subdev_state *sd_state)
@@ -225,10 +237,11 @@ static const struct v4l2_subdev_pad_ops xdmsc_pad_ops = {
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xdmsc_set_format,
+	.enable_streams = xdmsc_enable_streams,
+	.disable_streams = xdmsc_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xdmsc_ops = {
-	.video = &xdmsc_video_ops,
 	.pad = &xdmsc_pad_ops,
 };
 

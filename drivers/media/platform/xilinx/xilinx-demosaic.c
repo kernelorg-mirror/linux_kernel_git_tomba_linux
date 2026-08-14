@@ -48,7 +48,6 @@ struct xdmsc_dev {
 	struct v4l2_mbus_framefmt formats[2];
 	struct v4l2_mbus_framefmt default_formats[2];
 
-	enum xdmsc_bayer_format bayer_fmt;
 	struct gpio_desc *rst_gpio;
 	u32 max_width;
 	u32 max_height;
@@ -103,9 +102,42 @@ static struct v4l2_mbus_framefmt
 	return get_fmt;
 }
 
+/*
+ * Return the IP specific bayer format for a media bus code, or a negative
+ * error code if the media bus code isn't a bayer format.
+ */
+static int xdmsc_get_bayer_format(u32 code)
+{
+	switch (code) {
+	case MEDIA_BUS_FMT_SRGGB8_1X8:
+	case MEDIA_BUS_FMT_SRGGB10_1X10:
+	case MEDIA_BUS_FMT_SRGGB12_1X12:
+	case MEDIA_BUS_FMT_SRGGB16_1X16:
+		return XDEMOSAIC_RGGB;
+	case MEDIA_BUS_FMT_SGRBG8_1X8:
+	case MEDIA_BUS_FMT_SGRBG10_1X10:
+	case MEDIA_BUS_FMT_SGRBG12_1X12:
+	case MEDIA_BUS_FMT_SGRBG16_1X16:
+		return XDEMOSAIC_GRBG;
+	case MEDIA_BUS_FMT_SGBRG8_1X8:
+	case MEDIA_BUS_FMT_SGBRG10_1X10:
+	case MEDIA_BUS_FMT_SGBRG12_1X12:
+	case MEDIA_BUS_FMT_SGBRG16_1X16:
+		return XDEMOSAIC_GBRG;
+	case MEDIA_BUS_FMT_SBGGR8_1X8:
+	case MEDIA_BUS_FMT_SBGGR10_1X10:
+	case MEDIA_BUS_FMT_SBGGR12_1X12:
+	case MEDIA_BUS_FMT_SBGGR16_1X16:
+		return XDEMOSAIC_BGGR;
+	default:
+		return -EINVAL;
+	}
+}
+
 static int xdmsc_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xdmsc_dev *xdmsc = to_xdmsc(subdev);
+	int bayer_fmt;
 
 	if (!enable) {
 		dev_dbg(xdmsc->xvip.dev, "%s : Off", __func__);
@@ -116,11 +148,15 @@ static int xdmsc_s_stream(struct v4l2_subdev *subdev, int enable)
 		return 0;
 	}
 
+	bayer_fmt = xdmsc_get_bayer_format(xdmsc->formats[XVIP_PAD_SINK].code);
+	if (bayer_fmt < 0)
+		return bayer_fmt;
+
 	xdmsc_write(xdmsc, XDEMOSAIC_WIDTH,
 		    xdmsc->formats[XVIP_PAD_SINK].width);
 	xdmsc_write(xdmsc, XDEMOSAIC_HEIGHT,
 		    xdmsc->formats[XVIP_PAD_SINK].height);
-	xdmsc_write(xdmsc, XDEMOSAIC_INPUT_BAYER_FORMAT, xdmsc->bayer_fmt);
+	xdmsc_write(xdmsc, XDEMOSAIC_INPUT_BAYER_FORMAT, bayer_fmt);
 
 	/* Start Demosaic Video IP */
 	xdmsc_write(xdmsc, XDEMOSAIC_AP_CTRL, XDEMOSAIC_STREAM_ON);
@@ -145,41 +181,6 @@ static int xdmsc_get_format(struct v4l2_subdev *subdev,
 	fmt->format = *get_fmt;
 
 	return 0;
-}
-
-static bool
-xdmsc_is_format_bayer(struct xdmsc_dev *xdmsc, u32 code)
-{
-	switch (code) {
-	case MEDIA_BUS_FMT_SRGGB8_1X8:
-	case MEDIA_BUS_FMT_SRGGB10_1X10:
-	case MEDIA_BUS_FMT_SRGGB12_1X12:
-	case MEDIA_BUS_FMT_SRGGB16_1X16:
-		xdmsc->bayer_fmt = XDEMOSAIC_RGGB;
-		break;
-	case MEDIA_BUS_FMT_SGRBG8_1X8:
-	case MEDIA_BUS_FMT_SGRBG10_1X10:
-	case MEDIA_BUS_FMT_SGRBG12_1X12:
-	case MEDIA_BUS_FMT_SGRBG16_1X16:
-		xdmsc->bayer_fmt = XDEMOSAIC_GRBG;
-		break;
-	case MEDIA_BUS_FMT_SGBRG8_1X8:
-	case MEDIA_BUS_FMT_SGBRG10_1X10:
-	case MEDIA_BUS_FMT_SGBRG12_1X12:
-	case MEDIA_BUS_FMT_SGBRG16_1X16:
-		xdmsc->bayer_fmt = XDEMOSAIC_GBRG;
-		break;
-	case MEDIA_BUS_FMT_SBGGR8_1X8:
-	case MEDIA_BUS_FMT_SBGGR10_1X10:
-	case MEDIA_BUS_FMT_SBGGR12_1X12:
-	case MEDIA_BUS_FMT_SBGGR16_1X16:
-		xdmsc->bayer_fmt = XDEMOSAIC_BGGR;
-		break;
-	default:
-		dev_dbg(xdmsc->xvip.dev, "Unsupported format for Sink Pad");
-		return false;
-	}
-	return true;
 }
 
 static int xdmsc_set_format(struct v4l2_subdev *subdev,
@@ -213,7 +214,7 @@ static int xdmsc_set_format(struct v4l2_subdev *subdev,
 	}
 
 	if (fmt->pad == XVIP_PAD_SINK) {
-		if (!xdmsc_is_format_bayer(xdmsc, __format->code)) {
+		if (xdmsc_get_bayer_format(__format->code) < 0) {
 			dev_dbg(xdmsc->xvip.dev,
 				"Unsupported Sink Pad Media format, defaulting to RGGB");
 			__format->code = MEDIA_BUS_FMT_SRGGB8_1X8;

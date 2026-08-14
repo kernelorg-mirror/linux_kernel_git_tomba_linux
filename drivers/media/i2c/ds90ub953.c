@@ -22,6 +22,7 @@
 #include <linux/regmap.h>
 
 #include <media/i2c/ds90ub9xx.h>
+#include <media/mipi-csi2.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-mediabus.h>
@@ -424,11 +425,71 @@ static int ub953_set_routing(struct v4l2_subdev *sd,
 	return _ub953_set_routing(sd, state, routing);
 }
 
+/*
+ * Fallback for source subdevs that do not implement get_frame_desc. Assumes a
+ * single stream on VC 0, with the data type based on the sink pad format.
+ */
+static int ub953_get_frame_desc_fallback(struct ub953_data *priv,
+					 struct v4l2_mbus_frame_desc *fd)
+{
+	struct v4l2_mbus_frame_desc_entry *entry;
+	struct v4l2_subdev_state *state;
+	struct v4l2_mbus_framefmt *fmt;
+	u8 dt;
+
+	state = v4l2_subdev_get_locked_active_state(&priv->sd);
+
+	fmt = v4l2_subdev_state_get_format(state, UB953_PAD_SINK, 0);
+	if (!fmt)
+		return -EPIPE;
+
+	switch (fmt->code) {
+	case MEDIA_BUS_FMT_SBGGR8_1X8:
+	case MEDIA_BUS_FMT_SGBRG8_1X8:
+	case MEDIA_BUS_FMT_SGRBG8_1X8:
+	case MEDIA_BUS_FMT_SRGGB8_1X8:
+	case MEDIA_BUS_FMT_Y8_1X8:
+		dt = MIPI_CSI2_DT_RAW8;
+		break;
+	case MEDIA_BUS_FMT_SBGGR10_1X10:
+	case MEDIA_BUS_FMT_SGBRG10_1X10:
+	case MEDIA_BUS_FMT_SGRBG10_1X10:
+	case MEDIA_BUS_FMT_SRGGB10_1X10:
+	case MEDIA_BUS_FMT_Y10_1X10:
+		dt = MIPI_CSI2_DT_RAW10;
+		break;
+	case MEDIA_BUS_FMT_SBGGR12_1X12:
+	case MEDIA_BUS_FMT_SGBRG12_1X12:
+	case MEDIA_BUS_FMT_SGRBG12_1X12:
+	case MEDIA_BUS_FMT_SRGGB12_1X12:
+	case MEDIA_BUS_FMT_Y12_1X12:
+		dt = MIPI_CSI2_DT_RAW12;
+		break;
+	default:
+		dev_err(&priv->client->dev,
+			"Unable to deduce data type for mbus code %#06x\n",
+			fmt->code);
+		return -EINVAL;
+	}
+
+	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_CSI2;
+	fd->num_entries = 1;
+
+	entry = &fd->entry[0];
+
+	entry->stream = 0;
+	entry->pixelcode = fmt->code;
+	entry->bus.csi2.vc = 0;
+	entry->bus.csi2.dt = dt;
+
+	return 0;
+}
+
 static int ub953_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 				struct v4l2_mbus_frame_desc *fd)
 {
 	struct ub953_data *priv = sd_to_ub953(sd);
-	struct v4l2_mbus_frame_desc source_fd;
+	struct v4l2_mbus_frame_desc source_fd = {};
 	struct v4l2_subdev_route *route;
 	struct v4l2_subdev_state *state;
 	int ret;
@@ -436,14 +497,16 @@ static int ub953_get_frame_desc(struct v4l2_subdev *sd, unsigned int pad,
 	if (pad != UB953_PAD_SOURCE)
 		return -EINVAL;
 
+	state = v4l2_subdev_lock_and_get_active_state(sd);
+
 	ret = v4l2_subdev_call(priv->source_sd, pad, get_frame_desc,
 			       priv->source_sd_pad, &source_fd);
+	if (ret == -ENOIOCTLCMD)
+		ret = ub953_get_frame_desc_fallback(priv, &source_fd);
 	if (ret)
-		return ret;
+		goto out_unlock;
 
 	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_CSI2;
-
-	state = v4l2_subdev_lock_and_get_active_state(sd);
 
 	for_each_active_route(&state->routing, route) {
 		struct v4l2_mbus_frame_desc_entry *source_entry = NULL;

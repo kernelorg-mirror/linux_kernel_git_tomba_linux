@@ -2016,19 +2016,14 @@ static void xisp_reset(struct xisp_dev *xisp)
 	gpiod_set_value_cansleep(xisp->rst_gpio, XISP_RESET_DEASSERT);
 }
 
-static int xisp_s_stream(struct v4l2_subdev *subdev, int enable)
+static int xisp_enable_streams(struct v4l2_subdev *subdev,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
 {
 	struct xisp_dev *xisp = to_xisp(subdev);
 	const struct v4l2_mbus_framefmt *format;
-	struct v4l2_subdev_state *state;
+	int ret;
 
-	if (!enable) {
-		dev_dbg(xisp->xvip.dev, "%s : Off", __func__);
-		xisp_reset(xisp);
-		return 0;
-	}
-
-	state = v4l2_subdev_lock_and_get_active_state(subdev);
 	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
 
 	if (xisp->config->flags & XILINX_ISP_VERSION_1) {
@@ -2081,21 +2076,35 @@ static int xisp_s_stream(struct v4l2_subdev *subdev, int enable)
 			    XGET_BIT(XISP_LUT3D_INDEX, xisp->module_bypass)))
 				xisp_set_lut3d_entries(xisp, XISP_LUT3D_CONFIG_BASE, xisp->lut3d);
 	} else {
-		v4l2_subdev_unlock_state(state);
 		return -EINVAL;
 	}
-
-	v4l2_subdev_unlock_state(state);
 
 	/* Start ISP pipeline IP */
 	xvip_write(&xisp->xvip, XISP_AP_CTRL_REG, XISP_STREAM_ON);
 
+	ret = xvip_enable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+	if (ret) {
+		xisp_reset(xisp);
+		return ret;
+	}
+
 	return 0;
 }
 
-static const struct v4l2_subdev_video_ops xisp_video_ops = {
-	.s_stream = xisp_s_stream,
-};
+static int xisp_disable_streams(struct v4l2_subdev *subdev,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xisp_dev *xisp = to_xisp(subdev);
+
+	dev_dbg(xisp->xvip.dev, "%s : Off", __func__);
+
+	xvip_disable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+
+	xisp_reset(xisp);
+
+	return 0;
+}
 
 static int xisp_init_state(struct v4l2_subdev *subdev,
 			   struct v4l2_subdev_state *sd_state)
@@ -2284,10 +2293,11 @@ static const struct v4l2_subdev_internal_ops xisp_internal_ops = {
 static const struct v4l2_subdev_pad_ops xisp_pad_ops = {
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xisp_set_format,
+	.enable_streams = xisp_enable_streams,
+	.disable_streams = xisp_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xisp_ops = {
-	.video = &xisp_video_ops,
 	.pad = &xisp_pad_ops,
 };
 

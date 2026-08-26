@@ -50,7 +50,6 @@
  * @entity: media entity, from the corresponding V4L2 subdev
  * @asc: subdev asynchronous registration information
  * @subdev: V4L2 subdev
- * @streaming: status of the V4L2 subdev if streaming or not
  */
 struct xvip_graph_entity {
 	struct list_head list;
@@ -59,7 +58,6 @@ struct xvip_graph_entity {
 
 	struct v4l2_async_connection asc;
 	struct v4l2_subdev *subdev;
-	bool streaming;
 };
 
 /**
@@ -81,11 +79,6 @@ struct xvip_pipeline {
 
 	unsigned int num_dmas;
 	struct xvip_m2m_dev *xdev;
-};
-
-struct xventity_list {
-	struct list_head list;
-	struct media_entity *entity;
 };
 
 /**
@@ -232,146 +225,40 @@ static int xvip_dma_verify_format(struct xvip_m2m_dma *dma)
  */
 
 /**
- * xvip_subdev_set_streaming - Find and update streaming status of subdev
- * @xdev: Composite video device
- * @subdev: V4L2 sub-device
- * @enable: enable/disable streaming status
- *
- * Walk the xvip graph entities list and find if subdev is present. Returns
- * streaming status of subdev and update the status as requested
- *
- * Return: streaming status (true or false) if successful or warn_on if subdev
- * is not present and return false
- */
-static bool xvip_subdev_set_streaming(struct xvip_m2m_dev *xdev,
-				      struct v4l2_subdev *subdev, bool enable)
-{
-	struct xvip_graph_entity *entity;
-
-	list_for_each_entry(entity, &xdev->entities, list)
-		if (entity->node == subdev->dev->of_node) {
-			bool status = entity->streaming;
-
-			entity->streaming = enable;
-			return status;
-		}
-
-	WARN(1, "Should never get here\n");
-	return false;
-}
-
-static int xvip_entity_start_stop(struct xvip_m2m_dev *xdev,
-				  struct media_entity *entity, bool start)
-{
-	struct v4l2_subdev *subdev;
-	bool is_streaming;
-	int ret = 0;
-
-	dev_dbg(xdev->dev, "%s entity %s\n",
-		start ? "Starting" : "Stopping", entity->name);
-	subdev = media_entity_to_v4l2_subdev(entity);
-
-	/* This is to maintain list of stream on/off devices */
-	is_streaming = xvip_subdev_set_streaming(xdev, subdev, start);
-
-	/*
-	 * start or stop the subdev only once in case if they are
-	 * shared between sub-graphs
-	 */
-	if (start && !is_streaming) {
-		/* stream-on subdevice */
-		ret = v4l2_subdev_call(subdev, video, s_stream, 1);
-		if (ret < 0 && ret != -ENOIOCTLCMD) {
-			dev_err(xdev->dev,
-				"s_stream on failed on subdev\n");
-			xvip_subdev_set_streaming(xdev, subdev, 0);
-		}
-	} else if (!start && is_streaming) {
-		/* stream-off subdevice */
-		ret = v4l2_subdev_call(subdev, video, s_stream, 0);
-		if (ret < 0 && ret != -ENOIOCTLCMD) {
-			dev_err(xdev->dev,
-				"s_stream off failed on subdev\n");
-			xvip_subdev_set_streaming(xdev, subdev, 1);
-		}
-	}
-
-	return ret;
-}
-
-/**
- * xvip_pipeline_start_stop - Start ot stop streaming on a pipeline
+ * xvip_pipeline_start_stop - Start or stop streaming on a pipeline
  * @xdev: Composite video device
  * @dma: xvip dma
  * @start: Start (when true) or stop (when false) the pipeline
  *
- * Walk the entities chain starting @dma and start or stop all of them
+ * Start or stop the subdev connected to the sink pad of the video node. The
+ * subdev is responsible for propagating the stream state to the subdev
+ * connected to its own sink pad, and so on up to the subdev fed by the source
+ * pad of the video node.
  *
- * Return: 0 if successful, or the return value of the failed video::s_stream
- * operation otherwise.
+ * Return: 0 if successful, -EPIPE if no subdev is connected to the sink pad of
+ * the video node, or the return value of the failed
+ * v4l2_subdev_enable_streams() operation otherwise.
  */
 static int xvip_pipeline_start_stop(struct xvip_m2m_dev *xdev,
 				    struct xvip_m2m_dma *dma, bool start)
 {
-	struct media_graph graph;
-	struct media_entity *entity = &dma->video.entity;
-	struct media_device *mdev = entity->graph_obj.mdev;
-	struct xventity_list *temp, *_temp;
-	LIST_HEAD(ent_list);
-	int ret = 0;
+	struct v4l2_subdev *subdev;
+	u32 pad;
+	int ret;
 
-	mutex_lock(&mdev->graph_mutex);
+	subdev = xvip_dma_remote_subdev(&dma->pads[XVIP_PAD_SINK], &pad);
+	if (!subdev)
+		return -EPIPE;
 
-	/* Walk the graph to locate the subdev nodes */
-	ret = media_graph_walk_init(&graph, mdev);
-	if (ret)
-		goto error;
+	if (start)
+		ret = v4l2_subdev_enable_streams(subdev, pad, BIT_ULL(0));
+	else
+		ret = v4l2_subdev_disable_streams(subdev, pad, BIT_ULL(0));
 
-	media_graph_walk_start(&graph, entity);
+	if (ret < 0)
+		dev_err(xdev->dev, "failed to %s %s: %d\n",
+			start ? "start" : "stop", subdev->name, ret);
 
-	/* get the list of entities */
-	while ((entity = media_graph_walk_next(&graph))) {
-		struct xventity_list *ele;
-
-		/* We want to stream on/off only subdevs */
-		if (!is_media_entity_v4l2_subdev(entity))
-			continue;
-
-		/* Maintain the pipeline sequence in a list */
-		ele = kzalloc(sizeof(*ele), GFP_KERNEL);
-		if (!ele) {
-			ret = -ENOMEM;
-			goto error;
-		}
-
-		ele->entity = entity;
-		list_add(&ele->list, &ent_list);
-	}
-
-	if (start) {
-		list_for_each_entry_safe(temp, _temp, &ent_list, list) {
-			/* Enable all subdevs from sink to source */
-			ret = xvip_entity_start_stop(xdev, temp->entity, start);
-			if (ret < 0) {
-				dev_err(xdev->dev, "ret = %d for entity %s\n",
-					ret, temp->entity->name);
-				break;
-			}
-		}
-	} else {
-		list_for_each_entry_safe_reverse(temp, _temp, &ent_list, list)
-			/* Enable all subdevs from source to sink */
-			xvip_entity_start_stop(xdev, temp->entity, start);
-	}
-
-	list_for_each_entry_safe(temp, _temp, &ent_list, list) {
-		list_del(&temp->list);
-		kfree(temp);
-	}
-
-error:
-	mutex_unlock(&mdev->graph_mutex);
-	media_graph_walk_cleanup(&graph);
 	return ret;
 }
 
@@ -380,26 +267,22 @@ error:
  * @pipe: The pipeline
  * @on: Turn the stream on when true or off when false
  *
- * The pipeline is shared between all DMA engines connect at its input and
- * output. While the stream state of DMA engines can be controlled
- * independently, pipelines have a shared stream state that enable or disable
- * all entities in the pipeline. For this reason the pipeline uses a streaming
- * counter that tracks the number of DMA engines that have requested the stream
- * to be enabled. This will walk the graph starting from each DMA and enable or
- * disable the entities in the path.
+ * The pipeline is shared by the output and the capture queue of the mem2mem
+ * device. While the stream state of the queues can be controlled
+ * independently, the pipeline has a shared stream state. For this reason the
+ * pipeline uses a streaming counter that tracks the number of queues that have
+ * requested the stream to be enabled.
  *
- * When called with the @on argument set to true, this function will increment
- * the pipeline streaming count. If the streaming count reaches the number of
- * DMA engines in the pipeline it will enable all entities that belong to the
- * pipeline.
+ * When called with the @on argument set to true, this function will enable the
+ * pipeline if the streaming count is zero, and increment the streaming count.
  *
  * Similarly, when called with the @on argument set to false, this function will
- * decrement the pipeline streaming count and disable all entities in the
- * pipeline when the streaming count reaches zero.
+ * decrement the pipeline streaming count and disable the pipeline when the
+ * streaming count reaches zero.
  *
- * Return: 0 if successful, or the return value of the failed video::s_stream
- * operation otherwise. Stopping the pipeline never fails. The pipeline state is
- * not updated when the operation fails.
+ * Return: 0 if successful, or the return value of the failed
+ * v4l2_subdev_enable_streams() operation otherwise. Stopping the pipeline never
+ * fails. The pipeline state is not updated when the operation fails.
  */
 static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe, bool on)
 {
@@ -412,9 +295,11 @@ static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe, bool on)
 	dma = xdev->dma;
 
 	if (on) {
-		ret = xvip_pipeline_start_stop(xdev, dma, true);
-		if (ret < 0)
-			goto done;
+		if (pipe->stream_count == 0) {
+			ret = xvip_pipeline_start_stop(xdev, dma, true);
+			if (ret < 0)
+				goto done;
+		}
 		pipe->stream_count++;
 	} else {
 		if (--pipe->stream_count == 0)

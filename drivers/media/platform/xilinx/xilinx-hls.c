@@ -31,9 +31,9 @@
  * @xvip: Xilinx Video IP device
  * @pads: media pads
  * @compatible: first DT compatible string for the device
- * @formats: active V4L2 media bus formats at the sink and source pads
- * @default_formats: default V4L2 media bus formats
  * @vip_formats: format information corresponding to the pads active formats
+ * @default_width: default frame width, read from the core at probe time
+ * @default_height: default frame height, read from the core at probe time
  * @model: additional description of IP implementation if available
  * @ctrl_handler: control handler
  * @user_mem: user portion of the register space
@@ -45,9 +45,9 @@ struct xhls_device {
 
 	const char *compatible;
 
-	struct v4l2_mbus_framefmt formats[2];
-	struct v4l2_mbus_framefmt default_formats[2];
 	const struct xvip_video_format *vip_formats[2];
+	unsigned int default_width;
+	unsigned int default_height;
 
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_ctrl *model;
@@ -178,15 +178,21 @@ static long xhls_ioctl(struct v4l2_subdev *subdev, unsigned int cmd, void *arg)
 static int xhls_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xhls_device *xhls = to_hls(subdev);
-	struct v4l2_mbus_framefmt *format = &xhls->formats[XVIP_PAD_SINK];
+	const struct v4l2_mbus_framefmt *format;
+	struct v4l2_subdev_state *state;
 
 	if (!enable) {
 		xvip_write(&xhls->xvip, XVIP_CTRL_CONTROL, 0);
 		return 0;
 	}
 
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
+	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
+
 	xvip_write(&xhls->xvip, XHLS_REG_COLS, format->width);
 	xvip_write(&xhls->xvip, XHLS_REG_ROWS, format->height);
+
+	v4l2_subdev_unlock_state(state);
 
 	xvip_write(&xhls->xvip, XVIP_CTRL_CONTROL,
 		   XHLS_REG_CTRL_AUTO_RESTART | XVIP_CTRL_CONTROL_SW_ENABLE);
@@ -198,54 +204,13 @@ static int xhls_s_stream(struct v4l2_subdev *subdev, int enable)
  * V4L2 Subdevice Pad Operations
  */
 
-static struct v4l2_mbus_framefmt *
-__xhls_get_pad_format(struct xhls_device *xhls,
-		      struct v4l2_subdev_state *sd_state,
-		      unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *format;
-
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_state_get_format(sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		format = &xhls->formats[pad];
-		break;
-	default:
-		format = NULL;
-		break;
-	}
-
-	return format;
-}
-
-static int xhls_get_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_state *sd_state,
-			   struct v4l2_subdev_format *fmt)
-{
-	struct xhls_device *xhls = to_hls(subdev);
-	struct v4l2_mbus_framefmt *format;
-
-	format = __xhls_get_pad_format(xhls, sd_state, fmt->pad, fmt->which);
-	if (!format)
-		return -EINVAL;
-
-	fmt->format = *format;
-
-	return 0;
-}
-
 static int xhls_set_format(struct v4l2_subdev *subdev,
 			   struct v4l2_subdev_state *sd_state,
 			   struct v4l2_subdev_format *fmt)
 {
-	struct xhls_device *xhls = to_hls(subdev);
 	struct v4l2_mbus_framefmt *format;
 
-	format = __xhls_get_pad_format(xhls, sd_state, fmt->pad, fmt->which);
-	if (!format)
-		return -EINVAL;
+	format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 
 	if (fmt->pad == XVIP_PAD_SOURCE) {
 		fmt->format = *format;
@@ -257,10 +222,7 @@ static int xhls_set_format(struct v4l2_subdev *subdev,
 	fmt->format = *format;
 
 	/* Propagate the format to the source pad. */
-	format = __xhls_get_pad_format(xhls, sd_state, XVIP_PAD_SOURCE,
-					 fmt->which);
-	if (!format)
-		return -EINVAL;
+	format = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SOURCE);
 
 	xvip_set_format_size(format, fmt);
 
@@ -271,23 +233,24 @@ static int xhls_set_format(struct v4l2_subdev *subdev,
  * V4L2 Subdevice Operations
  */
 
-static int xhls_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
+static int xhls_init_state(struct v4l2_subdev *subdev,
+			   struct v4l2_subdev_state *sd_state)
 {
 	struct xhls_device *xhls = to_hls(subdev);
-	struct v4l2_mbus_framefmt *format;
+	struct v4l2_mbus_framefmt *sink_fmt, *src_fmt;
 
-	/* Initialize with default formats */
-	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SINK);
-	*format = xhls->default_formats[XVIP_PAD_SINK];
+	sink_fmt = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SINK);
+	src_fmt = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SOURCE);
 
-	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SOURCE);
-	*format = xhls->default_formats[XVIP_PAD_SOURCE];
+	sink_fmt->code = xhls->vip_formats[XVIP_PAD_SINK]->code;
+	sink_fmt->field = V4L2_FIELD_NONE;
+	sink_fmt->colorspace = V4L2_COLORSPACE_SRGB;
+	sink_fmt->width = xhls->default_width;
+	sink_fmt->height = xhls->default_height;
 
-	return 0;
-}
+	*src_fmt = *sink_fmt;
+	src_fmt->code = xhls->vip_formats[XVIP_PAD_SOURCE]->code;
 
-static int xhls_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
 	return 0;
 }
 
@@ -302,7 +265,7 @@ static struct v4l2_subdev_video_ops xhls_video_ops = {
 static struct v4l2_subdev_pad_ops xhls_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
-	.get_fmt = xhls_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xhls_set_format,
 };
 
@@ -313,8 +276,7 @@ static struct v4l2_subdev_ops xhls_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops xhls_internal_ops = {
-	.open = xhls_open,
-	.close = xhls_close,
+	.init_state = xhls_init_state,
 };
 
 /* -----------------------------------------------------------------------------
@@ -328,28 +290,6 @@ static const struct media_entity_operations xhls_media_ops = {
 /* -----------------------------------------------------------------------------
  * Platform Device Driver
  */
-
-static void xhls_init_formats(struct xhls_device *xhls)
-{
-	struct v4l2_mbus_framefmt *format;
-
-	/* Initialize default and active formats */
-	format = &xhls->default_formats[XVIP_PAD_SINK];
-	format->code = xhls->vip_formats[XVIP_PAD_SINK]->code;
-	format->field = V4L2_FIELD_NONE;
-	format->colorspace = V4L2_COLORSPACE_SRGB;
-
-	format->width = xvip_read(&xhls->xvip, XHLS_REG_COLS);
-	format->height = xvip_read(&xhls->xvip, XHLS_REG_ROWS);
-
-	xhls->formats[XVIP_PAD_SINK] = *format;
-
-	format = &xhls->default_formats[XVIP_PAD_SOURCE];
-	*format = xhls->default_formats[XVIP_PAD_SINK];
-	format->code = xhls->vip_formats[XVIP_PAD_SOURCE]->code;
-
-	xhls->formats[XVIP_PAD_SOURCE] = *format;
-}
 
 static int xhls_parse_of(struct xhls_device *xhls)
 {
@@ -427,6 +367,9 @@ static int xhls_probe(struct platform_device *pdev)
 	/* Reset and initialize the core */
 	xvip_reset(&xhls->xvip);
 
+	xhls->default_width = xvip_read(&xhls->xvip, XHLS_REG_COLS);
+	xhls->default_height = xvip_read(&xhls->xvip, XHLS_REG_ROWS);
+
 	/* Initialize V4L2 subdevice and media entity */
 	subdev = &xhls->xvip.subdev;
 	v4l2_subdev_init(subdev, &xhls_ops);
@@ -436,8 +379,6 @@ static int xhls_probe(struct platform_device *pdev)
 	v4l2_set_subdevdata(subdev, xhls);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
-	xhls_init_formats(xhls);
-
 	xhls->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 	xhls->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 	subdev->entity.ops = &xhls_media_ops;
@@ -446,6 +387,10 @@ static int xhls_probe(struct platform_device *pdev)
 		goto error;
 
 	ret = xhls_create_controls(xhls);
+	if (ret < 0)
+		goto error;
+
+	ret = v4l2_subdev_init_finalize(subdev);
 	if (ret < 0)
 		goto error;
 
@@ -462,6 +407,7 @@ static int xhls_probe(struct platform_device *pdev)
 	return 0;
 
 error:
+	v4l2_subdev_cleanup(subdev);
 	v4l2_ctrl_handler_free(&xhls->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 	xvip_cleanup_resources(&xhls->xvip);
@@ -474,6 +420,7 @@ static void xhls_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xhls->xvip.subdev;
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	v4l2_ctrl_handler_free(&xhls->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 

@@ -40,6 +40,9 @@
 
 #define XHDMIRX_HPD_ENABLE_DELAY_MS		20
 
+#define XHDMIRX_DEFAULT_WIDTH	1920
+#define XHDMIRX_DEFAULT_HEIGHT	1080
+
 #define MAX_VID_PROP_TRIES	7
 #define MAX_FIELDS		2
 #define COREPIXPERCLK		4
@@ -1981,6 +1984,28 @@ static void xhdmirx1_get_mbusfmtcode(struct xhdmirx_state *xhdmi)
 }
 
 /**
+ * xhdmirx_update_state_format - Copy the detected format to the subdev state
+ *
+ * @xhdmi: pointer to driver state
+ *
+ * Copy the format detected by the hardware to the subdev active state. The
+ * callers run in sleepable context and hold no other lock. The state doesn't
+ * exist yet when called from probe, in which case there is nothing to update.
+ */
+static void xhdmirx_update_state_format(struct xhdmirx_state *xhdmi)
+{
+	struct v4l2_subdev_state *state;
+
+	state = v4l2_subdev_lock_and_get_active_state(&xhdmi->sd);
+	if (!state)
+		return;
+
+	*v4l2_subdev_state_get_format(state, 0) = xhdmi->mbus_fmt;
+
+	v4l2_subdev_unlock_state(state);
+}
+
+/**
  * rxstreamup - Update the dv timings and media bus format structs
  *
  * @xhdmi: pointer to driver state
@@ -2078,6 +2103,8 @@ static void rxstreamup(struct xhdmirx_state *xhdmi)
 	xhdmi->dv_timings.bt.flags = V4L2_DV_FL_IS_CE_VIDEO;
 
 	xhdmi->isstreamup = true;
+
+	xhdmirx_update_state_format(xhdmi);
 
 	v4l2_subdev_notify_event(&xhdmi->sd, &xhdmi_ev_fmt);
 
@@ -2242,6 +2269,7 @@ static void xhdmirx1_clear(struct xhdmirx_state *xhdmi)
 	xhdmi->stream.getvidproptries = 0;
 	memset(&xhdmi->dv_timings, 0, sizeof(xhdmi->dv_timings));
 	memset(&xhdmi->mbus_fmt, 0, sizeof(xhdmi->mbus_fmt));
+	xhdmirx_update_state_format(xhdmi);
 
 	xhdmi->stream.isfrl = false;
 	xhdmi->stream.frl.trainingstate = XFRLSTATE_LTS_L;
@@ -4057,79 +4085,27 @@ static int xhdmirx_query_dv_timings(struct v4l2_subdev *subdev, unsigned int pad
 	return 0;
 }
 
-static struct v4l2_mbus_framefmt *
-__xhdmirx_get_pad_format_ptr(struct xhdmirx_state *xhdmi,
-			     struct v4l2_subdev_state *sd_state,
-			     unsigned int pad, u32 which)
-{
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		dev_dbg(xhdmi->dev, "%s V4L2_SUBDEV_FORMAT_TRY\n", __func__);
-		return v4l2_subdev_state_get_format(sd_state, pad);
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		dev_dbg(xhdmi->dev, "%s V4L2_SUBDEV_FORMAT_ACTIVE\n", __func__);
-		return &xhdmi->mbus_fmt;
-	default:
-		return NULL;
-	}
-}
-
 /**
- * xhdmirx_set_format - Set the format to the pad
- *
- * @subdev: pointer to the v4l2 subdev struct
- * @sd_state: pointer to subdev state
- * @fmt: pointer to format structure
- *
- * This function will update the fmt structure passed to
- * the current incoming stream format.
- *
- * Returns: 0 on success else -EINVAL
- */
-static int xhdmirx_set_format(struct v4l2_subdev *subdev,
-			      struct v4l2_subdev_state *sd_state,
-			      struct v4l2_subdev_format *fmt)
-{
-	struct xhdmirx_state *xhdmi = to_xhdmirx_state(subdev);
-
-	if (fmt->pad > 0)
-		return -EINVAL;
-
-	fmt->format = xhdmi->mbus_fmt;
-	return 0;
-}
-
-/**
- * xhdmirx_get_format - Function to get pad format
+ * xhdmirx_init_state - Initialise the pad format to the default
  *
  * @subdev: pointer to v4l2 subdev struct
  * @sd_state: pointer to subdev state
- * @fmt: pointer to the subdev format structure
  *
- * The fmt structure is updated based on incoming stream format.
- *
- * Returns: 0 on success else -EINVAL
+ * Returns: 0 on success
  */
-static int xhdmirx_get_format(struct v4l2_subdev *subdev,
-			      struct v4l2_subdev_state *sd_state,
-			      struct v4l2_subdev_format *fmt)
+static int xhdmirx_init_state(struct v4l2_subdev *subdev,
+			      struct v4l2_subdev_state *sd_state)
 {
-	struct xhdmirx_state *xhdmi = to_xhdmirx_state(subdev);
-	struct v4l2_mbus_framefmt *gfmt;
+	struct v4l2_mbus_framefmt *format;
 
-	if (fmt->pad > 0)
-		return -EINVAL;
+	format = v4l2_subdev_state_get_format(sd_state, 0);
 
-	/* copy either try or currently-active (i.e. detected) format to caller */
-	gfmt = __xhdmirx_get_pad_format_ptr(xhdmi, sd_state, fmt->pad,
-					    fmt->which);
-	if (!gfmt)
-		return -EINVAL;
+	format->code = MEDIA_BUS_FMT_RBG888_1X24;
+	format->width = XHDMIRX_DEFAULT_WIDTH;
+	format->height = XHDMIRX_DEFAULT_HEIGHT;
+	format->field = V4L2_FIELD_NONE;
+	format->colorspace = V4L2_COLORSPACE_REC709;
 
-	dev_dbg(xhdmi->dev, "width %d height %d code %d\n",
-		gfmt->width, gfmt->height, gfmt->code);
-
-	fmt->format = *gfmt;
 	return 0;
 }
 
@@ -4172,8 +4148,13 @@ static const struct v4l2_subdev_pad_ops xpad_ops = {
 	.get_edid		= xhdmirx_get_edid,
 	.set_edid		= xhdmirx_set_edid,
 	.dv_timings_cap		= xhdmirx_dv_timings_cap,
-	.get_fmt		= xhdmirx_get_format,
-	.set_fmt		= xhdmirx_set_format,
+	.get_fmt		= v4l2_subdev_get_fmt,
+	/* The format is dictated by the incoming stream, it can't be set. */
+	.set_fmt		= v4l2_subdev_get_fmt,
+};
+
+static const struct v4l2_subdev_internal_ops xhdmirx_internal_ops = {
+	.init_state		= xhdmirx_init_state,
 };
 
 static const struct v4l2_subdev_ops xhdmirx_ops = {
@@ -4627,6 +4608,7 @@ static int xhdmirx_probe(struct platform_device *pdev)
 
 	sd = &xhdmi->sd;
 	v4l2_subdev_init(sd, &xhdmirx_ops);
+	sd->internal_ops = &xhdmirx_internal_ops;
 	sd->dev = xhdmi->dev;
 	strscpy(sd->name, dev_name(xhdmi->dev), sizeof(sd->name));
 	sd->flags = V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS;
@@ -4639,10 +4621,16 @@ static int xhdmirx_probe(struct platform_device *pdev)
 		goto phy_err;
 	}
 
+	ret = v4l2_subdev_init_finalize(sd);
+	if (ret < 0) {
+		dev_err(xhdmi->dev, "failed to init subdev state %d\n", ret);
+		goto media_err;
+	}
+
 	ret = v4l2_async_register_subdev(sd);
 	if (ret < 0) {
 		dev_err(xhdmi->dev, "failed to register v4l subdev %d\n", ret);
-		goto media_err;
+		goto subdev_err;
 	}
 
 	ret = xhdmirx_probe_load_edid(xhdmi);
@@ -4689,6 +4677,8 @@ hdcp_error:
 	xhdmirx_disable_allintr(xhdmi);
 v4lsd_reg_err:
 	v4l2_async_unregister_subdev(sd);
+subdev_err:
+	v4l2_subdev_cleanup(sd);
 media_err:
 	media_entity_cleanup(&sd->entity);
 phy_err:
@@ -4710,6 +4700,7 @@ static void xhdmirx_remove(struct platform_device *pdev)
 	int num_clks = ARRAY_SIZE(xhdmirx_clks);
 
 	v4l2_async_unregister_subdev(sd);
+	v4l2_subdev_cleanup(sd);
 	media_entity_cleanup(&sd->entity);
 	xhdmirx_phy_release(xhdmi);
 	cancel_delayed_work(&xhdmi->delayed_work_enable_hotplug);

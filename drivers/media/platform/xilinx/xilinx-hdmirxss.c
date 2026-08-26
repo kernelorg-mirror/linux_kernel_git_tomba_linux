@@ -4020,11 +4020,30 @@ static int xhdmirx_set_edid(struct v4l2_subdev *subdev, struct v4l2_edid *edid)
 	return ret;
 }
 
-static int xhdmirx_s_stream(struct v4l2_subdev *subdev, int enable)
+/*
+ * The HDMI Rx runs from probe on to detect the incoming stream, and there is
+ * nothing to configure when the pipeline starts. Enabling and disabling the
+ * stream is a no-op.
+ */
+static int xhdmirx_enable_streams(struct v4l2_subdev *subdev,
+				  struct v4l2_subdev_state *state, u32 pad,
+				  u64 streams_mask)
 {
 	struct xhdmirx_state *xhdmi = to_xhdmirx_state(subdev);
 
-	dev_dbg(xhdmi->dev, "s_stream : enable %d\n", enable);
+	dev_dbg(xhdmi->dev, "enable streams 0x%llx\n", streams_mask);
+
+	return 0;
+}
+
+static int xhdmirx_disable_streams(struct v4l2_subdev *subdev,
+				   struct v4l2_subdev_state *state, u32 pad,
+				   u64 streams_mask)
+{
+	struct xhdmirx_state *xhdmi = to_xhdmirx_state(subdev);
+
+	dev_dbg(xhdmi->dev, "disable streams 0x%llx\n", streams_mask);
+
 	return 0;
 }
 
@@ -4130,7 +4149,6 @@ static int xhdmirx_subscribe_event(struct v4l2_subdev *sd, struct v4l2_fh *fh,
 }
 
 static const struct v4l2_subdev_video_ops xvideo_ops = {
-	.s_stream		= xhdmirx_s_stream,
 	.g_input_status		= xhdmirx_g_input_status,
 };
 
@@ -4151,6 +4169,8 @@ static const struct v4l2_subdev_pad_ops xpad_ops = {
 	.get_fmt		= v4l2_subdev_get_fmt,
 	/* The format is dictated by the incoming stream, it can't be set. */
 	.set_fmt		= v4l2_subdev_get_fmt,
+	.enable_streams		= xhdmirx_enable_streams,
+	.disable_streams	= xhdmirx_disable_streams,
 };
 
 static const struct v4l2_subdev_internal_ops xhdmirx_internal_ops = {

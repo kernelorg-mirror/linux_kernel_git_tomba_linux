@@ -126,6 +126,33 @@ static int xsubsetconv_set_format(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int xsubsetconv_enable_streams(struct v4l2_subdev *sd,
+				      struct v4l2_subdev_state *state, u32 pad,
+				      u64 streams_mask)
+{
+	/* Nothing to program, only propagate the stream state upstream. */
+	return xvip_enable_remote_stream(sd, XVIP_PAD_SINK, BIT_ULL(0));
+}
+
+static int xsubsetconv_disable_streams(struct v4l2_subdev *sd,
+				       struct v4l2_subdev_state *state, u32 pad,
+				       u64 streams_mask)
+{
+	struct xsubsetconv_state *xsubsetconv = v4l2_get_subdevdata(sd);
+	int ret;
+
+	/*
+	 * Stopping is best effort: a failure would leave the streams marked as
+	 * enabled in the core while the source has stopped.
+	 */
+	ret = xvip_disable_remote_stream(sd, XVIP_PAD_SINK, BIT_ULL(0));
+	if (ret)
+		dev_err(xsubsetconv->dev, "failed to stop the source of pad %u: %d\n",
+			pad, ret);
+
+	return 0;
+}
+
 /* -----------------------------------------------------------------------------
  * Media Operations
  */
@@ -137,6 +164,8 @@ static const struct media_entity_operations xsubsetconv_media_ops = {
 static struct v4l2_subdev_pad_ops xsubsetconv_pad_ops = {
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xsubsetconv_set_format,
+	.enable_streams = xsubsetconv_enable_streams,
+	.disable_streams = xsubsetconv_disable_streams,
 };
 
 static struct v4l2_subdev_ops xsubsetconv_ops = {

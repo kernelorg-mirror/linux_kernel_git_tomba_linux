@@ -317,7 +317,6 @@ struct xilinx_isp_feature {
  * struct xisp_dev - Xilinx ISP pipeline device structure
  * @xvip: Xilinx Video IP device
  * @pads: media pads
- * @formats: V4L2 media bus formats
  * @ctrl_handler: V4L2 Control Handler
  * @bayer_fmt: IP or Hardware specific video format
  * @rst_gpio: GPIO reset line to bring ISP pipeline out of reset
@@ -376,7 +375,6 @@ struct xilinx_isp_feature {
 struct xisp_dev {
 	struct xvip_device xvip;
 	struct media_pad pads[XISP_NO_OF_PADS];
-	struct v4l2_mbus_framefmt formats[XISP_NO_OF_PADS];
 	struct v4l2_ctrl_handler ctrl_handler;
 	const struct xilinx_isp_feature *config;
 	const u32 *lut3d;
@@ -2007,28 +2005,6 @@ static struct v4l2_ctrl_config xisp_ctrls[] = {
 	},
 };
 
-static struct v4l2_mbus_framefmt
-*__xisp_get_pad_format(struct xisp_dev *xisp,
-			struct v4l2_subdev_state *sd_state,
-			unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *get_fmt;
-
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		get_fmt = v4l2_subdev_state_get_format(sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		get_fmt = &xisp->formats[pad];
-		break;
-	default:
-		get_fmt = NULL;
-		break;
-	}
-
-	return get_fmt;
-}
-
 /*
  * xisp_reset - Reset ISP pipeline IP
  */
@@ -2043,6 +2019,8 @@ static void xisp_reset(struct xisp_dev *xisp)
 static int xisp_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xisp_dev *xisp = to_xisp(subdev);
+	const struct v4l2_mbus_framefmt *format;
+	struct v4l2_subdev_state *state;
 
 	if (!enable) {
 		dev_dbg(xisp->xvip.dev, "%s : Off", __func__);
@@ -2050,9 +2028,12 @@ static int xisp_s_stream(struct v4l2_subdev *subdev, int enable)
 		return 0;
 	}
 
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
+	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
+
 	if (xisp->config->flags & XILINX_ISP_VERSION_1) {
-		xvip_write(&xisp->xvip, XISP_WIDTH_REG, xisp->formats[XVIP_PAD_SINK].width);
-		xvip_write(&xisp->xvip, XISP_HEIGHT_REG, xisp->formats[XVIP_PAD_SINK].height);
+		xvip_write(&xisp->xvip, XISP_WIDTH_REG, format->width);
+		xvip_write(&xisp->xvip, XISP_HEIGHT_REG, format->height);
 		xvip_write(&xisp->xvip, XISP_INPUT_BAYER_FORMAT_REG, xisp->bayer_fmt);
 		xvip_write(&xisp->xvip, XISP_RGAIN_REG, xisp->rgain);
 		xvip_write(&xisp->xvip, XISP_BGAIN_REG, xisp->bgain);
@@ -2062,8 +2043,8 @@ static int xisp_s_stream(struct v4l2_subdev *subdev, int enable)
 		xisp_set_lut_entries(xisp, xisp->green_lut, XISP_GAMMA_GREEN_REG);
 		xisp_set_lut_entries(xisp, xisp->blue_lut, XISP_GAMMA_BLUE_REG);
 	} else if (xisp->config->flags & XILINX_ISP_VERSION_2) {
-		xisp->width = xisp->formats[XVIP_PAD_SINK].width;
-		xisp->height = xisp->formats[XVIP_PAD_SINK].height;
+		xisp->width = format->width;
+		xisp->height = format->height;
 		xvip_write(&xisp->xvip, XISP_COMMON_CONFIG_REG, (xisp->height << 16) | xisp->width);
 
 		if (FIELD_GET(BIT(XISP_RGBIR_INDEX), xisp->module_en))
@@ -2100,8 +2081,11 @@ static int xisp_s_stream(struct v4l2_subdev *subdev, int enable)
 			    XGET_BIT(XISP_LUT3D_INDEX, xisp->module_bypass)))
 				xisp_set_lut3d_entries(xisp, XISP_LUT3D_CONFIG_BASE, xisp->lut3d);
 	} else {
+		v4l2_subdev_unlock_state(state);
 		return -EINVAL;
 	}
+
+	v4l2_subdev_unlock_state(state);
 
 	/* Start ISP pipeline IP */
 	xvip_write(&xisp->xvip, XISP_AP_CTRL_REG, XISP_STREAM_ON);
@@ -2113,18 +2097,30 @@ static const struct v4l2_subdev_video_ops xisp_video_ops = {
 	.s_stream = xisp_s_stream,
 };
 
-static int xisp_get_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_state *sd_state,
-			   struct v4l2_subdev_format *fmt)
+static int xisp_init_state(struct v4l2_subdev *subdev,
+			   struct v4l2_subdev_state *sd_state)
 {
-	struct xisp_dev *xisp = to_xisp(subdev);
-	struct v4l2_mbus_framefmt *get_fmt;
+	struct v4l2_mbus_framefmt *sink_fmt, *src_fmt;
 
-	get_fmt = __xisp_get_pad_format(xisp, sd_state, fmt->pad, fmt->which);
-	if (!get_fmt)
-		return -EINVAL;
+	sink_fmt = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SINK);
+	src_fmt = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SOURCE);
 
-	fmt->format = *get_fmt;
+	/*
+	 * Sink Pad can be any Bayer format.
+	 * Default Sink Pad format is RGGB.
+	 */
+	sink_fmt->field = V4L2_FIELD_NONE;
+	sink_fmt->colorspace = V4L2_COLORSPACE_SRGB;
+	sink_fmt->width = XISP_MIN_WIDTH;
+	sink_fmt->height = XISP_MIN_HEIGHT;
+	sink_fmt->code = MEDIA_BUS_FMT_SRGGB10_1X10;
+
+	/* Source Pad has a fixed media bus format of RGB */
+	src_fmt->field = V4L2_FIELD_NONE;
+	src_fmt->colorspace = V4L2_COLORSPACE_SRGB;
+	src_fmt->width = XISP_MIN_WIDTH;
+	src_fmt->height = XISP_MIN_HEIGHT;
+	src_fmt->code = MEDIA_BUS_FMT_RBG888_1X24;
 
 	return 0;
 }
@@ -2197,17 +2193,13 @@ static int xisp_set_format(struct v4l2_subdev *subdev,
 	struct v4l2_mbus_framefmt *__propagate;
 	u16 clamp_max_h, clamp_max_w;
 
-	__format = __xisp_get_pad_format(xisp, sd_state, fmt->pad, fmt->which);
-	if (!__format)
-		return -EINVAL;
+	__format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 
-	if (xisp->config->flags & XILINX_ISP_VERSION_1) {
-		/* Propagate to Source Pad */
-		__propagate = __xisp_get_pad_format(xisp, sd_state,
-						    XVIP_PAD_SOURCE, fmt->which);
-		if (!__propagate)
-			return -EINVAL;
-	}
+	/* Propagate to Source Pad */
+	if (xisp->config->flags & XILINX_ISP_VERSION_1)
+		__propagate = v4l2_subdev_state_get_format(sd_state,
+							   XVIP_PAD_SOURCE);
+
 	*__format = fmt->format;
 
 	if (xisp->config->flags & XILINX_ISP_VERSION_1) {
@@ -2285,8 +2277,12 @@ static int xisp_set_format(struct v4l2_subdev *subdev,
 	return 0;
 }
 
+static const struct v4l2_subdev_internal_ops xisp_internal_ops = {
+	.init_state = xisp_init_state,
+};
+
 static const struct v4l2_subdev_pad_ops xisp_pad_ops = {
-	.get_fmt = xisp_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xisp_set_format,
 };
 
@@ -2469,6 +2465,7 @@ static int xisp_probe(struct platform_device *pdev)
 	subdev = &xisp->xvip.subdev;
 	v4l2_subdev_init(subdev, &xisp_ops);
 	subdev->dev = &pdev->dev;
+	subdev->internal_ops = &xisp_internal_ops;
 	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	xisp->gamma_table = xgamma_curves;
@@ -2479,23 +2476,6 @@ static int xisp_probe(struct platform_device *pdev)
 		xisp->module_en = xvip_read(&xisp->xvip, XISP_FUNCS_AVAILABLE_REG);
 		xisp->module_bypass_en = xvip_read(&xisp->xvip, XISP_FUNCS_BYPASSABLE_REG);
 	}
-
-	/*
-	 * Sink Pad can be any Bayer format.
-	 * Default Sink Pad format is RGGB.
-	 */
-	xisp->formats[XVIP_PAD_SINK].field = V4L2_FIELD_NONE;
-	xisp->formats[XVIP_PAD_SINK].colorspace = V4L2_COLORSPACE_SRGB;
-	xisp->formats[XVIP_PAD_SINK].width = XISP_MIN_WIDTH;
-	xisp->formats[XVIP_PAD_SINK].height = XISP_MIN_HEIGHT;
-	xisp->formats[XVIP_PAD_SINK].code = MEDIA_BUS_FMT_SRGGB10_1X10;
-
-	/* Source Pad has a fixed media bus format of RGB */
-	xisp->formats[XVIP_PAD_SOURCE].field = V4L2_FIELD_NONE;
-	xisp->formats[XVIP_PAD_SOURCE].colorspace = V4L2_COLORSPACE_SRGB;
-	xisp->formats[XVIP_PAD_SOURCE].width = XISP_MIN_WIDTH;
-	xisp->formats[XVIP_PAD_SOURCE].height = XISP_MIN_HEIGHT;
-	xisp->formats[XVIP_PAD_SOURCE].code = MEDIA_BUS_FMT_RBG888_1X24;
 
 	xisp->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 	xisp->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
@@ -2666,16 +2646,22 @@ static int xisp_probe(struct platform_device *pdev)
 		goto  ctrl_error;
 	}
 
+	rval = v4l2_subdev_init_finalize(subdev);
+	if (rval < 0)
+		goto ctrl_error;
+
 	platform_set_drvdata(pdev, xisp);
 	rval = v4l2_async_register_subdev(subdev);
 	if (rval < 0) {
 		dev_err(&pdev->dev, "failed to register subdev");
-		goto ctrl_error;
+		goto subdev_error;
 	}
 
 	dev_dbg(&pdev->dev, "Xilinx Video ISP Pipeline Probe Successful");
 	return 0;
 
+subdev_error:
+	v4l2_subdev_cleanup(subdev);
 ctrl_error:
 	v4l2_ctrl_handler_free(&xisp->ctrl_handler);
 media_error:
@@ -2690,6 +2676,7 @@ static void xisp_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xisp->xvip.subdev;
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 	xvip_cleanup_resources(&xisp->xvip);
 }

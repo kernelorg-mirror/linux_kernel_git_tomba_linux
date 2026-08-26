@@ -126,6 +126,25 @@ static int xsubsetconv_set_format(struct v4l2_subdev *sd,
 	return 0;
 }
 
+static int xsubsetconv_enable_streams(struct v4l2_subdev *sd,
+				      struct v4l2_subdev_state *state, u32 pad,
+				      u64 streams_mask)
+{
+	/*
+	 * The converter has no register interface and nothing to program. Only
+	 * propagate the stream state to the subdevice connected to the sink
+	 * pad.
+	 */
+	return xvip_enable_remote_stream(sd, XVIP_PAD_SINK, BIT_ULL(0));
+}
+
+static int xsubsetconv_disable_streams(struct v4l2_subdev *sd,
+				       struct v4l2_subdev_state *state, u32 pad,
+				       u64 streams_mask)
+{
+	return xvip_disable_remote_stream(sd, XVIP_PAD_SINK, BIT_ULL(0));
+}
+
 /* -----------------------------------------------------------------------------
  * Media Operations
  */
@@ -137,6 +156,8 @@ static const struct media_entity_operations xsubsetconv_media_ops = {
 static struct v4l2_subdev_pad_ops xsubsetconv_pad_ops = {
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xsubsetconv_set_format,
+	.enable_streams = xsubsetconv_enable_streams,
+	.disable_streams = xsubsetconv_disable_streams,
 };
 
 static struct v4l2_subdev_ops xsubsetconv_ops = {

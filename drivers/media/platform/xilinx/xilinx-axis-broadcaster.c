@@ -27,14 +27,12 @@
  * @dev: Platform structure
  * @subdev: The v4l2 subdev structure
  * @pads: media pads
- * @formats: active V4L2 media bus formats on each pad
  * @npads: number of pads
  */
 struct xvbroadcaster_device {
 	struct device *dev;
 	struct v4l2_subdev subdev;
 	struct media_pad *pads;
-	struct v4l2_mbus_framefmt formats;
 	u32 npads;
 };
 
@@ -56,28 +54,23 @@ static int xvbr_s_stream(struct v4l2_subdev *subdev, int enable)
  * V4L2 Subdevice Pad Operations
  */
 
-static struct v4l2_mbus_framefmt *
-xvbr_get_pad_format(struct xvbroadcaster_device *xvbr,
-		    struct v4l2_subdev_state *sd_state,
-		    unsigned int pad, u32 which)
-{
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_state_get_format(sd_state, pad);
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		return &xvbr->formats;
-	default:
-		return NULL;
-	}
-}
-
-static int xvbr_get_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_state *sd_state,
-			   struct v4l2_subdev_format *fmt)
+static int xvbr_init_state(struct v4l2_subdev *subdev,
+			   struct v4l2_subdev_state *sd_state)
 {
 	struct xvbroadcaster_device *xvbr = to_xvbr(subdev);
+	unsigned int i;
 
-	fmt->format = *xvbr_get_pad_format(xvbr, sd_state, fmt->pad, fmt->which);
+	for (i = 0; i < xvbr->npads; ++i) {
+		struct v4l2_mbus_framefmt *format;
+
+		format = v4l2_subdev_state_get_format(sd_state, i);
+
+		format->code = MEDIA_BUS_FMT_RGB888_1X24;
+		format->field = V4L2_FIELD_NONE;
+		format->colorspace = V4L2_COLORSPACE_SRGB;
+		format->width = XVIP_MAX_WIDTH;
+		format->height = XVIP_MAX_HEIGHT;
+	}
 
 	return 0;
 }
@@ -88,8 +81,18 @@ static int xvbr_set_format(struct v4l2_subdev *subdev,
 {
 	struct xvbroadcaster_device *xvbr = to_xvbr(subdev);
 	struct v4l2_mbus_framefmt *format;
+	unsigned int i;
 
-	format = xvbr_get_pad_format(xvbr, sd_state, fmt->pad, fmt->which);
+	format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
+
+	/*
+	 * The source pads carry a copy of the sink stream, their format
+	 * follows the sink pad format and can't be set.
+	 */
+	if (fmt->pad != XVIP_PAD_SINK) {
+		fmt->format = *format;
+		return 0;
+	}
 
 	*format = fmt->format;
 
@@ -97,25 +100,9 @@ static int xvbr_set_format(struct v4l2_subdev *subdev,
 
 	fmt->format = *format;
 
-	return 0;
-}
+	for (i = XVIP_PAD_SINK + 1; i < xvbr->npads; ++i)
+		*v4l2_subdev_state_get_format(sd_state, i) = *format;
 
-static int xvbr_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	struct xvbroadcaster_device *xvbr = to_xvbr(subdev);
-	struct v4l2_mbus_framefmt *format;
-	unsigned int i;
-
-	for (i = 0; i < xvbr->npads; ++i) {
-		format = v4l2_subdev_state_get_format(fh->state, i);
-		*format = xvbr->formats;
-	}
-
-	return 0;
-}
-
-static int xvbr_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
 	return 0;
 }
 
@@ -126,7 +113,7 @@ static struct v4l2_subdev_video_ops xvbr_video_ops = {
 static struct v4l2_subdev_pad_ops xvbr_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
-	.get_fmt = xvbr_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xvbr_set_format,
 };
 
@@ -136,8 +123,7 @@ static struct v4l2_subdev_ops xvbr_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops xvbr_internal_ops = {
-	.open = xvbr_open,
-	.close = xvbr_close,
+	.init_state = xvbr_init_state,
 };
 
 /* -----------------------------------------------------------------------------
@@ -218,12 +204,6 @@ static int xvbr_probe(struct platform_device *pdev)
 	for (i = 1; i < xvbr->npads; ++i)
 		xvbr->pads[i].flags = MEDIA_PAD_FL_SOURCE;
 
-	xvbr->formats.code = MEDIA_BUS_FMT_RGB888_1X24;
-	xvbr->formats.field = V4L2_FIELD_NONE;
-	xvbr->formats.colorspace = V4L2_COLORSPACE_SRGB;
-	xvbr->formats.width = XVIP_MAX_WIDTH;
-	xvbr->formats.height = XVIP_MAX_HEIGHT;
-
 	subdev = &xvbr->subdev;
 	v4l2_subdev_init(subdev, &xvbr_ops);
 	subdev->dev = &pdev->dev;
@@ -237,18 +217,24 @@ static int xvbr_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto error;
 
+	ret = v4l2_subdev_init_finalize(subdev);
+	if (ret < 0)
+		goto error;
+
 	platform_set_drvdata(pdev, xvbr);
 
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to register subdev\n");
-		goto error;
+		goto error_subdev;
 	}
 
 	dev_info(xvbr->dev, "Xilinx AXI4-Stream Broadcaster found!\n");
 
 	return 0;
 
+error_subdev:
+	v4l2_subdev_cleanup(subdev);
 error:
 	media_entity_cleanup(&subdev->entity);
 
@@ -261,6 +247,7 @@ static void xvbr_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xvbr->subdev;
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 }
 

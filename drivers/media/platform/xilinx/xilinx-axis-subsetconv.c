@@ -17,7 +17,6 @@
 
 #include <linux/device.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/v4l2-subdev.h>
@@ -35,8 +34,6 @@
  * struct xsubsetconv_state - SW format converter device structure
  * @dev: Core structure for SW format converter
  * @subdev: The v4l2 subdev structure
- * @formats: Active V4L2 formats on each pad
- * @lock: mutex for serializing operations
  * @pads: media pads
  *
  * This structure contains the device driver related parameters
@@ -44,8 +41,6 @@
 struct xsubsetconv_state {
 	struct device *dev;
 	struct v4l2_subdev subdev;
-	struct v4l2_mbus_framefmt formats[2];
-	struct mutex lock; /* mutex lock for serializing operations */
 	struct media_pad pads[XSUBSETCONV_MEDIA_PADS];
 };
 
@@ -55,67 +50,31 @@ static const struct of_device_id xsubsetconv_of_id_table[] = {
 };
 MODULE_DEVICE_TABLE(of, xsubsetconv_of_id_table);
 
-static inline struct xsubsetconv_state *
-to_xsubsetconvstate(struct v4l2_subdev *subdev)
-{
-	return container_of(subdev, struct xsubsetconv_state, subdev);
-}
-
-static struct v4l2_mbus_framefmt *
-xsubsetconv_get_pad_format(struct xsubsetconv_state *xsubsetconv,
-			   struct v4l2_subdev_state *state,
-			   unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *format;
-
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_state_get_format(state, pad);
-		break;
-
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		format =  &xsubsetconv->formats[pad];
-		break;
-
-	default:
-		format = NULL;
-	}
-
-	return format;
-}
-
 /**
- * xsubsetconv_get_format - Get the pad format
+ * xsubsetconv_init_state - Initialise the default pad formats
  * @sd: pointer to v4l2 sub device structure
- * @state: pointer to sub device pad information structure
- * @fmt: pointer to pad level media bus format
+ * @state: pointer to the sub device state to initialise
  *
- * This function is used to get the pad format information.
- *
- * Return: -EINVAL or 0 on success
+ * Return: 0 on success
  */
-static int xsubsetconv_get_format(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_state *state,
-			      struct v4l2_subdev_format *fmt)
+static int xsubsetconv_init_state(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *state)
 {
-	struct xsubsetconv_state *xsubsetconv = to_xsubsetconvstate(sd);
-	struct v4l2_mbus_framefmt *get_fmt;
-	int ret = 0;
+	unsigned int pad;
 
-	mutex_lock(&xsubsetconv->lock);
-	get_fmt = xsubsetconv_get_pad_format(xsubsetconv, state,
-					     fmt->pad, fmt->which);
+	for (pad = 0; pad < XSUBSETCONV_MEDIA_PADS; pad++) {
+		struct v4l2_mbus_framefmt *format;
 
-	if (!get_fmt) {
-		ret = -EINVAL;
-		goto unlock_get_format;
+		format = v4l2_subdev_state_get_format(state, pad);
+
+		format->code = MEDIA_BUS_FMT_RGB888_1X24;
+		format->field = V4L2_FIELD_NONE;
+		format->colorspace = V4L2_COLORSPACE_SRGB;
+		format->width = XSUBSETCONV_DEFAULT_WIDTH;
+		format->height = XSUBSETCONV_DEFAULT_HEIGHT;
 	}
-	fmt->format = *get_fmt;
 
-unlock_get_format:
-	mutex_unlock(&xsubsetconv->lock);
-
-	return ret;
+	return 0;
 }
 
 /**
@@ -130,38 +89,22 @@ unlock_get_format:
  * to the hardware outputting sink pad format. It actually cannot
  * convert any format.
  *
- * Return: -EINVAL or 0 on success
+ * Return: 0 on success
  */
 static int xsubsetconv_set_format(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *state,
 				  struct v4l2_subdev_format *fmt)
 {
 	struct v4l2_mbus_framefmt *format;
-	struct xsubsetconv_state *xsubsetconv = to_xsubsetconvstate(sd);
 	unsigned int src_code;
-	int ret = 0;
 
-	mutex_lock(&xsubsetconv->lock);
-
-	format = xsubsetconv_get_pad_format(xsubsetconv, state,
-					    fmt->pad, fmt->which);
-	if (!format) {
-		dev_err(xsubsetconv->dev, "get pad format error\n");
-		ret = -EINVAL;
-		goto unlock_set_fmt;
-	}
+	format = v4l2_subdev_state_get_format(state, fmt->pad);
 
 	/* Restore the original pad format code */
 	if (fmt->pad == XVIP_PAD_SOURCE) {
 		struct v4l2_mbus_framefmt *sink_fmt;
 
-		sink_fmt = xsubsetconv_get_pad_format(xsubsetconv, state,
-						      XVIP_PAD_SINK, fmt->which);
-		if (!sink_fmt) {
-			dev_err(xsubsetconv->dev, "get sink pad format error\n");
-			ret = -EINVAL;
-			goto unlock_set_fmt;
-		}
+		sink_fmt = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
 		/*
 		 * TODO: Need to add a check to compare sink format and possible
 		 *		 src format supported by subset converter
@@ -172,13 +115,7 @@ static int xsubsetconv_set_format(struct v4l2_subdev *sd,
 	} else {
 		struct v4l2_mbus_framefmt *src_fmt;
 
-		src_fmt = xsubsetconv_get_pad_format(xsubsetconv, state,
-						     XVIP_PAD_SOURCE, fmt->which);
-		if (!src_fmt) {
-			dev_err(xsubsetconv->dev, "get source pad format error\n");
-			ret = -EINVAL;
-			goto unlock_set_fmt;
-		}
+		src_fmt = v4l2_subdev_state_get_format(state, XVIP_PAD_SOURCE);
 
 		*format = fmt->format;
 		src_code = src_fmt->code;
@@ -186,10 +123,7 @@ static int xsubsetconv_set_format(struct v4l2_subdev *sd,
 		src_fmt->code = src_code;
 	}
 
-unlock_set_fmt:
-	mutex_unlock(&xsubsetconv->lock);
-
-	return ret;
+	return 0;
 }
 
 /* -----------------------------------------------------------------------------
@@ -201,12 +135,16 @@ static const struct media_entity_operations xsubsetconv_media_ops = {
 };
 
 static struct v4l2_subdev_pad_ops xsubsetconv_pad_ops = {
-	.get_fmt = xsubsetconv_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xsubsetconv_set_format,
 };
 
 static struct v4l2_subdev_ops xsubsetconv_ops = {
 	.pad = &xsubsetconv_pad_ops
+};
+
+static const struct v4l2_subdev_internal_ops xsubsetconv_internal_ops = {
+	.init_state = xsubsetconv_init_state,
 };
 
 /* -----------------------------------------------------------------------------
@@ -268,22 +206,9 @@ static int xsubsetconv_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	mutex_init(&xsubsetconv->lock);
-
 	/* Initialize V4L2 subdevice and media entity */
 	xsubsetconv->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 	xsubsetconv->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
-
-	/* Initialize the sink format */
-	memset(&xsubsetconv->formats[XVIP_PAD_SINK], 0,
-	       sizeof(xsubsetconv->formats[0]));
-	xsubsetconv->formats[XVIP_PAD_SINK].code = MEDIA_BUS_FMT_RGB888_1X24;
-	xsubsetconv->formats[XVIP_PAD_SINK].field = V4L2_FIELD_NONE;
-	xsubsetconv->formats[XVIP_PAD_SINK].colorspace = V4L2_COLORSPACE_SRGB;
-	xsubsetconv->formats[XVIP_PAD_SINK].width = XSUBSETCONV_DEFAULT_WIDTH;
-	xsubsetconv->formats[XVIP_PAD_SINK].height = XSUBSETCONV_DEFAULT_HEIGHT;
-
-	xsubsetconv->formats[XVIP_PAD_SOURCE] = xsubsetconv->formats[XVIP_PAD_SINK];
 
 	/* Initialize V4L2 subdevice and media entity */
 	subdev = &xsubsetconv->subdev;
@@ -291,6 +216,7 @@ static int xsubsetconv_probe(struct platform_device *pdev)
 	v4l2_subdev_init(subdev, &xsubsetconv_ops);
 
 	subdev->dev = &pdev->dev;
+	subdev->internal_ops = &xsubsetconv_internal_ops;
 	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
@@ -303,25 +229,29 @@ static int xsubsetconv_probe(struct platform_device *pdev)
 				     xsubsetconv->pads);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "media pad init failed = %d\n", ret);
-		mutex_destroy(&xsubsetconv->lock);
 		return ret;
 	}
+
+	ret = v4l2_subdev_init_finalize(subdev);
+	if (ret < 0)
+		goto error_media;
 
 	platform_set_drvdata(pdev, xsubsetconv);
 
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to register subdev\n");
-		goto error;
+		goto error_subdev;
 	}
 
 	dev_info(&pdev->dev, "Xilinx AXI4-Stream Subset Converter found!\n");
 
 	return 0;
 
-error:
+error_subdev:
+	v4l2_subdev_cleanup(subdev);
+error_media:
 	media_entity_cleanup(&subdev->entity);
-	mutex_destroy(&xsubsetconv->lock);
 
 	return ret;
 }
@@ -332,8 +262,8 @@ static void xsubsetconv_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xsubsetconv->subdev;
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
-	mutex_destroy(&xsubsetconv->lock);
 }
 
 static struct platform_driver xsubsetconv_driver = {

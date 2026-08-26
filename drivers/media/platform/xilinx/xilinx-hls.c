@@ -168,30 +168,43 @@ static long xhls_ioctl(struct v4l2_subdev *subdev, unsigned int cmd, void *arg)
 }
 
 /* -----------------------------------------------------------------------------
- * V4L2 Subdevice Video Operations
+ * Streaming
  */
 
-static int xhls_s_stream(struct v4l2_subdev *subdev, int enable)
+static int xhls_enable_streams(struct v4l2_subdev *subdev,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
 {
 	struct xhls_device *xhls = to_hls(subdev);
 	const struct v4l2_mbus_framefmt *format;
-	struct v4l2_subdev_state *state;
+	int ret;
 
-	if (!enable) {
-		xvip_write(&xhls->xvip, XVIP_CTRL_CONTROL, 0);
-		return 0;
-	}
-
-	state = v4l2_subdev_lock_and_get_active_state(subdev);
 	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
 
 	xvip_write(&xhls->xvip, XHLS_REG_COLS, format->width);
 	xvip_write(&xhls->xvip, XHLS_REG_ROWS, format->height);
 
-	v4l2_subdev_unlock_state(state);
-
 	xvip_write(&xhls->xvip, XVIP_CTRL_CONTROL,
 		   XHLS_REG_CTRL_AUTO_RESTART | XVIP_CTRL_CONTROL_SW_ENABLE);
+
+	ret = xvip_enable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+	if (ret) {
+		xvip_write(&xhls->xvip, XVIP_CTRL_CONTROL, 0);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int xhls_disable_streams(struct v4l2_subdev *subdev,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xhls_device *xhls = to_hls(subdev);
+
+	xvip_disable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+
+	xvip_write(&xhls->xvip, XVIP_CTRL_CONTROL, 0);
 
 	return 0;
 }
@@ -254,20 +267,17 @@ static struct v4l2_subdev_core_ops xhls_core_ops = {
 	.ioctl = xhls_ioctl,
 };
 
-static struct v4l2_subdev_video_ops xhls_video_ops = {
-	.s_stream = xhls_s_stream,
-};
-
 static struct v4l2_subdev_pad_ops xhls_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xhls_set_format,
+	.enable_streams = xhls_enable_streams,
+	.disable_streams = xhls_disable_streams,
 };
 
 static struct v4l2_subdev_ops xhls_ops = {
 	.core   = &xhls_core_ops,
-	.video  = &xhls_video_ops,
 	.pad    = &xhls_pad_ops,
 };
 

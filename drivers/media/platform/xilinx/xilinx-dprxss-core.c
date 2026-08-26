@@ -57,6 +57,8 @@
 #define INFO_PCKT_TYPE_DRM		0x87
 #define XDPRX_MAX_STREAM_COUNT		4
 #define XDPRXSS_MST_RETRY_COUNT		10
+#define XDPRXSS_DEFAULT_WIDTH		1920
+#define XDPRXSS_DEFAULT_HEIGHT		1080
 
 #define xdprxss_generate_hpd_intr(state, duration) \
 		xdprxss_write(state, XDPRX_HPD_INTR_REG, \
@@ -199,7 +201,7 @@ struct vidphy_cfg {
  * @lane_set_work: lane set worker
  * @link_qual_work: link qual worker
  * @lock: Lock is used for width, height, framerate variables
- * @format: Active V4L2 format on each pad
+ * @format: Format last detected from the hardware for each stream
  * @frame_interval: Captures the frame rate
  * @max_linkrate: Maximum supported link rate
  * @max_lanecount: Maximux supported lane count
@@ -1747,28 +1749,6 @@ static int xdprxss_g_input_status(struct v4l2_subdev *sd, u32 *status)
 	return 0;
 }
 
-static struct v4l2_mbus_framefmt *
-__xdprxss_get_pad_format(struct xdprxss_state *xdprxss,
-			 struct v4l2_subdev_state *sd_state,
-			 unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *format;
-
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_state_get_format(sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		format = &xdprxss->format[pad];
-		break;
-	default:
-		format = NULL;
-		break;
-	}
-
-	return format;
-}
-
 /**
  * xdprxss_init_state - Initialize the pad format config to default
  * @sd: Pointer to V4L2 Sub device structure
@@ -1784,13 +1764,27 @@ static int xdprxss_init_state(struct v4l2_subdev *sd,
 {
 	struct xdprxss_state *xdprxss = to_xdprxssstate(sd);
 	struct v4l2_mbus_framefmt *format;
+	u32 code;
 	int i;
+
+	/*
+	 * The default format is only reported until a stream has been
+	 * detected. Use the first media bus code supported for the bits per
+	 * component, as .enum_mbus_code() does.
+	 */
+	code = xdprxss_supported_mbus_fmts[xdprxss->bpc == 10 ? 3 : 0];
 
 	for (i = 0; i < xdprxss->num_mst_streams; i++) {
 		format = v4l2_subdev_state_get_format(sd_state, i);
 
-		if (!xdprxss->valid_stream[i])
-			*format = xdprxss->format[i];
+		format->code = code;
+		format->width = XDPRXSS_DEFAULT_WIDTH;
+		format->height = XDPRXSS_DEFAULT_HEIGHT;
+		format->field = V4L2_FIELD_NONE;
+		format->colorspace = V4L2_COLORSPACE_REC709;
+		format->xfer_func = V4L2_XFER_FUNC_DEFAULT;
+		format->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
+		format->quantization = V4L2_QUANTIZATION_DEFAULT;
 	}
 
 	return 0;
@@ -1849,10 +1843,16 @@ static int xdprxss_getset_format(struct v4l2_subdev *sd,
 		fmt->format.width, fmt->format.height,
 		fmt->format.code, fmt->format.field,
 		fmt->format.colorspace);
-	format = __xdprxss_get_pad_format(xdprxss, sd_state,
-					  fmt->pad, fmt->which);
+	format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 	if (!format)
 		return -EINVAL;
+
+	/*
+	 * The detection runs in interrupt context as well, where the state
+	 * can't be locked, so it stores its result in xdprxss->format[].
+	 * Publish it in the state, which is locked by the caller.
+	 */
+	*format = xdprxss->format[fmt->pad];
 
 	fmt->format = *format;
 
@@ -3289,6 +3289,10 @@ static int xdprxss_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto error;
 
+	ret = v4l2_subdev_init_finalize(subdev);
+	if (ret < 0)
+		goto error;
+
 	ret = v4l2_ctrl_handler_init(&xdprxss->ctrl_handler,
 				     ARRAY_SIZE(xdprxss_ctrls));
 	if (ret < 0) {
@@ -3403,6 +3407,7 @@ static int xdprxss_probe(struct platform_device *pdev)
 error:
 	if (xdprxss->mst_enable)
 		xdprxss_deinit_mst(xdprxss->mst);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 clk_err:
 	clk_disable_unprepare(xdprxss->rx_vid_clk);
@@ -3441,6 +3446,7 @@ static void xdprxss_remove(struct platform_device *pdev)
 	if (xdprxss->mst_enable)
 		xdprxss_deinit_mst(xdprxss->mst);
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 	clk_disable_unprepare(xdprxss->rx_vid_clk);
 	clk_disable_unprepare(xdprxss->rx_lnk_clk);

@@ -1607,11 +1607,22 @@ xv_hscaler_set_phases(struct xscaler_device *xscaler)
 	}
 }
 
-static int xscaler_s_stream(struct v4l2_subdev *subdev, int enable)
+static void xscaler_stop_stream(struct xscaler_device *xscaler)
+{
+	/* Reset the Global IP Reset through PS GPIO */
+	gpiod_set_value_cansleep(xscaler->rst_gpio, XSCALER_RESET_ASSERT);
+	gpiod_set_value_cansleep(xscaler->rst_gpio, XSCALER_RESET_DEASSERT);
+	xscaler_reset(xscaler);
+	memset(xscaler->H_phases, 0, sizeof(xscaler->H_phases));
+	memset(xscaler->H_phases_h, 0, sizeof(xscaler->H_phases_h));
+}
+
+static int xscaler_enable_streams(struct v4l2_subdev *subdev,
+				  struct v4l2_subdev_state *state, u32 pad,
+				  u64 streams_mask)
 {
 	struct xscaler_device *xscaler = to_scaler(subdev);
 	const struct v4l2_mbus_framefmt *format;
-	struct v4l2_subdev_state *state;
 	u32 width_in, width_out;
 	u32 height_in, height_out;
 	u32 code_in, code_out;
@@ -1619,22 +1630,7 @@ static int xscaler_s_stream(struct v4l2_subdev *subdev, int enable)
 	u32 line_rate;
 	int ret;
 
-	if (!enable) {
-		dev_dbg(xscaler->xvip.dev, "%s: Stream Off", __func__);
-		/* Reset the Global IP Reset through PS GPIO */
-		gpiod_set_value_cansleep(xscaler->rst_gpio,
-					 XSCALER_RESET_ASSERT);
-		gpiod_set_value_cansleep(xscaler->rst_gpio,
-					 XSCALER_RESET_DEASSERT);
-		xscaler_reset(xscaler);
-		memset(xscaler->H_phases, 0, sizeof(xscaler->H_phases));
-		memset(xscaler->H_phases_h, 0, sizeof(xscaler->H_phases_h));
-		return 0;
-	}
-
 	dev_dbg(xscaler->xvip.dev, "%s: Stream On", __func__);
-
-	state = v4l2_subdev_lock_and_get_active_state(subdev);
 
 	/* Extract Sink Pad Information */
 	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
@@ -1647,8 +1643,6 @@ static int xscaler_s_stream(struct v4l2_subdev *subdev, int enable)
 	width_out = format->width;
 	height_out = format->height;
 	code_out = format->code;
-
-	v4l2_subdev_unlock_state(state);
 
 	/*
 	 * V Scaler is before H Scaler
@@ -1707,6 +1701,28 @@ static int xscaler_s_stream(struct v4l2_subdev *subdev, int enable)
 		   XV_VSCALER_CTRL_ADDR_AP_CTRL, XSCALER_STREAM_ON);
 	xv_procss_enable_block(&xscaler->xvip, XGPIO_CH_RESET_SEL,
 			       XGPIO_RESET_MASK_VIDEO_IN);
+
+	ret = xvip_enable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+	if (ret) {
+		xscaler_stop_stream(xscaler);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int xscaler_disable_streams(struct v4l2_subdev *subdev,
+				   struct v4l2_subdev_state *state, u32 pad,
+				   u64 streams_mask)
+{
+	struct xscaler_device *xscaler = to_scaler(subdev);
+
+	dev_dbg(xscaler->xvip.dev, "%s: Stream Off", __func__);
+
+	xvip_disable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+
+	xscaler_stop_stream(xscaler);
+
 	return 0;
 }
 
@@ -1780,19 +1796,16 @@ static int xscaler_set_format(struct v4l2_subdev *subdev,
  * V4L2 Subdevice Operations
  */
 
-static const struct v4l2_subdev_video_ops xscaler_video_ops = {
-	.s_stream = xscaler_s_stream,
-};
-
 static const struct v4l2_subdev_pad_ops xscaler_pad_ops = {
 	.enum_mbus_code		= xvip_enum_mbus_code,
 	.enum_frame_size	= xscaler_enum_frame_size,
 	.get_fmt		= v4l2_subdev_get_fmt,
 	.set_fmt		= xscaler_set_format,
+	.enable_streams		= xscaler_enable_streams,
+	.disable_streams	= xscaler_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xscaler_ops = {
-	.video  = &xscaler_video_ops,
 	.pad    = &xscaler_pad_ops,
 };
 

@@ -2021,52 +2021,69 @@ static int xsdirxss_get_frame_interval(struct v4l2_subdev *sd,
 }
 
 /**
- * xsdirxss_s_stream - It is used to start/stop the streaming.
+ * xsdirxss_enable_streams - Start the streaming
  * @sd: V4L2 Sub device
- * @enable: Flag (True / False)
+ * @sd_state: V4L2 subdev state, locked by the caller
+ * @pad: Source pad
+ * @streams_mask: Streams to start
  *
- * This function controls the start or stop of streaming for the
- * Xilinx SDI Rx Subsystem.
+ * This function enables the video bridges of the Xilinx SDI Rx Subsystem.
  *
  * Return: 0 on success, errors otherwise
  */
-static int xsdirxss_s_stream(struct v4l2_subdev *sd, int enable)
+static int xsdirxss_enable_streams(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_state *sd_state,
+				   u32 pad, u64 streams_mask)
 {
 	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
 	struct xsdirxss_core *core = &xsdirxss->core;
-	struct v4l2_subdev_state *state;
 
-	if (enable) {
-		if (!xsdirxss->vidlocked) {
-			dev_dbg(core->dev, "Video is not locked\n");
-			return -EINVAL;
-		}
-		if (xsdirxss->streaming) {
-			dev_dbg(core->dev, "Already streaming\n");
-			return -EINVAL;
-		}
-
-		state = v4l2_subdev_lock_and_get_active_state(sd);
-		xsdirx_streamflow_control(core, true);
-		v4l2_subdev_unlock_state(state);
-
-		xsdirxss->streaming = true;
-		xsdirxss->s_stream = true;
-		dev_dbg(core->dev, "Streaming started\n");
-	} else {
-		xsdirxss->s_stream = false;
-		if (!xsdirxss->streaming) {
-			dev_dbg(core->dev, "Stopped streaming already\n");
-			return 0;
-		}
-
-		state = v4l2_subdev_lock_and_get_active_state(sd);
-		xsdirx_streamflow_control(core, false);
-		v4l2_subdev_unlock_state(state);
-
-		xsdirxss->streaming = false;
-		dev_dbg(core->dev, "Streaming stopped\n");
+	if (!xsdirxss->vidlocked) {
+		dev_dbg(core->dev, "Video is not locked\n");
+		return -EINVAL;
 	}
+	if (xsdirxss->streaming) {
+		dev_dbg(core->dev, "Already streaming\n");
+		return -EINVAL;
+	}
+
+	xsdirx_streamflow_control(core, true);
+
+	xsdirxss->streaming = true;
+	xsdirxss->s_stream = true;
+	dev_dbg(core->dev, "Streaming started\n");
+
+	return 0;
+}
+
+/**
+ * xsdirxss_disable_streams - Stop the streaming
+ * @sd: V4L2 Sub device
+ * @sd_state: V4L2 subdev state, locked by the caller
+ * @pad: Source pad
+ * @streams_mask: Streams to stop
+ *
+ * This function disables the video bridges of the Xilinx SDI Rx Subsystem.
+ *
+ * Return: 0 on success, errors otherwise
+ */
+static int xsdirxss_disable_streams(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *sd_state,
+				    u32 pad, u64 streams_mask)
+{
+	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
+	struct xsdirxss_core *core = &xsdirxss->core;
+
+	xsdirxss->s_stream = false;
+	if (!xsdirxss->streaming) {
+		dev_dbg(core->dev, "Stopped streaming already\n");
+		return 0;
+	}
+
+	xsdirx_streamflow_control(core, false);
+
+	xsdirxss->streaming = false;
+	dev_dbg(core->dev, "Streaming stopped\n");
 
 	return 0;
 }
@@ -2412,7 +2429,6 @@ static const struct v4l2_subdev_core_ops xsdirxss_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops xsdirxss_video_ops = {
-	.s_stream = xsdirxss_s_stream,
 	.g_input_status = xsdirxss_g_input_status,
 };
 
@@ -2423,6 +2439,8 @@ static const struct v4l2_subdev_pad_ops xsdirxss_pad_ops = {
 	.enum_mbus_code = xsdirxss_enum_mbus_code,
 	.enum_dv_timings = xsdirxss_enum_dv_timings,
 	.query_dv_timings = xsdirxss_query_dv_timings,
+	.enable_streams = xsdirxss_enable_streams,
+	.disable_streams = xsdirxss_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xsdirxss_ops = {

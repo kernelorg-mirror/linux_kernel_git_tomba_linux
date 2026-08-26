@@ -397,30 +397,27 @@ static void xpreprocess_reset(struct xpreprocess_dev *xpreprocess)
 }
 
 /**
- * xpreprocess_s_stream - Start/stop streaming
- * @subdev:  V4L2 subdevice
- * @enable:  1 to start, 0 to stop
+ * xpreprocess_enable_streams - Start streaming
+ * @subdev:       V4L2 subdevice
+ * @state:        Subdev state, locked by the caller
+ * @pad:          Source pad to start
+ * @streams_mask: Mask of the streams to start
  *
- * On stop, asserts GPIO reset. On start, programs frame sizes and data type,
- * replays V4L2 controls to parameter registers (reset clears them), then
- * starts the core.
+ * Programs frame sizes and data type, replays V4L2 controls to parameter
+ * registers (reset clears them), starts the core and then starts the
+ * upstream part of the pipeline.
  *
- * Return: Always 0.
+ * Return: 0 on success, or a negative error code if the upstream subdevice
+ *	   can't be started.
  */
-static int xpreprocess_s_stream(struct v4l2_subdev *subdev, int enable)
+static int xpreprocess_enable_streams(struct v4l2_subdev *subdev,
+				      struct v4l2_subdev_state *state, u32 pad,
+				      u64 streams_mask)
 {
 	struct xpreprocess_dev *xpreprocess = to_xpreprocess(subdev);
 	const struct v4l2_mbus_framefmt *format;
-	struct v4l2_subdev_state *state;
 	unsigned int i;
-
-	if (!enable) {
-		dev_dbg(xpreprocess->xvip.dev, "%s : Off\n", __func__);
-		xpreprocess_reset(xpreprocess);
-		return 0;
-	}
-
-	state = v4l2_subdev_lock_and_get_active_state(subdev);
+	int ret;
 
 	/* Cache input / output sizes from pad formats */
 	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
@@ -430,8 +427,6 @@ static int xpreprocess_s_stream(struct v4l2_subdev *subdev, int enable)
 	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SOURCE);
 	xpreprocess->out_width = format->width;
 	xpreprocess->out_height = format->height;
-
-	v4l2_subdev_unlock_state(state);
 
 	/* Program input image size */
 	xpreprocess_write(xpreprocess, XPREPROCESS_IN_IMG_WIDTH_REG,
@@ -456,13 +451,41 @@ static int xpreprocess_s_stream(struct v4l2_subdev *subdev, int enable)
 	xpreprocess_write(xpreprocess, XPREPROCESS_AP_CTRL,
 			  XPREPROCESS_STREAM_ON);
 
+	ret = xvip_enable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+	if (ret) {
+		xpreprocess_reset(xpreprocess);
+		return ret;
+	}
+
 	return 0;
 }
 
-/* V4L2 video operations */
-static const struct v4l2_subdev_video_ops xpreprocess_video_ops = {
-	.s_stream = xpreprocess_s_stream,
-};
+/**
+ * xpreprocess_disable_streams - Stop streaming
+ * @subdev:       V4L2 subdevice
+ * @state:        Subdev state, locked by the caller
+ * @pad:          Source pad to stop
+ * @streams_mask: Mask of the streams to stop
+ *
+ * Stops the upstream part of the pipeline and then the core, by asserting
+ * the GPIO reset.
+ *
+ * Return: Always 0.
+ */
+static int xpreprocess_disable_streams(struct v4l2_subdev *subdev,
+				       struct v4l2_subdev_state *state, u32 pad,
+				       u64 streams_mask)
+{
+	struct xpreprocess_dev *xpreprocess = to_xpreprocess(subdev);
+
+	dev_dbg(xpreprocess->xvip.dev, "%s : Off\n", __func__);
+
+	xvip_disable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+
+	xpreprocess_reset(xpreprocess);
+
+	return 0;
+}
 
 /**
  * xpreprocess_enum_mbus_code - Enumerate mbus codes per pad
@@ -646,11 +669,12 @@ static const struct v4l2_subdev_pad_ops xpreprocess_pad_ops = {
 	.enum_mbus_code = xpreprocess_enum_mbus_code,
 	.set_fmt = xpreprocess_set_format,
 	.get_fmt = v4l2_subdev_get_fmt,
+	.enable_streams = xpreprocess_enable_streams,
+	.disable_streams = xpreprocess_disable_streams,
 };
 
 /* Aggregate subdev operations */
 static const struct v4l2_subdev_ops xpreprocess_ops = {
-	.video = &xpreprocess_video_ops,
 	.pad = &xpreprocess_pad_ops,
 };
 

@@ -205,14 +205,16 @@ static int xg_set_format(struct v4l2_subdev *subdev,
 	if (!__format)
 		return -EINVAL;
 
+	if (fmt->pad == XVIP_PAD_SOURCE) {
+		fmt->format = *__format;
+		return 0;
+	}
+
 	*__format = fmt->format;
 
-	if (fmt->pad == XVIP_PAD_SINK) {
-		if (__format->code != MEDIA_BUS_FMT_RBG888_1X24) {
-			dev_dbg(xg->xvip.dev,
-				"Unsupported sink media bus code format");
-			__format->code = MEDIA_BUS_FMT_RBG888_1X24;
-		}
+	if (__format->code != MEDIA_BUS_FMT_RBG888_1X24) {
+		dev_dbg(xg->xvip.dev, "Unsupported sink media bus code format");
+		__format->code = MEDIA_BUS_FMT_RBG888_1X24;
 	}
 	__format->width = clamp_t(unsigned int, fmt->format.width,
 				  XGAMMA_MIN_WIDTH, xg->max_width);

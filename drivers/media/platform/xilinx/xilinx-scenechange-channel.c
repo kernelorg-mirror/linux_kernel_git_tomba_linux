@@ -172,7 +172,7 @@ static void xscd_chan_configure_params(struct xscd_chan *chan)
 	struct v4l2_subdev_state *state;
 	u32 vid_fmt, stride;
 
-	state = v4l2_subdev_lock_and_get_active_state(&chan->subdev);
+	state = v4l2_subdev_get_locked_active_state(&chan->subdev);
 	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
 
 	xscd_write(chan->iomem, XSCD_WIDTH_OFFSET, format->width);
@@ -194,8 +194,6 @@ static void xscd_chan_configure_params(struct xscd_chan *chan)
 	 * SAD value, cache the frame size for it.
 	 */
 	chan->frame_size = format->width * format->height;
-
-	v4l2_subdev_unlock_state(state);
 
 	/*
 	 * This is the vertical subsampling factor of the input image. Instead
@@ -227,23 +225,97 @@ static int xscd_s_ctrl(struct v4l2_ctrl *ctrl)
 	return ret;
 }
 
-static int xscd_s_stream(struct v4l2_subdev *subdev, int enable)
+static void xscd_stop_stream(struct xscd_chan *chan)
 {
-	struct xscd_chan *chan = to_xscd_chan(subdev);
 	struct xscd_device *xscd = chan->xscd;
 
-	if (enable)
-		xscd_chan_configure_params(chan);
-
-	xscd_dma_enable_channel(&chan->dmachan, enable);
+	xscd_dma_enable_channel(&chan->dmachan, false);
 
 	/*
 	 * Resolution change doesn't work in stream based mode unless
 	 * the device is reset.
 	 */
-	if (!enable && !xscd->memory_based) {
+	if (!xscd->memory_based) {
 		gpiod_set_value_cansleep(xscd->rst_gpio, XSCD_RESET_ASSERT);
 		gpiod_set_value_cansleep(xscd->rst_gpio, XSCD_RESET_DEASSERT);
+	}
+}
+
+static int xscd_enable_streams(struct v4l2_subdev *subdev,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
+{
+	struct xscd_chan *chan = to_xscd_chan(subdev);
+	int ret;
+
+	xscd_chan_configure_params(chan);
+	xscd_dma_enable_channel(&chan->dmachan, true);
+
+	/*
+	 * The SCD can't drop data, start the upstream part of the pipeline
+	 * only once the channel is ready to consume it.
+	 */
+	ret = xvip_enable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+	if (ret) {
+		xscd_stop_stream(chan);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int xscd_disable_streams(struct v4l2_subdev *subdev,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xscd_chan *chan = to_xscd_chan(subdev);
+
+	xvip_disable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+
+	xscd_stop_stream(chan);
+
+	return 0;
+}
+
+/*
+ * v4l2_subdev_enable_streams() can only address a source pad, so a channel that
+ * ends a branch of the pipeline is started with .s_stream() instead. That is the
+ * case of a memory-based channel, which has no source pad at all and reads its
+ * frames from memory through the SCD DMA engine, and of a stream-based channel
+ * whose source pad is left unlinked because only the scene change events are of
+ * interest.
+ *
+ * Propagate the stream state to the subdev connected to the sink pad, the same
+ * way .enable_streams() does. The helpers do nothing for a memory-based channel,
+ * whose sink pad is linked to the output video node that queues the buffers
+ * rather than to a subdev.
+ */
+static int xscd_s_stream(struct v4l2_subdev *subdev, int enable)
+{
+	struct xscd_chan *chan = to_xscd_chan(subdev);
+	struct v4l2_subdev_state *state;
+	int ret;
+
+	if (!enable) {
+		xvip_disable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+		xscd_stop_stream(chan);
+		return 0;
+	}
+
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
+	xscd_chan_configure_params(chan);
+	v4l2_subdev_unlock_state(state);
+
+	xscd_dma_enable_channel(&chan->dmachan, true);
+
+	/*
+	 * The SCD can't drop data, start the upstream part of the pipeline only
+	 * once the channel is ready to consume it.
+	 */
+	ret = xvip_enable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+	if (ret) {
+		xscd_stop_stream(chan);
+		return ret;
 	}
 
 	return 0;
@@ -307,21 +379,43 @@ static const struct v4l2_subdev_core_ops xscd_core_ops = {
 	.unsubscribe_event = xscd_unsubscribe_event
 };
 
-static struct v4l2_subdev_video_ops xscd_video_ops = {
+static const struct v4l2_subdev_video_ops xscd_video_ops = {
 	.s_stream = xscd_s_stream,
 };
 
-static struct v4l2_subdev_pad_ops xscd_pad_ops = {
+static const struct v4l2_subdev_pad_ops xscd_memory_pad_ops = {
 	.enum_mbus_code = xscd_enum_mbus_code,
 	.enum_frame_size = xscd_enum_frame_size,
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xscd_set_format,
 };
 
-static struct v4l2_subdev_ops xscd_ops = {
+static const struct v4l2_subdev_pad_ops xscd_stream_pad_ops = {
+	.enum_mbus_code = xscd_enum_mbus_code,
+	.enum_frame_size = xscd_enum_frame_size,
+	.get_fmt = v4l2_subdev_get_fmt,
+	.set_fmt = xscd_set_format,
+	.enable_streams = xscd_enable_streams,
+	.disable_streams = xscd_disable_streams,
+};
+
+/*
+ * A memory-based channel has a sink pad only and is always started with
+ * .s_stream(). A stream-based channel is started through its source pad with
+ * .enable_streams() when that pad is linked to a consumer, and with .s_stream()
+ * when it isn't. Registering both is unambiguous: v4l2_subdev_enable_streams()
+ * uses the pad operation whenever the subdev implements it.
+ */
+static const struct v4l2_subdev_ops xscd_memory_ops = {
 	.core = &xscd_core_ops,
 	.video = &xscd_video_ops,
-	.pad = &xscd_pad_ops,
+	.pad = &xscd_memory_pad_ops,
+};
+
+static const struct v4l2_subdev_ops xscd_stream_ops = {
+	.core = &xscd_core_ops,
+	.video = &xscd_video_ops,
+	.pad = &xscd_stream_pad_ops,
 };
 
 static const struct v4l2_subdev_internal_ops xscd_internal_ops = {
@@ -379,7 +473,8 @@ int xscd_chan_init(struct xscd_device *xscd, unsigned int chan_id,
 
 	/* Initialize V4L2 subdevice and media entity */
 	subdev = &chan->subdev;
-	v4l2_subdev_init(subdev, &xscd_ops);
+	v4l2_subdev_init(subdev, xscd->memory_based ? &xscd_memory_ops
+				 : &xscd_stream_ops);
 	subdev->dev = chan->xscd->dev;
 	subdev->fwnode = of_fwnode_handle(node);
 	subdev->internal_ops = &xscd_internal_ops;

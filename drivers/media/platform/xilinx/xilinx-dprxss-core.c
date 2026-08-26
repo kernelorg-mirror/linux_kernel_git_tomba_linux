@@ -227,7 +227,6 @@ struct vidphy_cfg {
  * @audio_init: flag to indicate audio is initialized
  * @rx_audio_data: audio data
  * @valid_stream: To indicate valid video for all streams
- * @streaming: Flag for storing streaming state
  * @ltstate: Flag for storing link training state
  * @last_powered_down: Tracks whether link was last in power-down state
  * @hdcp2x_timer_irq: HDCP2X timer IRQ variable
@@ -286,7 +285,6 @@ struct xdprxss_state {
 	bool audio_init;
 	struct xlnx_dprx_audio_data *rx_audio_data;
 	bool valid_stream[XDPRX_MAX_STREAM_COUNT];
-	unsigned int streaming : 1;
 	unsigned int ltstate : 2;
 	unsigned int last_powered_down : 1;
 	int hdcp2x_timer_irq;
@@ -1709,19 +1707,27 @@ static int xdprxss_subscribe_event(struct v4l2_subdev *sd,
 	return ret;
 }
 
-static int xdprxss_s_stream(struct v4l2_subdev *sd, int enable)
+static int xdprxss_enable_streams(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *sd_state, u32 pad,
+				  u64 streams_mask)
 {
 	struct xdprxss_state *xdprxss = to_xdprxssstate(sd);
 
-	/* DP does not need to be enabled when we start streaming */
-	if (enable == xdprxss->streaming)
-		return 0;
-
-	if (enable && !xdprxss_is_stream_valid(xdprxss))
+	/*
+	 * The receiver is driven by the source, link training and video
+	 * detection run on their own and there is nothing to start. Only
+	 * refuse to start a pad the hardware has not locked a stream on.
+	 */
+	if (!xdprxss->valid_stream[pad])
 		return -EINVAL;
 
-	xdprxss->streaming = enable;
+	return 0;
+}
 
+static int xdprxss_disable_streams(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_state *sd_state, u32 pad,
+				   u64 streams_mask)
+{
 	return 0;
 }
 
@@ -2359,7 +2365,6 @@ static const struct v4l2_subdev_core_ops xdprxss_core_ops = {
 };
 
 static const struct v4l2_subdev_video_ops xdprxss_video_ops = {
-	.s_stream		= xdprxss_s_stream,
 	.g_input_status		= xdprxss_g_input_status,
 };
 
@@ -2370,6 +2375,8 @@ static const struct v4l2_subdev_pad_ops xdprxss_pad_ops = {
 	.set_fmt		= xdprxss_getset_format,
 	.enum_dv_timings	= xdprxss_enum_dv_timings,
 	.dv_timings_cap         = xdprxss_get_dv_timings_cap,
+	.enable_streams		= xdprxss_enable_streams,
+	.disable_streams	= xdprxss_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xdprxss_ops = {

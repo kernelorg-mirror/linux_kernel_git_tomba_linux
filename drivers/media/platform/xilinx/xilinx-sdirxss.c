@@ -340,8 +340,6 @@ struct xsdirxss_core {
  * @subdev: The v4l2 subdev structure
  * @ctrl_handler: control handler
  * @event: Holds the video unlock event
- * @format: Active V4L2 format on source pad
- * @default_format: default V4L2 media bus format
  * @frame_interval: Captures the frame rate
  * @vip_format: format information corresponding to the active format
  * @pad: source media pad
@@ -363,8 +361,6 @@ struct xsdirxss_state {
 	struct v4l2_subdev subdev;
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_event event;
-	struct v4l2_mbus_framefmt format;
-	struct v4l2_mbus_framefmt default_format;
 	struct v4l2_fract frame_interval;
 	const struct xvip_video_format *vip_format;
 	struct media_pad pad;
@@ -921,12 +917,19 @@ static void xsdirx_vid_bridge_control(struct xsdirxss_core *core,
 {
 	struct xsdirxss_state *state =
 		container_of(core, struct xsdirxss_state, core);
+	struct v4l2_subdev_state *sd_state;
 	u32 mask = XSDIRX_RST_CTRL_SDIRX_BRIDGE_ENB_MASK;
+	u32 code = 0;
 
-	if (state->format.code == MEDIA_BUS_FMT_VUY10_1X30 ||
-	    state->format.code == MEDIA_BUS_FMT_RBG101010_1X30 ||
-	    state->format.code == MEDIA_BUS_FMT_RBG121212_1X36 ||
-	    state->format.code == MEDIA_BUS_FMT_VUY12_1X36)
+	/* The core is also reset at probe time, before the state exists. */
+	sd_state = v4l2_subdev_get_locked_active_state(&state->subdev);
+	if (sd_state)
+		code = v4l2_subdev_state_get_format(sd_state, 0)->code;
+
+	if (code == MEDIA_BUS_FMT_VUY10_1X30 ||
+	    code == MEDIA_BUS_FMT_RBG101010_1X30 ||
+	    code == MEDIA_BUS_FMT_RBG121212_1X36 ||
+	    code == MEDIA_BUS_FMT_VUY12_1X36)
 		mask |= (XSDIRX_RST_CTRL_BRIDGE_CH_FMT_YUV444 <<
 			 XSDIRX_RST_CTRL_BRIDGE_CH_FMT_OFFSET);
 
@@ -1097,9 +1100,13 @@ static int xsdirx_get_stream_properties(struct xsdirxss_state *state)
 	u32 mode, payload = 0, val, family, valid, tscan;
 	u8 byte1 = 0, active_luma = 0, pic_type = 0, framerate = 0;
 	u8 sampling = XST352_BYTE3_COLOR_FORMAT_422, stream_bpc = 0;
-	struct v4l2_mbus_framefmt *format = &state->format;
+	struct v4l2_subdev_state *sd_state;
+	struct v4l2_mbus_framefmt *format;
 	u32 bpc = XST352_BYTE4_BIT_DEPTH_10;
 	u8 is_3GB;
+
+	sd_state = v4l2_subdev_get_locked_active_state(&state->subdev);
+	format = v4l2_subdev_state_get_format(sd_state, 0);
 
 	mode = xsdirxss_read(core, XSDIRX_MODE_DET_STAT_REG);
 	mode &= XSDIRX_MODE_DET_STAT_RX_MODE_MASK;
@@ -1582,10 +1589,13 @@ static irqreturn_t xsdirxss_irq_handler(int irq, void *dev_id)
 
 	if (status & XSDIRX_INTR_VIDLOCK_MASK ||
 	    status & XSDIRX_INTR_VIDUNLOCK_MASK) {
+		struct v4l2_subdev_state *sd_state;
 		u32 val1, val2;
 		bool gen_event = true;
 
 		dev_dbg(core->dev, "video lock/unlock interrupt\n");
+
+		sd_state = v4l2_subdev_lock_and_get_active_state(&state->subdev);
 
 		xsdirx_streamflow_control(core, false);
 		state->streaming = false;
@@ -1641,6 +1651,9 @@ static irqreturn_t xsdirxss_irq_handler(int irq, void *dev_id)
 			dev_dbg(core->dev, "video unlock interrupt\n");
 			state->vidlocked = false;
 		}
+
+		v4l2_subdev_unlock_state(sd_state);
+
 		if (gen_event) {
 			memset(&state->event, 0, sizeof(state->event));
 			state->event.type = V4L2_EVENT_SOURCE_CHANGE;
@@ -1667,7 +1680,9 @@ static irqreturn_t xsdirxss_irq_handler(int irq, void *dev_id)
 	}
 
 	if (status & XSDIRX_INTR_VSYNC_MASK) {
+		struct v4l2_subdev_state *sd_state;
 		u32 valid, payload;
+		int ret;
 		/*
 		 * If ST352 payload changed without generating video unlock/
 		 * lock sequence, then use vsync interrupt to update the
@@ -1693,7 +1708,11 @@ static irqreturn_t xsdirxss_irq_handler(int irq, void *dev_id)
 		if (payload == state->prev_payload)
 			return IRQ_HANDLED;
 
-		if (xsdirx_get_stream_properties(state))
+		sd_state = v4l2_subdev_lock_and_get_active_state(&state->subdev);
+		ret = xsdirx_get_stream_properties(state);
+		v4l2_subdev_unlock_state(sd_state);
+
+		if (ret)
 			return IRQ_HANDLED;
 
 		memset(&state->event, 0, sizeof(state->event));
@@ -2015,6 +2034,7 @@ static int xsdirxss_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
 	struct xsdirxss_core *core = &xsdirxss->core;
+	struct v4l2_subdev_state *state;
 
 	if (enable) {
 		if (!xsdirxss->vidlocked) {
@@ -2026,7 +2046,10 @@ static int xsdirxss_s_stream(struct v4l2_subdev *sd, int enable)
 			return -EINVAL;
 		}
 
+		state = v4l2_subdev_lock_and_get_active_state(sd);
 		xsdirx_streamflow_control(core, true);
+		v4l2_subdev_unlock_state(state);
+
 		xsdirxss->streaming = true;
 		xsdirxss->s_stream = true;
 		dev_dbg(core->dev, "Streaming started\n");
@@ -2037,7 +2060,10 @@ static int xsdirxss_s_stream(struct v4l2_subdev *sd, int enable)
 			return 0;
 		}
 
+		state = v4l2_subdev_lock_and_get_active_state(sd);
 		xsdirx_streamflow_control(core, false);
+		v4l2_subdev_unlock_state(state);
+
 		xsdirxss->streaming = false;
 		dev_dbg(core->dev, "Streaming stopped\n");
 	}
@@ -2069,28 +2095,6 @@ static int xsdirxss_g_input_status(struct v4l2_subdev *sd, u32 *status)
 	return 0;
 }
 
-static struct v4l2_mbus_framefmt *
-__xsdirxss_get_pad_format(struct xsdirxss_state *xsdirxss,
-			  struct v4l2_subdev_state *sd_state,
-			  unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *format;
-
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_state_get_format(sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		format = &xsdirxss->format;
-		break;
-	default:
-		format = NULL;
-		break;
-	}
-
-	return format;
-}
-
 /**
  * xsdirxss_get_format - Get the pad format
  * @sd: Pointer to V4L2 Sub device structure
@@ -2107,19 +2111,13 @@ static int xsdirxss_get_format(struct v4l2_subdev *sd,
 {
 	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
 	struct xsdirxss_core *core = &xsdirxss->core;
-	struct v4l2_mbus_framefmt *format;
 
 	if (!xsdirxss->vidlocked) {
 		dev_err(core->dev, "Video not locked!\n");
 		return -EINVAL;
 	}
 
-	format = __xsdirxss_get_pad_format(xsdirxss, sd_state,
-					   fmt->pad, fmt->which);
-	if (!format)
-		return -EINVAL;
-
-	fmt->format = *format;
+	fmt->format = *v4l2_subdev_state_get_format(sd_state, fmt->pad);
 
 	dev_dbg(core->dev, "Stream width = %d height = %d Field = %d\n",
 		fmt->format.width, fmt->format.height, fmt->format.field);
@@ -2143,8 +2141,8 @@ static int xsdirxss_set_format(struct v4l2_subdev *sd,
 			       struct v4l2_subdev_state *sd_state,
 			       struct v4l2_subdev_format *fmt)
 {
-	struct v4l2_mbus_framefmt *__format;
 	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
+	const struct v4l2_mbus_framefmt *__format;
 
 	dev_dbg(xsdirxss->core.dev,
 		"set width %d height %d code %d field %d colorspace %d\n",
@@ -2152,10 +2150,7 @@ static int xsdirxss_set_format(struct v4l2_subdev *sd,
 		fmt->format.code, fmt->format.field,
 		fmt->format.colorspace);
 
-	__format = __xsdirxss_get_pad_format(xsdirxss, sd_state,
-					     fmt->pad, fmt->which);
-	if (!__format)
-		return -EINVAL;
+	__format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 
 	/* Currently reset the code to one fixed in hardware */
 	/* TODO : Add checks for width height */
@@ -2223,57 +2218,54 @@ static int xsdirxss_query_dv_timings(struct v4l2_subdev *sd, unsigned int pad,
 				     struct v4l2_dv_timings *timings)
 {
 	struct xsdirxss_state *state = to_xsdirxssstate(sd);
+	const struct v4l2_mbus_framefmt *format;
+	struct v4l2_subdev_state *sd_state;
 	unsigned int i;
+	int ret = -ERANGE;
 
 	if (!state->vidlocked)
 		return -ENOLCK;
 
+	sd_state = v4l2_subdev_lock_and_get_active_state(sd);
+	format = v4l2_subdev_state_get_format(sd_state, 0);
+
 	for (i = 0; i < ARRAY_SIZE(xsdirxss_dv_timings); i++) {
-		if (state->format.width == xsdirxss_dv_timings[i].width &&
-		    state->format.height == xsdirxss_dv_timings[i].height &&
+		if (format->width == xsdirxss_dv_timings[i].width &&
+		    format->height == xsdirxss_dv_timings[i].height &&
 		    state->frame_interval.denominator ==
 		    (xsdirxss_dv_timings[i].fps * 1000)) {
 			*timings = xsdirxss_dv_timings[i].format;
-			return 0;
+			ret = 0;
+			break;
 		}
 	}
 
-	return -ERANGE;
+	v4l2_subdev_unlock_state(sd_state);
+
+	return ret;
 }
 
 /**
- * xsdirxss_open - Called on v4l2_open()
+ * xsdirxss_init_state - Initialise the pad format to the default
  * @sd: Pointer to V4L2 sub device structure
- * @fh: Pointer to V4L2 File handle
- *
- * This function is called on v4l2_open(). It sets the default format for pad.
+ * @sd_state: Pointer to V4L2 sub device state structure
  *
  * Return: 0 on success
  */
-static int xsdirxss_open(struct v4l2_subdev *sd,
-			 struct v4l2_subdev_fh *fh)
+static int xsdirxss_init_state(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *sd_state)
 {
-	struct v4l2_mbus_framefmt *format;
 	struct xsdirxss_state *xsdirxss = to_xsdirxssstate(sd);
+	struct v4l2_mbus_framefmt *format;
 
-	format = v4l2_subdev_state_get_format(fh->state, 0);
-	*format = xsdirxss->default_format;
+	format = v4l2_subdev_state_get_format(sd_state, 0);
 
-	return 0;
-}
+	format->code = xsdirxss->vip_format->code;
+	format->field = V4L2_FIELD_NONE;
+	format->colorspace = V4L2_COLORSPACE_DEFAULT;
+	format->width = XSDIRX_DEFAULT_WIDTH;
+	format->height = XSDIRX_DEFAULT_HEIGHT;
 
-/**
- * xsdirxss_close - Called on v4l2_close()
- * @sd: Pointer to V4L2 sub device structure
- * @fh: Pointer to V4L2 File handle
- *
- * This function is called on v4l2_close().
- *
- * Return: 0 on success
- */
-static int xsdirxss_close(struct v4l2_subdev *sd,
-			  struct v4l2_subdev_fh *fh)
-{
 	return 0;
 }
 
@@ -2440,8 +2432,7 @@ static const struct v4l2_subdev_ops xsdirxss_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops xsdirxss_internal_ops = {
-	.open = xsdirxss_open,
-	.close = xsdirxss_close
+	.init_state = xsdirxss_init_state,
 };
 
 /* -----------------------------------------------------------------------------
@@ -2643,16 +2634,6 @@ static int xsdirxss_probe(struct platform_device *pdev)
 	/* Initialize V4L2 subdevice and media entity */
 	xsdirxss->pad.flags = MEDIA_PAD_FL_SOURCE;
 
-	/* Initialize the default format */
-	xsdirxss->default_format.code = xsdirxss->vip_format->code;
-	xsdirxss->default_format.field = V4L2_FIELD_NONE;
-	xsdirxss->default_format.colorspace = V4L2_COLORSPACE_DEFAULT;
-	xsdirxss->default_format.width = XSDIRX_DEFAULT_WIDTH;
-	xsdirxss->default_format.height = XSDIRX_DEFAULT_HEIGHT;
-
-	xsdirxss->format = xsdirxss->default_format;
-
-	/* Initialize V4L2 subdevice and media entity */
 	subdev = &xsdirxss->subdev;
 	v4l2_subdev_init(subdev, &xsdirxss_ops);
 
@@ -2667,6 +2648,11 @@ static int xsdirxss_probe(struct platform_device *pdev)
 	v4l2_set_subdevdata(subdev, xsdirxss);
 
 	ret = media_entity_pads_init(&subdev->entity, 1, &xsdirxss->pad);
+	if (ret < 0)
+		goto error;
+
+	/* Allocate the subdev active state and populate the default format. */
+	ret = v4l2_subdev_init_finalize(subdev);
 	if (ret < 0)
 		goto error;
 
@@ -2744,6 +2730,7 @@ static int xsdirxss_probe(struct platform_device *pdev)
 
 	return 0;
 error:
+	v4l2_subdev_cleanup(subdev);
 	v4l2_ctrl_handler_free(&xsdirxss->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 	xsdirx_globalintr(core, false);
@@ -2758,6 +2745,7 @@ static void xsdirxss_remove(struct platform_device *pdev)
 	struct xsdirxss_state *xsdirxss = platform_get_drvdata(pdev);
 	struct xsdirxss_core *core = &xsdirxss->core;
 	struct v4l2_subdev *subdev = &xsdirxss->subdev;
+	struct v4l2_subdev_state *state;
 
 	v4l2_async_unregister_subdev(subdev);
 	v4l2_ctrl_handler_free(&xsdirxss->ctrl_handler);
@@ -2766,7 +2754,12 @@ static void xsdirxss_remove(struct platform_device *pdev)
 	xsdirx_globalintr(core, false);
 	xsdirx_disableintr(core, XSDIRX_INTR_ALL_MASK);
 	xsdirx_core_disable(core);
+
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
 	xsdirx_streamflow_control(core, false);
+	v4l2_subdev_unlock_state(state);
+
+	v4l2_subdev_cleanup(subdev);
 
 	clk_bulk_disable_unprepare(core->num_clks, core->clks);
 }

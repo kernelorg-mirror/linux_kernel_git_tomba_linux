@@ -158,10 +158,11 @@ static const struct xilinx_preprocess_out_format_desc xilinx_preprocess_formats[
  * struct xpreprocess_dev - Xilinx Preprocess device structure
  * @xvip:		Embedded xvip_device (registers, clocks, etc.)
  * @pads:		Media pads (sink/source)
- * @formats:		Current mbus formats for each pad
  * @ctrl_handler:	V4L2 control handler for alpha/beta parameters
  * @rst_gpio:		Reset GPIO used to reset the hardware
  * @data_type_enabled:	Array of mbus codes enabled via DT "xlnx,vid-formats"
+ * @default_code:	Default source pad mbus code, taken from the first
+ *			DT "xlnx,vid-formats" entry
  * @width:		Current input frame width
  * @height:		Current input frame height
  * @out_width:		Current output frame width
@@ -175,10 +176,10 @@ static const struct xilinx_preprocess_out_format_desc xilinx_preprocess_formats[
 struct xpreprocess_dev {
 	struct xvip_device xvip;
 	struct media_pad pads[XPREPROCESS_NO_OF_PADS];
-	struct v4l2_mbus_framefmt formats[XPREPROCESS_NO_OF_PADS];
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct gpio_desc *rst_gpio;
 	u32 data_type_enabled[ARRAY_SIZE(xilinx_preprocess_formats)];
+	u32 default_code;
 	u32 width;
 	u32 height;
 	u32 out_width;
@@ -359,38 +360,6 @@ static inline struct xpreprocess_dev *to_xpreprocess(struct v4l2_subdev *subdev)
 	return container_of(subdev, struct xpreprocess_dev, xvip.subdev);
 }
 
-/**
- * __xpreprocess_get_pad_format - Get mbus format for a pad
- * @xpreprocess: Preprocess device
- * @sd_state:   Subdev state (try formats)
- * @pad:        Pad index
- * @which:      ACTIVE or TRY
- *
- * Return: Pointer to the mbus format for @pad and @which, or %NULL when
- *	   @which is neither %V4L2_SUBDEV_FORMAT_TRY nor %V4L2_SUBDEV_FORMAT_ACTIVE.
- */
-static struct v4l2_mbus_framefmt *
-__xpreprocess_get_pad_format(struct xpreprocess_dev *xpreprocess,
-			     struct v4l2_subdev_state *sd_state,
-			     unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *get_fmt;
-
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		get_fmt = v4l2_subdev_state_get_format(sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		get_fmt = &xpreprocess->formats[pad];
-		break;
-	default:
-		get_fmt = NULL;
-		break;
-	}
-
-	return get_fmt;
-}
-
 static u32 xpreprocess_data_type_from_code(unsigned int code)
 {
 	switch (code) {
@@ -441,6 +410,8 @@ static void xpreprocess_reset(struct xpreprocess_dev *xpreprocess)
 static int xpreprocess_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xpreprocess_dev *xpreprocess = to_xpreprocess(subdev);
+	const struct v4l2_mbus_framefmt *format;
+	struct v4l2_subdev_state *state;
 	unsigned int i;
 
 	if (!enable) {
@@ -449,12 +420,18 @@ static int xpreprocess_s_stream(struct v4l2_subdev *subdev, int enable)
 		return 0;
 	}
 
-	/* Cache input / output sizes from pad formats */
-	xpreprocess->width = xpreprocess->formats[XVIP_PAD_SINK].width;
-	xpreprocess->height = xpreprocess->formats[XVIP_PAD_SINK].height;
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
 
-	xpreprocess->out_width = xpreprocess->formats[XVIP_PAD_SOURCE].width;
-	xpreprocess->out_height = xpreprocess->formats[XVIP_PAD_SOURCE].height;
+	/* Cache input / output sizes from pad formats */
+	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
+	xpreprocess->width = format->width;
+	xpreprocess->height = format->height;
+
+	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SOURCE);
+	xpreprocess->out_width = format->width;
+	xpreprocess->out_height = format->height;
+
+	v4l2_subdev_unlock_state(state);
 
 	/* Program input image size */
 	xpreprocess_write(xpreprocess, XPREPROCESS_IN_IMG_WIDTH_REG,
@@ -529,31 +506,6 @@ static int xpreprocess_enum_mbus_code(struct v4l2_subdev *subdev,
 }
 
 /**
- * xpreprocess_get_format - Get pad format
- * @subdev:   V4L2 subdevice
- * @sd_state: Subdev state
- * @fmt:      Format struct to fill
- *
- * Return: 0 on success, %-EINVAL if the pad format cannot be resolved.
- */
-static int xpreprocess_get_format(struct v4l2_subdev *subdev,
-				  struct v4l2_subdev_state *sd_state,
-				  struct v4l2_subdev_format *fmt)
-{
-	struct xpreprocess_dev *xpreprocess = to_xpreprocess(subdev);
-	struct v4l2_mbus_framefmt *get_fmt;
-
-	get_fmt = __xpreprocess_get_pad_format(xpreprocess, sd_state,
-					       fmt->pad, fmt->which);
-	if (!get_fmt)
-		return -EINVAL;
-
-	fmt->format = *get_fmt;
-
-	return 0;
-}
-
-/**
  * xpreprocess_set_format - Set pad format
  * @subdev:   V4L2 subdevice
  * @sd_state: Subdev state
@@ -562,8 +514,8 @@ static int xpreprocess_get_format(struct v4l2_subdev *subdev,
  * Clamps resolution to IP limits, validates/sets mbus code and
  * updates data type according to the selected output format.
  *
- * Return: 0 on success, %-EINVAL if the pad format cannot be resolved or no
- *	   DT-enabled output format exists to fall back to.
+ * Return: 0 on success, %-EINVAL if no DT-enabled output format exists to
+ *	   fall back to.
  */
 static int xpreprocess_set_format(struct v4l2_subdev *subdev,
 				  struct v4l2_subdev_state *sd_state,
@@ -575,10 +527,7 @@ static int xpreprocess_set_format(struct v4l2_subdev *subdev,
 	bool found = false;
 	int i;
 
-	__format = __xpreprocess_get_pad_format(xpreprocess, sd_state,
-						fmt->pad, fmt->which);
-	if (!__format)
-		return -EINVAL;
+	__format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 
 	if (fmt->pad == XVIP_PAD_SOURCE) {
 		width = clamp_t(unsigned int, fmt->format.width,
@@ -651,38 +600,52 @@ static int xpreprocess_set_format(struct v4l2_subdev *subdev,
 }
 
 /**
- * xpreprocess_open - Initialize per-filehandle TRY pad formats
- * @subdev: V4L2 subdevice
- * @fh:     Subdevice file handle
- *
- * Seeds TRY state from the active pad formats so
- * %V4L2_SUBDEV_FORMAT_TRY operations do not read zeroed structs.
+ * xpreprocess_init_state - Initialize the default pad formats
+ * @subdev:   V4L2 subdevice
+ * @sd_state: Subdev state to initialize
  *
  * Return: Always 0.
  */
-static int xpreprocess_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
+static int xpreprocess_init_state(struct v4l2_subdev *subdev,
+				  struct v4l2_subdev_state *sd_state)
 {
 	struct xpreprocess_dev *xpreprocess = to_xpreprocess(subdev);
 	struct v4l2_mbus_framefmt *format;
 
-	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SINK);
-	*format = xpreprocess->formats[XVIP_PAD_SINK];
+	/*
+	 * Configure default sink pad format.
+	 * Treat sink as RGB 8-bit by default.
+	 */
+	format = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SINK);
+	format->field = V4L2_FIELD_NONE;
+	format->colorspace = V4L2_COLORSPACE_SRGB;
+	format->width = XPREPROCESS_MIN_WIDTH;
+	format->height = XPREPROCESS_MIN_HEIGHT;
+	format->code = MEDIA_BUS_FMT_RBG888_1X24;
 
-	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SOURCE);
-	*format = xpreprocess->formats[XVIP_PAD_SOURCE];
+	/*
+	 * Default source pad format is taken from DT
+	 * property "xlnx,vid-formats".
+	 */
+	format = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SOURCE);
+	format->field = V4L2_FIELD_NONE;
+	format->colorspace = V4L2_COLORSPACE_SRGB;
+	format->width = XPREPROCESS_MIN_WIDTH;
+	format->height = XPREPROCESS_MIN_HEIGHT;
+	format->code = xpreprocess->default_code;
 
 	return 0;
 }
 
 static const struct v4l2_subdev_internal_ops xpreprocess_internal_ops = {
-	.open = xpreprocess_open,
+	.init_state = xpreprocess_init_state,
 };
 
 /* Pad operations: format negotiation on sink/source pads */
 static const struct v4l2_subdev_pad_ops xpreprocess_pad_ops = {
 	.enum_mbus_code = xpreprocess_enum_mbus_code,
 	.set_fmt = xpreprocess_set_format,
-	.get_fmt = xpreprocess_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 };
 
 /* Aggregate subdev operations */
@@ -791,26 +754,6 @@ static int xpreprocess_probe(struct platform_device *pdev)
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	dev_dbg(&pdev->dev, "xpreprocess_reset done\n");
 
-	/*
-	 * Configure default sink pad format.
-	 * Treat sink as RGB 8-bit by default.
-	 */
-	xpreprocess->formats[XVIP_PAD_SINK].field = V4L2_FIELD_NONE;
-	xpreprocess->formats[XVIP_PAD_SINK].colorspace = V4L2_COLORSPACE_SRGB;
-	xpreprocess->formats[XVIP_PAD_SINK].width = XPREPROCESS_MIN_WIDTH;
-	xpreprocess->formats[XVIP_PAD_SINK].height = XPREPROCESS_MIN_HEIGHT;
-	xpreprocess->formats[XVIP_PAD_SINK].code = MEDIA_BUS_FMT_RBG888_1X24;
-
-	/*
-	 * Default source pad format will be taken from DT
-	 * property "xlnx,vid-formats".
-	 */
-	xpreprocess->formats[XVIP_PAD_SOURCE].field = V4L2_FIELD_NONE;
-	xpreprocess->formats[XVIP_PAD_SOURCE].colorspace =
-		V4L2_COLORSPACE_SRGB;
-	xpreprocess->formats[XVIP_PAD_SOURCE].width = XPREPROCESS_MIN_WIDTH;
-	xpreprocess->formats[XVIP_PAD_SOURCE].height = XPREPROCESS_MIN_HEIGHT;
-
 	/* Read number of video formats listed in DT */
 	hw_vid_fmt_cnt = device_property_string_array_count(&pdev->dev,
 							    "xlnx,vid-formats");
@@ -849,12 +792,11 @@ static int xpreprocess_probe(struct platform_device *pdev)
 			continue;
 
 		matched_first = true;
-		xpreprocess->formats[XVIP_PAD_SOURCE].code =
-			xilinx_preprocess_formats[j].code;
+		xpreprocess->default_code = xilinx_preprocess_formats[j].code;
 		xpreprocess->channels =
 			xilinx_preprocess_formats[j].channels;
 		xpreprocess->data_type =
-			xpreprocess_data_type_from_code(xpreprocess->formats[XVIP_PAD_SOURCE].code);
+			xpreprocess_data_type_from_code(xpreprocess->default_code);
 		xpreprocess_write(xpreprocess, XPREPROCESS_DATA_TYPE_REG,
 				  xpreprocess->data_type);
 		break;
@@ -930,17 +872,23 @@ static int xpreprocess_probe(struct platform_device *pdev)
 		goto ctrl_error;
 	}
 
+	ret = v4l2_subdev_init_finalize(subdev);
+	if (ret < 0)
+		goto ctrl_error;
+
 	/* Store driver data and register subdev with V4L2 core */
 	platform_set_drvdata(pdev, xpreprocess);
 
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to register subdev\n");
-		goto ctrl_error;
+		goto subdev_error;
 	}
 
 	return 0;
 
+subdev_error:
+	v4l2_subdev_cleanup(subdev);
 ctrl_error:
 	v4l2_ctrl_handler_free(&xpreprocess->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
@@ -968,6 +916,7 @@ static void xpreprocess_remove(struct platform_device *pdev)
 
 	subdev = &xpreprocess->xvip.subdev;
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	v4l2_ctrl_handler_free(&xpreprocess->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 	xvip_cleanup_resources(&xpreprocess->xvip);

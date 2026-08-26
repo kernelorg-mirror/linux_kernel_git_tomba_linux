@@ -114,7 +114,6 @@
  * @pads: media pads
  * @npads: number of pads (1 or 2)
  * @has_input: whether an input is connected to the sink pad
- * @formats: active V4L2 media bus format for each pad
  * @default_format: default V4L2 media bus format
  * @vip_format: format information corresponding to the active format
  * @bayer: boolean flag if TPG is set to any bayer format
@@ -140,7 +139,6 @@ struct xtpg_device {
 	unsigned int npads;
 	bool has_input;
 
-	struct v4l2_mbus_framefmt formats[2];
 	struct v4l2_mbus_framefmt default_format;
 	const struct xvip_video_format *vip_format;
 	bool bayer;
@@ -278,8 +276,10 @@ static int xtpg_set_frame_interval(struct v4l2_subdev *sd,
 static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
-	unsigned int width = xtpg->formats[0].width;
-	unsigned int height = xtpg->formats[0].height;
+	const struct v4l2_mbus_framefmt *format;
+	struct v4l2_subdev_state *state;
+	unsigned int width;
+	unsigned int height;
 	bool passthrough;
 	u32 bayer_phase;
 
@@ -310,10 +310,15 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 		return 0;
 	}
 
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
+	format = v4l2_subdev_state_get_format(state, 0);
+	width = format->width;
+	height = format->height;
+
 	if (xtpg->is_hls) {
 		u32 fmt = 0;
 
-		switch (xtpg->formats[0].code) {
+		switch (format->code) {
 		case MEDIA_BUS_FMT_VYYUYY8_1X24:
 		case MEDIA_BUS_FMT_VYYUYY10_4X20:
 		case MEDIA_BUS_FMT_UYYVYY12_4X24:
@@ -342,7 +347,7 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 		xvip_write(&xtpg->xvip, XHLS_REG_COLS, width);
 		xvip_write(&xtpg->xvip, XHLS_REG_ROWS, height);
 	} else {
-		xvip_set_frame_size(&xtpg->xvip, &xtpg->formats[0]);
+		xvip_set_frame_size(&xtpg->xvip, format);
 	}
 
 	if (xtpg->vtc)
@@ -389,10 +394,12 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 		 * be subsampled.
 		 */
 		bayer_phase = passthrough ? XTPG_BAYER_PHASE_OFF
-			    : xtpg_get_bayer_phase(xtpg->formats[0].code);
+			    : xtpg_get_bayer_phase(format->code);
 		xvip_write(&xtpg->xvip, XTPG_BAYER_PHASE, bayer_phase);
 		xvip_start(&xtpg->xvip);
 	}
+
+	v4l2_subdev_unlock_state(state);
 
 	return 0;
 }
@@ -400,44 +407,6 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 /* -----------------------------------------------------------------------------
  * V4L2 Subdevice Pad Operations
  */
-
-static struct v4l2_mbus_framefmt *
-__xtpg_get_pad_format(struct xtpg_device *xtpg,
-		      struct v4l2_subdev_state *sd_state,
-		      unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *format;
-
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_state_get_format(sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		format = &xtpg->formats[pad];
-		break;
-	default:
-		format = NULL;
-		break;
-	}
-
-	return format;
-}
-
-static int xtpg_get_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_state *sd_state,
-			   struct v4l2_subdev_format *fmt)
-{
-	struct xtpg_device *xtpg = to_tpg(subdev);
-	struct v4l2_mbus_framefmt *format;
-
-	format = __xtpg_get_pad_format(xtpg, sd_state, fmt->pad, fmt->which);
-	if (!format)
-		return -EINVAL;
-
-	fmt->format = *format;
-
-	return 0;
-}
 
 static int xtpg_set_format(struct v4l2_subdev *subdev,
 			   struct v4l2_subdev_state *sd_state,
@@ -447,9 +416,7 @@ static int xtpg_set_format(struct v4l2_subdev *subdev,
 	struct v4l2_mbus_framefmt *__format;
 	u32 bayer_phase;
 
-	__format = __xtpg_get_pad_format(xtpg, sd_state, fmt->pad, fmt->which);
-	if (!__format)
-		return -EINVAL;
+	__format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 
 	/* In two pads mode the source pad format is always identical to the
 	 * sink pad format.
@@ -498,10 +465,7 @@ static int xtpg_set_format(struct v4l2_subdev *subdev,
 
 	/* Propagate the format to the source pad. */
 	if (xtpg->npads == 2) {
-		__format = __xtpg_get_pad_format(xtpg, sd_state, 1,
-						 fmt->which);
-		if (!__format)
-			return -EINVAL;
+		__format = v4l2_subdev_state_get_format(sd_state, 1);
 		*__format = fmt->format;
 	}
 
@@ -543,24 +507,19 @@ static int xtpg_enum_frame_size(struct v4l2_subdev *subdev,
 	return 0;
 }
 
-static int xtpg_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
+static int xtpg_init_state(struct v4l2_subdev *subdev,
+			   struct v4l2_subdev_state *sd_state)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
-	struct v4l2_mbus_framefmt *format;
+	unsigned int pad;
 
-	format = v4l2_subdev_state_get_format(fh->state, 0);
-	*format = xtpg->default_format;
+	for (pad = 0; pad < xtpg->npads; ++pad) {
+		struct v4l2_mbus_framefmt *format;
 
-	if (xtpg->npads == 2) {
-		format = v4l2_subdev_state_get_format(fh->state, 1);
+		format = v4l2_subdev_state_get_format(sd_state, pad);
 		*format = xtpg->default_format;
 	}
 
-	return 0;
-}
-
-static int xtpg_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
 	return 0;
 }
 
@@ -716,7 +675,7 @@ static const struct v4l2_subdev_video_ops xtpg_video_ops = {
 static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {
 	.enum_mbus_code		= xvip_enum_mbus_code,
 	.enum_frame_size	= xtpg_enum_frame_size,
-	.get_fmt		= xtpg_get_format,
+	.get_fmt		= v4l2_subdev_get_fmt,
 	.set_fmt		= xtpg_set_format,
 	.get_frame_interval	= xtpg_get_frame_interval,
 	.set_frame_interval	= xtpg_set_frame_interval,
@@ -729,8 +688,7 @@ static const struct v4l2_subdev_ops xtpg_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops xtpg_internal_ops = {
-	.open	= xtpg_open,
-	.close	= xtpg_close,
+	.init_state	= xtpg_init_state,
 };
 
 /*
@@ -1172,10 +1130,6 @@ static int xtpg_probe(struct platform_device *pdev)
 			xtpg->bayer = true;
 	}
 
-	xtpg->formats[0] = xtpg->default_format;
-	if (xtpg->npads == 2)
-		xtpg->formats[1] = xtpg->default_format;
-
 	/* Initialize V4L2 subdevice and media entity */
 	subdev = &xtpg->xvip.subdev;
 	v4l2_subdev_init(subdev, &xtpg_ops);
@@ -1249,6 +1203,10 @@ static int xtpg_probe(struct platform_device *pdev)
 		goto error;
 	}
 
+	ret = v4l2_subdev_init_finalize(subdev);
+	if (ret < 0)
+		goto error;
+
 	platform_set_drvdata(pdev, xtpg);
 
 	if (!xtpg->is_hls)
@@ -1261,11 +1219,13 @@ static int xtpg_probe(struct platform_device *pdev)
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to register subdev\n");
-		goto error;
+		goto error_subdev;
 	}
 
 	return 0;
 
+error_subdev:
+	v4l2_subdev_cleanup(subdev);
 error:
 	v4l2_ctrl_handler_free(&xtpg->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
@@ -1281,6 +1241,7 @@ static void xtpg_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xtpg->xvip.subdev;
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	v4l2_ctrl_handler_free(&xtpg->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 

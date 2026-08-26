@@ -28,12 +28,14 @@
  * @subdev: The v4l2 subdev structure
  * @pads: media pads
  * @npads: number of pads
+ * @enabled_pads: bitmask of the source pads that have their stream enabled
  */
 struct xvbroadcaster_device {
 	struct device *dev;
 	struct v4l2_subdev subdev;
 	struct media_pad *pads;
 	u32 npads;
+	u64 enabled_pads;
 };
 
 static inline struct xvbroadcaster_device *to_xvbr(struct v4l2_subdev *subdev)
@@ -42,11 +44,54 @@ static inline struct xvbroadcaster_device *to_xvbr(struct v4l2_subdev *subdev)
 }
 
 /* -----------------------------------------------------------------------------
- * V4L2 Subdevice Video Operations
+ * Streaming
  */
 
-static int xvbr_s_stream(struct v4l2_subdev *subdev, int enable)
+static u64 xvbr_linked_pads(struct xvbroadcaster_device *xvbr)
 {
+	u64 mask = 0;
+	unsigned int i;
+
+	for (i = XVIP_PAD_SINK + 1; i < xvbr->npads; ++i) {
+		if (media_pad_remote_pad_first(&xvbr->pads[i]))
+			mask |= BIT_ULL(i);
+	}
+
+	return mask;
+}
+
+static int xvbr_enable_streams(struct v4l2_subdev *subdev,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
+{
+	struct xvbroadcaster_device *xvbr = to_xvbr(subdev);
+	int ret;
+
+	xvbr->enabled_pads |= BIT_ULL(pad);
+
+	if (xvbr->enabled_pads != xvbr_linked_pads(xvbr))
+		return 0;
+
+	ret = xvip_enable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+	if (ret) {
+		xvbr->enabled_pads &= ~BIT_ULL(pad);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int xvbr_disable_streams(struct v4l2_subdev *subdev,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xvbroadcaster_device *xvbr = to_xvbr(subdev);
+
+	if (xvbr->enabled_pads == xvbr_linked_pads(xvbr))
+		xvip_disable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+
+	xvbr->enabled_pads &= ~BIT_ULL(pad);
+
 	return 0;
 }
 
@@ -102,19 +147,16 @@ static int xvbr_set_format(struct v4l2_subdev *subdev,
 	return 0;
 }
 
-static struct v4l2_subdev_video_ops xvbr_video_ops = {
-	.s_stream = xvbr_s_stream,
-};
-
 static struct v4l2_subdev_pad_ops xvbr_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
 	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xvbr_set_format,
+	.enable_streams = xvbr_enable_streams,
+	.disable_streams = xvbr_disable_streams,
 };
 
 static struct v4l2_subdev_ops xvbr_ops = {
-	.video = &xvbr_video_ops,
 	.pad = &xvbr_pad_ops,
 };
 

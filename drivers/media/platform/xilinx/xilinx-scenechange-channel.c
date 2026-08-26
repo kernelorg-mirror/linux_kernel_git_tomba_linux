@@ -51,30 +51,22 @@ static int xscd_enum_frame_size(struct v4l2_subdev *subdev,
 	return 0;
 }
 
-static struct v4l2_mbus_framefmt *
-__xscd_get_pad_format(struct xscd_chan *chan,
-		      struct v4l2_subdev_state *sd_state,
-		      unsigned int pad, u32 which)
+static int xscd_init_state(struct v4l2_subdev *subdev,
+			   struct v4l2_subdev_state *sd_state)
 {
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_state_get_format(sd_state, pad);
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		return &chan->format;
-	default:
-		return NULL;
+	unsigned int pad;
+
+	for (pad = 0; pad < subdev->entity.num_pads; ++pad) {
+		struct v4l2_mbus_framefmt *format;
+
+		format = v4l2_subdev_state_get_format(sd_state, pad);
+
+		format->code = MEDIA_BUS_FMT_VYYUYY8_1X24;
+		format->field = V4L2_FIELD_NONE;
+		format->width = XSCD_DEFAULT_WIDTH;
+		format->height = XSCD_DEFAULT_HEIGHT;
 	}
-	return NULL;
-}
 
-static int xscd_get_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_state *sd_state,
-			   struct v4l2_subdev_format *fmt)
-{
-	struct xscd_chan *chan = to_xscd_chan(subdev);
-
-	fmt->format = *__xscd_get_pad_format(chan, sd_state, fmt->pad,
-					     fmt->which);
 	return 0;
 }
 
@@ -85,7 +77,17 @@ static int xscd_set_format(struct v4l2_subdev *subdev,
 	struct xscd_chan *chan = to_xscd_chan(subdev);
 	struct v4l2_mbus_framefmt *format;
 
-	format = __xscd_get_pad_format(chan, sd_state, fmt->pad, fmt->which);
+	format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
+
+	/*
+	 * A stream-based channel passes the frames through unmodified, the
+	 * source pad format follows the sink pad format and can't be set.
+	 */
+	if (fmt->pad == XVIP_PAD_SOURCE) {
+		fmt->format = *format;
+		return 0;
+	}
+
 	format->width = clamp_t(unsigned int, fmt->format.width,
 				XSCD_MIN_WIDTH, XSCD_MAX_WIDTH);
 	format->height = clamp_t(unsigned int, fmt->format.height,
@@ -100,6 +102,13 @@ static int xscd_set_format(struct v4l2_subdev *subdev,
 		format->field = fmt->format.field;
 
 	fmt->format = *format;
+
+	/* Mirror the sink format on the source pad. */
+	if (chan->xscd->memory_based)
+		return 0;
+
+	format = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SOURCE);
+	*format = fmt->format;
 
 	return 0;
 }
@@ -159,22 +168,34 @@ static int xscd_chan_get_vid_fmt(u32 media_bus_fmt, bool memory_based)
  */
 static void xscd_chan_configure_params(struct xscd_chan *chan)
 {
+	const struct v4l2_mbus_framefmt *format;
+	struct v4l2_subdev_state *state;
 	u32 vid_fmt, stride;
 
-	xscd_write(chan->iomem, XSCD_WIDTH_OFFSET, chan->format.width);
+	state = v4l2_subdev_lock_and_get_active_state(&chan->subdev);
+	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
+
+	xscd_write(chan->iomem, XSCD_WIDTH_OFFSET, format->width);
 
 	/* Stride is required only for memory based IP, not for streaming IP */
 	if (chan->xscd->memory_based) {
-		stride = roundup(chan->format.width, XSCD_BYTE_ALIGN);
+		stride = roundup(format->width, XSCD_BYTE_ALIGN);
 		xscd_write(chan->iomem, XSCD_STRIDE_OFFSET, stride);
 	}
 
-	xscd_write(chan->iomem, XSCD_HEIGHT_OFFSET, chan->format.height);
+	xscd_write(chan->iomem, XSCD_HEIGHT_OFFSET, format->height);
 
 	/* Hardware video format */
-	vid_fmt = xscd_chan_get_vid_fmt(chan->format.code,
-					chan->xscd->memory_based);
+	vid_fmt = xscd_chan_get_vid_fmt(format->code, chan->xscd->memory_based);
 	xscd_write(chan->iomem, XSCD_VID_FMT_OFFSET, vid_fmt);
+
+	/*
+	 * The interrupt handler can't access the subdev state to normalize the
+	 * SAD value, cache the frame size for it.
+	 */
+	chan->frame_size = format->width * format->height;
+
+	v4l2_subdev_unlock_state(state);
 
 	/*
 	 * This is the vertical subsampling factor of the input image. Instead
@@ -264,16 +285,6 @@ static int xscd_unsubscribe_event(struct v4l2_subdev *sd,
 	return ret;
 }
 
-static int xscd_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	return 0;
-}
-
-static int xscd_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	return 0;
-}
-
 static const struct v4l2_ctrl_ops xscd_ctrl_ops = {
 	.s_ctrl	= xscd_s_ctrl
 };
@@ -303,7 +314,7 @@ static struct v4l2_subdev_video_ops xscd_video_ops = {
 static struct v4l2_subdev_pad_ops xscd_pad_ops = {
 	.enum_mbus_code = xscd_enum_mbus_code,
 	.enum_frame_size = xscd_enum_frame_size,
-	.get_fmt = xscd_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xscd_set_format,
 };
 
@@ -314,8 +325,7 @@ static struct v4l2_subdev_ops xscd_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops xscd_internal_ops = {
-	.open = xscd_open,
-	.close = xscd_close,
+	.init_state = xscd_init_state,
 };
 
 /* -----------------------------------------------------------------------------
@@ -333,7 +343,7 @@ void xscd_chan_event_notify(struct xscd_chan *chan)
 
 	sad = xscd_read(chan->iomem, XSCD_SAD_OFFSET);
 	sad = (sad * XSCD_V_SUBSAMPLING * MULTIPLICATION_FACTOR) /
-	       (chan->format.width * chan->format.height);
+	      chan->frame_size;
 	eventdata = (u32 *)&chan->event.u.data;
 
 	if (sad > chan->threshold)
@@ -377,12 +387,6 @@ int xscd_chan_init(struct xscd_device *xscd, unsigned int chan_id,
 		 chan_id);
 	v4l2_set_subdevdata(subdev, chan);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS;
-
-	/* Initialize default format */
-	chan->format.code = MEDIA_BUS_FMT_VYYUYY8_1X24;
-	chan->format.field = V4L2_FIELD_NONE;
-	chan->format.width = XSCD_DEFAULT_WIDTH;
-	chan->format.height = XSCD_DEFAULT_HEIGHT;
 
 	/* Initialize media pads */
 	num_pads = xscd->memory_based ? 1 : 2;
@@ -428,15 +432,21 @@ int xscd_chan_init(struct xscd_device *xscd, unsigned int chan_id,
 		goto ctrl_handler_error;
 	}
 
+	ret = v4l2_subdev_init_finalize(subdev);
+	if (ret < 0)
+		goto ctrl_handler_error;
+
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
 		dev_err(chan->xscd->dev, "failed to register subdev\n");
-		goto ctrl_handler_error;
+		goto subdev_error;
 	}
 
 	dev_info(chan->xscd->dev, "Scene change detection channel found!\n");
 	return 0;
 
+subdev_error:
+	v4l2_subdev_cleanup(subdev);
 ctrl_handler_error:
 	v4l2_ctrl_handler_free(&chan->ctrl_handler);
 media_init_error:
@@ -458,6 +468,7 @@ void xscd_chan_cleanup(struct xscd_device *xscd, unsigned int chan_id,
 	struct v4l2_subdev *subdev = &chan->subdev;
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	v4l2_ctrl_handler_free(&chan->ctrl_handler);
 	media_entity_cleanup(&subdev->entity);
 	mutex_destroy(&chan->lock);

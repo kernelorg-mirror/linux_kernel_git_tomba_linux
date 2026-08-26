@@ -148,7 +148,7 @@ static inline struct xscd_dma_chan *to_xscd_dma_chan(struct dma_chan *chan)
  * @subdev: V4L2 subdevice
  * @ctrl_handler: V4L2 control handler
  * @pads: media pads
- * @format: active V4L2 media bus format for the pad
+ * @frame_size: number of pixels in a frame, cached for the interrupt handler
  * @event: scene change event
  * @dmachan: dma channel part of the scenechange stream
  * @lock: lock to protect active stream count variable
@@ -161,7 +161,7 @@ struct xscd_chan {
 	struct v4l2_subdev subdev;
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct media_pad pads[2];
-	struct v4l2_mbus_framefmt format;
+	unsigned int frame_size;
 	struct v4l2_event event;
 	struct xscd_dma_chan dmachan;
 

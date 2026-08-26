@@ -898,8 +898,6 @@ struct xscaler_feature {
  * struct xscaler_device - Xilinx Scaler device structure
  * @xvip: Xilinx Video IP device
  * @pads: Scaler sub-device media pads
- * @formats: V4L2 media bus formats at the sink and source pads
- * @default_formats: default V4L2 media bus formats
  * @vip_formats: Xilinx Video IP format retrieved from the DT
  * @num_hori_taps: number of horizontal taps
  * @num_vert_taps: number of vertical taps
@@ -921,8 +919,6 @@ struct xscaler_device {
 	struct xvip_device xvip;
 
 	struct media_pad pads[2];
-	struct v4l2_mbus_framefmt formats[2];
-	struct v4l2_mbus_framefmt default_formats[2];
 	const struct xvip_video_format *vip_formats[2];
 
 	u32 num_hori_taps;
@@ -1614,6 +1610,8 @@ xv_hscaler_set_phases(struct xscaler_device *xscaler)
 static int xscaler_s_stream(struct v4l2_subdev *subdev, int enable)
 {
 	struct xscaler_device *xscaler = to_scaler(subdev);
+	const struct v4l2_mbus_framefmt *format;
+	struct v4l2_subdev_state *state;
 	u32 width_in, width_out;
 	u32 height_in, height_out;
 	u32 code_in, code_out;
@@ -1636,15 +1634,21 @@ static int xscaler_s_stream(struct v4l2_subdev *subdev, int enable)
 
 	dev_dbg(xscaler->xvip.dev, "%s: Stream On", __func__);
 
+	state = v4l2_subdev_lock_and_get_active_state(subdev);
+
 	/* Extract Sink Pad Information */
-	width_in = xscaler->formats[XVIP_PAD_SINK].width;
-	height_in = xscaler->formats[XVIP_PAD_SINK].height;
-	code_in = xscaler->formats[XVIP_PAD_SINK].code;
+	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SINK);
+	width_in = format->width;
+	height_in = format->height;
+	code_in = format->code;
 
 	/* Extract Source Pad Information */
-	width_out = xscaler->formats[XVIP_PAD_SOURCE].width;
-	height_out = xscaler->formats[XVIP_PAD_SOURCE].height;
-	code_out = xscaler->formats[XVIP_PAD_SOURCE].code;
+	format = v4l2_subdev_state_get_format(state, XVIP_PAD_SOURCE);
+	width_out = format->width;
+	height_out = format->height;
+	code_out = format->code;
+
+	v4l2_subdev_unlock_state(state);
 
 	/*
 	 * V Scaler is before H Scaler
@@ -1729,41 +1733,25 @@ static int xscaler_enum_frame_size(struct v4l2_subdev *subdev,
 	return 0;
 }
 
-static struct v4l2_mbus_framefmt *
-__xscaler_get_pad_format(struct xscaler_device *xscaler,
-			 struct v4l2_subdev_state *sd_state,
-			 unsigned int pad, u32 which)
-{
-	struct v4l2_mbus_framefmt *format;
-
-	switch (which) {
-	case V4L2_SUBDEV_FORMAT_TRY:
-		format = v4l2_subdev_state_get_format(sd_state, pad);
-		break;
-	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		format = &xscaler->formats[pad];
-		break;
-	default:
-		format = NULL;
-		break;
-	}
-
-	return format;
-}
-
-static int xscaler_get_format(struct v4l2_subdev *subdev,
-			      struct v4l2_subdev_state *sd_state,
-			      struct v4l2_subdev_format *fmt)
+static int xscaler_init_state(struct v4l2_subdev *subdev,
+			      struct v4l2_subdev_state *sd_state)
 {
 	struct xscaler_device *xscaler = to_scaler(subdev);
 	struct v4l2_mbus_framefmt *format;
 
-	format = __xscaler_get_pad_format(xscaler, sd_state, fmt->pad,
-					  fmt->which);
-	if (!format)
-		return -EINVAL;
+	format = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SINK);
+	format->code = xscaler->vip_formats[XVIP_PAD_SINK]->code;
+	format->field = V4L2_FIELD_NONE;
+	format->colorspace = V4L2_COLORSPACE_SRGB;
+	format->width = XSCALER_DEF_IN_WIDTH;
+	format->height = XSCALER_DEF_IN_HEIGHT;
 
-	fmt->format = *format;
+	format = v4l2_subdev_state_get_format(sd_state, XVIP_PAD_SOURCE);
+	format->code = xscaler->vip_formats[XVIP_PAD_SOURCE]->code;
+	format->field = V4L2_FIELD_NONE;
+	format->colorspace = V4L2_COLORSPACE_SRGB;
+	format->width = XSCALER_DEF_OUT_WIDTH;
+	format->height = XSCALER_DEF_OUT_HEIGHT;
 
 	return 0;
 }
@@ -1775,10 +1763,7 @@ static int xscaler_set_format(struct v4l2_subdev *subdev,
 	struct xscaler_device *xscaler = to_scaler(subdev);
 	struct v4l2_mbus_framefmt *format;
 
-	format = __xscaler_get_pad_format(xscaler, sd_state, fmt->pad,
-					  fmt->which);
-	if (!format)
-		return -EINVAL;
+	format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
 
 	*format = fmt->format;
 
@@ -1795,28 +1780,6 @@ static int xscaler_set_format(struct v4l2_subdev *subdev,
  * V4L2 Subdevice Operations
  */
 
-static int
-xscaler_open(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	struct xscaler_device *xscaler = to_scaler(subdev);
-	struct v4l2_mbus_framefmt *format;
-
-	/* Initialize with default formats */
-	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SINK);
-	*format = xscaler->default_formats[XVIP_PAD_SINK];
-
-	format = v4l2_subdev_state_get_format(fh->state, XVIP_PAD_SOURCE);
-	*format = xscaler->default_formats[XVIP_PAD_SOURCE];
-
-	return 0;
-}
-
-static int
-xscaler_close(struct v4l2_subdev *subdev, struct v4l2_subdev_fh *fh)
-{
-	return 0;
-}
-
 static const struct v4l2_subdev_video_ops xscaler_video_ops = {
 	.s_stream = xscaler_s_stream,
 };
@@ -1824,7 +1787,7 @@ static const struct v4l2_subdev_video_ops xscaler_video_ops = {
 static const struct v4l2_subdev_pad_ops xscaler_pad_ops = {
 	.enum_mbus_code		= xvip_enum_mbus_code,
 	.enum_frame_size	= xscaler_enum_frame_size,
-	.get_fmt		= xscaler_get_format,
+	.get_fmt		= v4l2_subdev_get_fmt,
 	.set_fmt		= xscaler_set_format,
 };
 
@@ -1834,8 +1797,7 @@ static const struct v4l2_subdev_ops xscaler_ops = {
 };
 
 static const struct v4l2_subdev_internal_ops xscaler_internal_ops = {
-	.open	= xscaler_open,
-	.close	= xscaler_close,
+	.init_state	= xscaler_init_state,
 };
 
 /*
@@ -2013,7 +1975,6 @@ static int xscaler_probe(struct platform_device *pdev)
 {
 	struct xscaler_device *xscaler;
 	struct v4l2_subdev *subdev;
-	struct v4l2_mbus_framefmt *default_format;
 	int ret;
 	const struct of_device_id *match;
 	struct device_node *node = pdev->dev.of_node;
@@ -2084,22 +2045,6 @@ static int xscaler_probe(struct platform_device *pdev)
 	v4l2_set_subdevdata(subdev, xscaler);
 	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
-	/* Initialize default and active formats */
-	default_format = &xscaler->default_formats[XVIP_PAD_SINK];
-	default_format->code = xscaler->vip_formats[XVIP_PAD_SINK]->code;
-	default_format->field = V4L2_FIELD_NONE;
-	default_format->colorspace = V4L2_COLORSPACE_SRGB;
-	default_format->width = XSCALER_DEF_IN_WIDTH;
-	default_format->height = XSCALER_DEF_IN_HEIGHT;
-	xscaler->formats[XVIP_PAD_SINK] = *default_format;
-
-	default_format = &xscaler->default_formats[XVIP_PAD_SOURCE];
-	*default_format = xscaler->default_formats[XVIP_PAD_SINK];
-	default_format->code = xscaler->vip_formats[XVIP_PAD_SOURCE]->code;
-	default_format->width = XSCALER_DEF_OUT_WIDTH;
-	default_format->height = XSCALER_DEF_OUT_HEIGHT;
-	xscaler->formats[XVIP_PAD_SOURCE] = *default_format;
-
 	xscaler->pads[XVIP_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 	xscaler->pads[XVIP_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 	subdev->entity.ops = &xscaler_media_ops;
@@ -2108,12 +2053,16 @@ static int xscaler_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto error;
 
+	ret = v4l2_subdev_init_finalize(subdev);
+	if (ret < 0)
+		goto error;
+
 	platform_set_drvdata(pdev, xscaler);
 
 	ret = v4l2_async_register_subdev(subdev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "failed to register subdev");
-		goto error;
+		goto subdev_error;
 	}
 	dev_info(xscaler->xvip.dev, "Num Hori Taps %d",
 		 xscaler->num_hori_taps);
@@ -2122,6 +2071,8 @@ static int xscaler_probe(struct platform_device *pdev)
 	dev_info(&pdev->dev, "VPSS Scaler Probe Successful");
 	return 0;
 
+subdev_error:
+	v4l2_subdev_cleanup(subdev);
 error:
 	media_entity_cleanup(&subdev->entity);
 	clk_disable_unprepare(xscaler->aclk_ctrl);
@@ -2138,6 +2089,7 @@ static void xscaler_remove(struct platform_device *pdev)
 	struct v4l2_subdev *subdev = &xscaler->xvip.subdev;
 
 	v4l2_async_unregister_subdev(subdev);
+	v4l2_subdev_cleanup(subdev);
 	media_entity_cleanup(&subdev->entity);
 	clk_disable_unprepare(xscaler->aclk_ctrl);
 	clk_disable_unprepare(xscaler->aclk_axis);

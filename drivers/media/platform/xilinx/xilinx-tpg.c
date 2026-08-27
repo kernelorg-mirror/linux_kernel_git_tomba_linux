@@ -273,44 +273,50 @@ static int xtpg_set_frame_interval(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
+/*
+ * Stopping is best effort: the caller has no way to recover from a failure, and
+ * the core only marks the streams as disabled when .disable_streams() succeeds,
+ * so give up on nothing and always complete the teardown.
+ */
+static void xtpg_stop_stream(struct xtpg_device *xtpg)
+{
+	if (!xtpg->is_hls) {
+		xvip_stop(&xtpg->xvip);
+	} else {
+		int ret;
+		/*
+		 * There is an known issue in TPG v7.0 that on
+		 * resolution change it doesn't generates pattern
+		 * correctly i.e some hor/ver offset is added.
+		 * As a workaround issue reset on stop.
+		 */
+		gpiod_set_value_cansleep(xtpg->rst_gpio, 0x1);
+		gpiod_set_value_cansleep(xtpg->rst_gpio, 0x0);
+		ret = v4l2_ctrl_handler_setup(&xtpg->ctrl_handler);
+		if (ret)
+			dev_err(xtpg->xvip.dev,
+				"failed to set controls: %d\n", ret);
+	}
+
+	if (xtpg->vtc)
+		xvtc_generator_stop(xtpg->vtc);
+
+	xtpg_update_pattern_control(xtpg, true, true);
+	xtpg->streaming = false;
+}
+
+static int xtpg_enable_streams(struct v4l2_subdev *subdev,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
 {
 	struct xtpg_device *xtpg = to_tpg(subdev);
 	const struct v4l2_mbus_framefmt *format;
-	struct v4l2_subdev_state *state;
 	unsigned int width;
 	unsigned int height;
 	bool passthrough;
 	u32 bayer_phase;
+	int ret;
 
-	if (!enable) {
-		if (!xtpg->is_hls) {
-			xvip_stop(&xtpg->xvip);
-		} else {
-			int ret;
-			/*
-			 * There is an known issue in TPG v7.0 that on
-			 * resolution change it doesn't generates pattern
-			 * correctly i.e some hor/ver offset is added.
-			 * As a workaround issue reset on stop.
-			 */
-			gpiod_set_value_cansleep(xtpg->rst_gpio, 0x1);
-			gpiod_set_value_cansleep(xtpg->rst_gpio, 0x0);
-			ret = v4l2_ctrl_handler_setup(&xtpg->ctrl_handler);
-			if (ret)
-				dev_err(xtpg->xvip.dev,
-					"failed to set controls: %d\n", ret);
-		}
-
-		if (xtpg->vtc)
-			xvtc_generator_stop(xtpg->vtc);
-
-		xtpg_update_pattern_control(xtpg, true, true);
-		xtpg->streaming = false;
-		return 0;
-	}
-
-	state = v4l2_subdev_lock_and_get_active_state(subdev);
 	format = v4l2_subdev_state_get_format(state, 0);
 	width = format->width;
 	height = format->height;
@@ -399,7 +405,34 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 		xvip_start(&xtpg->xvip);
 	}
 
-	v4l2_subdev_unlock_state(state);
+	/*
+	 * Start the input last, as the IP can't drop data and would stall the
+	 * pipeline if it received frames before being started. Without an
+	 * input the TPG is the source of the pipeline and there is nothing to
+	 * propagate to.
+	 */
+	if (!xtpg->has_input)
+		return 0;
+
+	ret = xvip_enable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+	if (ret) {
+		xtpg_stop_stream(xtpg);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int xtpg_disable_streams(struct v4l2_subdev *subdev,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xtpg_device *xtpg = to_tpg(subdev);
+
+	if (xtpg->has_input)
+		xvip_disable_remote_stream(subdev, XVIP_PAD_SINK, BIT_ULL(0));
+
+	xtpg_stop_stream(xtpg);
 
 	return 0;
 }
@@ -668,10 +701,6 @@ static const struct v4l2_ctrl_ops xtpg_ctrl_ops = {
 static const struct v4l2_subdev_core_ops xtpg_core_ops = {
 };
 
-static const struct v4l2_subdev_video_ops xtpg_video_ops = {
-	.s_stream = xtpg_s_stream,
-};
-
 static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {
 	.enum_mbus_code		= xvip_enum_mbus_code,
 	.enum_frame_size	= xtpg_enum_frame_size,
@@ -679,11 +708,12 @@ static const struct v4l2_subdev_pad_ops xtpg_pad_ops = {
 	.set_fmt		= xtpg_set_format,
 	.get_frame_interval	= xtpg_get_frame_interval,
 	.set_frame_interval	= xtpg_set_frame_interval,
+	.enable_streams		= xtpg_enable_streams,
+	.disable_streams	= xtpg_disable_streams,
 };
 
 static const struct v4l2_subdev_ops xtpg_ops = {
 	.core   = &xtpg_core_ops,
-	.video  = &xtpg_video_ops,
 	.pad    = &xtpg_pad_ops,
 };
 

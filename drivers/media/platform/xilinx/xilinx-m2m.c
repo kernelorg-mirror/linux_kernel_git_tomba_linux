@@ -647,12 +647,37 @@ static void xvip_m2m_buf_queue(struct vb2_buffer *vb)
 	v4l2_m2m_buf_queue(ctx->fh.m2m_ctx, vbuf);
 }
 
+/*
+ * Give the buffers of the queue back to videobuf2. The state is
+ * VB2_BUF_STATE_QUEUED when the queue has failed to start, as the buffers have
+ * never been processed, and VB2_BUF_STATE_ERROR when it is being stopped.
+ */
+static void xvip_m2m_return_buffers(struct xvip_m2m_ctx *ctx,
+				    struct vb2_queue *q,
+				    enum vb2_buffer_state state)
+{
+	struct vb2_v4l2_buffer *vbuf;
+
+	for (;;) {
+		if (q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
+			vbuf = v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx);
+		else
+			vbuf = v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
+
+		if (!vbuf)
+			return;
+
+		spin_lock(&ctx->xdev->queued_lock);
+		v4l2_m2m_buf_done(vbuf, state);
+		spin_unlock(&ctx->xdev->queued_lock);
+	}
+}
+
 static void xvip_m2m_stop_streaming(struct vb2_queue *q)
 {
 	struct xvip_m2m_ctx *ctx = vb2_get_drv_priv(q);
 	struct xvip_m2m_dma *dma = ctx->xdev->dma;
 	struct xvip_pipeline *pipe = to_xvip_pipeline(&dma->video.entity);
-	struct vb2_v4l2_buffer *vbuf;
 
 	dma->crop = false;
 	if (q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
@@ -669,19 +694,7 @@ static void xvip_m2m_stop_streaming(struct vb2_queue *q)
 		media_pipeline_stop(dma->video.entity.pads);
 	}
 
-	for (;;) {
-		if (q->type == V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE)
-			vbuf = v4l2_m2m_src_buf_remove(ctx->fh.m2m_ctx);
-		else
-			vbuf = v4l2_m2m_dst_buf_remove(ctx->fh.m2m_ctx);
-
-		if (!vbuf)
-			return;
-
-		spin_lock(&ctx->xdev->queued_lock);
-		v4l2_m2m_buf_done(vbuf, VB2_BUF_STATE_ERROR);
-		spin_unlock(&ctx->xdev->queued_lock);
-	}
+	xvip_m2m_return_buffers(ctx, q, VB2_BUF_STATE_ERROR);
 }
 
 static int xvip_m2m_start_streaming(struct vb2_queue *q, unsigned int count)
@@ -707,23 +720,32 @@ static int xvip_m2m_start_streaming(struct vb2_queue *q, unsigned int count)
 	 */
 	ret = xvip_dma_verify_format(dma);
 	if (ret < 0)
-		goto error_stop;
+		goto error_stop_pipeline;
 
 	ret = xvip_pipeline_prepare(pipe, dma);
 	if (ret < 0)
-		goto error_stop;
+		goto error_stop_pipeline;
 
 	/* Start the pipeline. */
 	ret = xvip_pipeline_set_stream(pipe, true);
 	if (ret < 0)
-		goto error_stop;
+		goto error_cleanup_pipeline;
 
 	return 0;
-error_stop:
+
+error_cleanup_pipeline:
+	xvip_pipeline_cleanup(pipe);
+
+error_stop_pipeline:
 	media_pipeline_stop(dma->video.entity.pads);
 
 error:
-	xvip_m2m_stop_streaming(q);
+	/*
+	 * No transfer can be in flight, as the DMA engines are only programmed
+	 * for a job, which the mem2mem framework only schedules once both
+	 * queues stream.
+	 */
+	xvip_m2m_return_buffers(ctx, q, VB2_BUF_STATE_QUEUED);
 
 	return ret;
 }

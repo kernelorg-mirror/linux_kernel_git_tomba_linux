@@ -297,12 +297,9 @@ static int xtpg_s_stream(struct v4l2_subdev *subdev, int enable)
 			gpiod_set_value_cansleep(xtpg->rst_gpio, 0x1);
 			gpiod_set_value_cansleep(xtpg->rst_gpio, 0x0);
 			ret = v4l2_ctrl_handler_setup(&xtpg->ctrl_handler);
-			if (ret) {
-				struct device *dev = xtpg->xvip.dev;
-
-				dev_err(dev, "failed to set controls\n");
-				return ret;
-			}
+			if (ret)
+				dev_err(xtpg->xvip.dev,
+					"failed to set controls: %d\n", ret);
 		}
 
 		if (xtpg->vtc)

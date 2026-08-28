@@ -207,6 +207,65 @@ static int max_ser_tpg_route_to_hw(struct max_ser_priv *priv,
 					      route->sink_pad);
 }
 
+/*
+ * Fallback for source subdevs that do not implement get_frame_desc. Assumes a
+ * single stream on VC 0, with the data type based on the sink pad format.
+ */
+static int max_ser_get_frame_desc_fallback(struct max_ser_priv *priv,
+					   struct v4l2_subdev_state *state,
+					   unsigned int pad,
+					   struct v4l2_mbus_frame_desc *fd)
+{
+	struct v4l2_mbus_frame_desc_entry *entry;
+	struct v4l2_mbus_framefmt *fmt;
+	u8 dt;
+
+	fmt = v4l2_subdev_state_get_format(state, pad, 0);
+	if (!fmt)
+		return -EPIPE;
+
+	switch (fmt->code) {
+	case MEDIA_BUS_FMT_SBGGR8_1X8:
+	case MEDIA_BUS_FMT_SGBRG8_1X8:
+	case MEDIA_BUS_FMT_SGRBG8_1X8:
+	case MEDIA_BUS_FMT_SRGGB8_1X8:
+	case MEDIA_BUS_FMT_Y8_1X8:
+		dt = MIPI_CSI2_DT_RAW8;
+		break;
+	case MEDIA_BUS_FMT_SBGGR10_1X10:
+	case MEDIA_BUS_FMT_SGBRG10_1X10:
+	case MEDIA_BUS_FMT_SGRBG10_1X10:
+	case MEDIA_BUS_FMT_SRGGB10_1X10:
+	case MEDIA_BUS_FMT_Y10_1X10:
+		dt = MIPI_CSI2_DT_RAW10;
+		break;
+	case MEDIA_BUS_FMT_SBGGR12_1X12:
+	case MEDIA_BUS_FMT_SGBRG12_1X12:
+	case MEDIA_BUS_FMT_SGRBG12_1X12:
+	case MEDIA_BUS_FMT_SRGGB12_1X12:
+	case MEDIA_BUS_FMT_Y12_1X12:
+		dt = MIPI_CSI2_DT_RAW12;
+		break;
+	default:
+		dev_err(priv->dev,
+			"Unable to deduce data type for mbus code %#06x\n",
+			fmt->code);
+		return -EINVAL;
+	}
+
+	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_CSI2;
+	fd->num_entries = 1;
+
+	entry = &fd->entry[0];
+
+	entry->stream = 0;
+	entry->pixelcode = fmt->code;
+	entry->bus.csi2.vc = 0;
+	entry->bus.csi2.dt = dt;
+
+	return 0;
+}
+
 static int max_ser_route_to_hw(struct max_ser_priv *priv,
 			       struct v4l2_subdev_state *state,
 			       struct v4l2_subdev_route *route,
@@ -238,6 +297,9 @@ static int max_ser_route_to_hw(struct max_ser_priv *priv,
 
 	ret = v4l2_subdev_call(hw->source->sd, pad, get_frame_desc,
 			       hw->source->pad, &fd);
+	if (ret == -ENOIOCTLCMD)
+		ret = max_ser_get_frame_desc_fallback(priv, state,
+						      route->sink_pad, &fd);
 	if (ret)
 		return ret;
 

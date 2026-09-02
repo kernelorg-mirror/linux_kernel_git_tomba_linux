@@ -593,7 +593,7 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 		/* Start the pipeline. */
 		ret = xvip_pipeline_set_stream(pipe, true);
 		if (ret < 0)
-			goto error_stop;
+			goto error_cleanup;
 	} else {
 		/* For low latency capture, return the first buffer early
 		 * so that consumer can initialize until we start DMA.
@@ -605,6 +605,9 @@ static int xvip_dma_start_streaming(struct vb2_queue *vq, unsigned int count)
 	}
 
 	return 0;
+
+error_cleanup:
+	xvip_pipeline_cleanup(pipe);
 
 error_stop:
 	video_device_pipeline_stop(&dma->video);

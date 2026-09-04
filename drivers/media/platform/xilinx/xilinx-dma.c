@@ -342,9 +342,11 @@ static int xvip_pipeline_start_stop(struct xvip_pipeline *pipe, bool start)
  * DMA engines in the pipeline it will enable all entities that belong to the
  * pipeline.
  *
- * Similarly, when called with the @on argument set to false, this function will
- * decrement the pipeline streaming count and disable all entities in the
- * pipeline when the streaming count reaches zero.
+ * When called with the @on argument set to false, this function will disable
+ * all entities in the pipeline if every DMA engine was streaming, and decrement
+ * the pipeline streaming count. The subdevs may only stream while every DMA
+ * engine streams, so the pipeline is started when the last DMA engine starts
+ * and stopped when the first one stops.
  *
  * With the xlnx,atomic_streamon property each DMA engine instead starts and
  * stops the subdev connected to it on its own, independently of the other DMA
@@ -382,8 +384,13 @@ static int xvip_pipeline_set_stream(struct xvip_pipeline *pipe,
 		}
 		pipe->stream_count++;
 	} else {
-		if (--pipe->stream_count == 0)
+		/*
+		 * Stop the pipeline when the first DMA engine stops, as the
+		 * subdevs may only stream while every DMA engine streams.
+		 */
+		if (pipe->stream_count == pipe->num_dmas)
 			xvip_pipeline_start_stop(pipe, false);
+		pipe->stream_count--;
 	}
 
 done:

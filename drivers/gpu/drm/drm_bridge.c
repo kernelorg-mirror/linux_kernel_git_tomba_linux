@@ -652,6 +652,36 @@ static bool drm_bridge_atomic_compare_priv_state(struct drm_private_obj *obj,
 		return false;
 }
 
+static void drm_bridge_atomic_install_priv_state(struct drm_private_obj *obj,
+						 struct drm_private_state *priv_state)
+{
+	struct drm_bridge *bridge = drm_priv_to_bridge(obj);
+	struct drm_connector_state *conn_state = NULL;
+	struct drm_connector_list_iter conn_iter;
+	struct drm_connector *connector;
+
+	if (!bridge->funcs->atomic_sro_install_state)
+		return;
+
+	drm_connector_list_iter_begin(obj->dev, &conn_iter);
+	drm_for_each_connector_iter(connector, &conn_iter) {
+		if (connector->state &&
+		    connector->state->best_encoder == bridge->encoder) {
+			conn_state = connector->state;
+			break;
+		}
+	}
+	drm_connector_list_iter_end(&conn_iter);
+
+	if (!conn_state || !conn_state->crtc || !conn_state->crtc->state)
+		return;
+
+	bridge->funcs->atomic_sro_install_state(bridge,
+						drm_priv_to_bridge_state(priv_state),
+						conn_state->crtc->state,
+						conn_state);
+}
+
 static void
 drm_bridge_atomic_print_priv_state(struct drm_printer *p,
 				   const struct drm_private_state *s)
@@ -682,6 +712,7 @@ static const struct drm_private_state_funcs drm_bridge_priv_state_funcs = {
 static const struct drm_private_state_funcs drm_bridge_priv_state_funcs_with_sro = {
 	.atomic_sro_compare_state = drm_bridge_atomic_compare_priv_state,
 	.atomic_sro_readout_state = drm_bridge_atomic_readout_priv_state,
+	.atomic_sro_install_state = drm_bridge_atomic_install_priv_state,
 	.atomic_create_state = drm_bridge_atomic_create_priv_state,
 	.atomic_duplicate_state = drm_bridge_atomic_duplicate_priv_state,
 	.atomic_destroy_state = drm_bridge_atomic_destroy_priv_state,

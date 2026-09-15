@@ -3462,6 +3462,7 @@ static const struct drm_display_mode microtips_mf_101hiebcaf0_c_mode = {
 	.vsync_start = 1200 + 24,
 	.vsync_end = 1200 + 24 + 8,
 	.vtotal = 1200 + 24 + 8 + 3,
+	.flags = DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC,
 };
 
 static const struct panel_desc microtips_mf_101hiebcaf0_c = {

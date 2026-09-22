@@ -191,6 +191,53 @@ static int xvsw_init_state(struct v4l2_subdev *subdev,
 	return 0;
 }
 
+static int xvsw_enum_mbus_code(struct v4l2_subdev *subdev,
+			       struct v4l2_subdev_state *sd_state,
+			       struct v4l2_subdev_mbus_code_enum *code)
+{
+	const struct v4l2_mbus_framefmt *format;
+
+	/*
+	 * The switch passes the data through without interpreting it, there's
+	 * no list of formats to enumerate. Report the format of the pad.
+	 */
+	if (code->index)
+		return -EINVAL;
+
+	format = v4l2_subdev_state_get_format(sd_state, code->pad);
+
+	code->code = format->code;
+
+	return 0;
+}
+
+static int xvsw_enum_frame_size(struct v4l2_subdev *subdev,
+				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_frame_size_enum *fse)
+{
+	struct xvswitch_device *xvsw = to_xvsw(subdev);
+	const struct v4l2_mbus_framefmt *format;
+
+	format = v4l2_subdev_state_get_format(sd_state, fse->pad);
+
+	if (fse->index || fse->code != format->code)
+		return -EINVAL;
+
+	if (fse->pad < xvsw->nsinks) {
+		fse->min_width = 1;
+		fse->max_width = XVIP_MAX_WIDTH;
+		fse->min_height = 1;
+		fse->max_height = XVIP_MAX_HEIGHT;
+	} else {
+		fse->min_width = format->width;
+		fse->max_width = format->width;
+		fse->min_height = format->height;
+		fse->max_height = format->height;
+	}
+
+	return 0;
+}
+
 static int xvsw_get_format(struct v4l2_subdev *subdev,
 			   struct v4l2_subdev_state *sd_state,
 			   struct v4l2_subdev_format *fmt)
@@ -286,8 +333,8 @@ static int xvsw_set_format(struct v4l2_subdev *subdev,
 }
 
 static struct v4l2_subdev_pad_ops xvsw_pad_ops = {
-	.enum_mbus_code = xvip_enum_mbus_code,
-	.enum_frame_size = xvip_enum_frame_size,
+	.enum_mbus_code = xvsw_enum_mbus_code,
+	.enum_frame_size = xvsw_enum_frame_size,
 	.get_fmt = xvsw_get_format,
 	.set_fmt = xvsw_set_format,
 	.enable_streams = xvsw_enable_streams,

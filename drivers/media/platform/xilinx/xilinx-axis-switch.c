@@ -37,8 +37,7 @@
  * @iomem: Base address of IP
  * @subdev: The v4l2 subdev structure
  * @pads: media pads
- * @routing: sink pad connected to each source pad (-1 if none)
- * @sink_users: number of started source pads fed by each sink pad
+ * @enabled_streams: mask of the enabled streams of each source pad
  * @nsinks: number of sink pads (1 to 8)
  * @nsources: number of source pads (2 to 8)
  * @tdest_routing: Whether TDEST routing is enabled
@@ -50,8 +49,7 @@ struct xvswitch_device {
 	void __iomem *iomem;
 	struct v4l2_subdev subdev;
 	struct media_pad *pads;
-	int routing[MAX_VSW_SRCS];
-	unsigned int sink_users[MAX_VSW_SINKS];
+	u64 enabled_streams[MAX_VSW_SRCS];
 	u32 nsinks;
 	u32 nsources;
 	bool tdest_routing;
@@ -92,15 +90,21 @@ static void xvsw_disable_all_ports(struct xvswitch_device *xvsw)
  */
 
 /*
- * Get the sink pad that feeds the given source pad, or a negative value if
- * there is none.
+ * Get the sink pad that feeds the given source pad.
  */
-static int xvsw_get_sink_pad(struct xvswitch_device *xvsw, u32 pad)
+static int xvsw_get_sink_pad(struct v4l2_subdev_state *state, u32 pad,
+			     u32 *sink_pad)
 {
-	if (xvsw->tdest_routing)
-		return 0;
+	struct v4l2_subdev_route *route;
 
-	return xvsw->routing[pad - xvsw->nsinks];
+	for_each_active_route(&state->routing, route) {
+		if (route->source_pad == pad) {
+			*sink_pad = route->sink_pad;
+			return 0;
+		}
+	}
+
+	return -EPIPE;
 }
 
 static void xvsw_set_pad_stream(struct xvswitch_device *xvsw, u32 pad,
@@ -120,23 +124,30 @@ static int xvsw_enable_streams(struct v4l2_subdev *subdev,
 			       u64 streams_mask)
 {
 	struct xvswitch_device *xvsw = to_xvsw(subdev);
-	int sink_pad = xvsw_get_sink_pad(xvsw, pad);
+	u64 *enabled = &xvsw->enabled_streams[pad - xvsw->nsinks];
+	u64 sink_streams;
+	u64 streams = streams_mask;
+	u32 sink_pad;
 	int ret;
 
-	if (sink_pad < 0)
-		return -EPIPE;
+	ret = xvsw_get_sink_pad(state, pad, &sink_pad);
+	if (ret)
+		return ret;
 
-	xvsw_set_pad_stream(xvsw, pad, sink_pad, true);
+	sink_streams = v4l2_subdev_state_xlate_streams(state, pad, sink_pad,
+						       &streams);
 
-	if (!xvsw->sink_users[sink_pad]) {
-		ret = xvip_enable_remote_stream(subdev, sink_pad, BIT_ULL(0));
-		if (ret) {
+	if (!*enabled)
+		xvsw_set_pad_stream(xvsw, pad, sink_pad, true);
+
+	ret = xvip_enable_remote_stream(subdev, sink_pad, sink_streams);
+	if (ret) {
+		if (!*enabled)
 			xvsw_set_pad_stream(xvsw, pad, sink_pad, false);
-			return ret;
-		}
+		return ret;
 	}
 
-	xvsw->sink_users[sink_pad]++;
+	*enabled |= streams_mask;
 
 	return 0;
 }
@@ -146,21 +157,28 @@ static int xvsw_disable_streams(struct v4l2_subdev *subdev,
 				u64 streams_mask)
 {
 	struct xvswitch_device *xvsw = to_xvsw(subdev);
-	int sink_pad = xvsw_get_sink_pad(xvsw, pad);
+	u64 *enabled = &xvsw->enabled_streams[pad - xvsw->nsinks];
+	u64 streams = streams_mask;
+	u64 sink_streams;
+	u32 sink_pad;
 	int ret;
 
-	if (sink_pad < 0)
-		return -EPIPE;
+	ret = xvsw_get_sink_pad(state, pad, &sink_pad);
+	if (ret)
+		return ret;
 
-	if (--xvsw->sink_users[sink_pad] == 0) {
-		ret = xvip_disable_remote_stream(subdev, sink_pad, BIT_ULL(0));
-		if (ret)
-			dev_err(xvsw->dev,
-				"failed to stop the source of pad %u: %d\n",
-				pad, ret);
-	}
+	sink_streams = v4l2_subdev_state_xlate_streams(state, pad, sink_pad,
+						       &streams);
 
-	xvsw_set_pad_stream(xvsw, pad, sink_pad, false);
+	ret = xvip_disable_remote_stream(subdev, sink_pad, sink_streams);
+	if (ret)
+		dev_err(xvsw->dev, "failed to stop the source of pad %u: %d\n",
+			pad, ret);
+
+	*enabled &= ~streams_mask;
+
+	if (!*enabled)
+		xvsw_set_pad_stream(xvsw, pad, sink_pad, false);
 
 	return 0;
 }
@@ -169,42 +187,98 @@ static int xvsw_disable_streams(struct v4l2_subdev *subdev,
  * V4L2 Subdevice Pad Operations
  */
 
-static int xvsw_init_state(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_state *sd_state)
+static const struct v4l2_mbus_framefmt xvsw_default_format = {
+	.code = MEDIA_BUS_FMT_RGB888_1X24,
+	.width = XVIP_MAX_WIDTH,
+	.height = XVIP_MAX_HEIGHT,
+	.field = V4L2_FIELD_NONE,
+	.colorspace = V4L2_COLORSPACE_SRGB,
+};
+
+static int __xvsw_set_routing(struct v4l2_subdev *subdev,
+			      struct v4l2_subdev_state *state,
+			      struct v4l2_subdev_krouting *routing)
 {
 	struct xvswitch_device *xvsw = to_xvsw(subdev);
-	unsigned int npads = xvsw->nsinks + xvsw->nsources;
+	enum v4l2_subdev_routing_restriction disallow;
+	int ret;
+
+	/*
+	 * The switch can neither duplicate nor merge streams, so the routing is
+	 * always one to one.
+	 *
+	 * In TDEST mode the streams are routed based on their TDEST value, so
+	 * the streams of the sink pad may end up on different source pads.
+	 *
+	 * In control register routing mode each master port selects a single
+	 * slave port and forwards all of its data, so we use
+	 * V4L2_SUBDEV_ROUTING_NO_STREAM_MIX.
+	 */
+	disallow = V4L2_SUBDEV_ROUTING_ONLY_1_TO_1;
+
+	if (!xvsw->tdest_routing)
+		disallow |= V4L2_SUBDEV_ROUTING_NO_STREAM_MIX;
+
+	ret = v4l2_subdev_routing_validate(subdev, routing, disallow);
+	if (ret)
+		return ret;
+
+	return v4l2_subdev_set_routing_with_fmt(subdev, state, routing,
+						&xvsw_default_format);
+}
+
+static int xvsw_set_routing(struct v4l2_subdev *subdev,
+			    struct v4l2_subdev_state *state,
+			    enum v4l2_subdev_format_whence which,
+			    struct v4l2_subdev_krouting *routing)
+{
+	if (which == V4L2_SUBDEV_FORMAT_ACTIVE &&
+	    media_entity_is_streaming(&subdev->entity))
+		return -EBUSY;
+
+	return __xvsw_set_routing(subdev, state, routing);
+}
+
+static int xvsw_init_state(struct v4l2_subdev *subdev,
+			   struct v4l2_subdev_state *state)
+{
+	struct xvswitch_device *xvsw = to_xvsw(subdev);
+	struct v4l2_subdev_route routes[MAX_VSW_SRCS] = { };
+	struct v4l2_subdev_krouting routing = {
+		.routes = routes,
+	};
 	unsigned int i;
 
-	for (i = 0; i < npads; i++) {
-		struct v4l2_mbus_framefmt *format;
+	routing.num_routes = xvsw->tdest_routing ?
+			     1 : min(xvsw->nsinks, xvsw->nsources);
 
-		format = v4l2_subdev_state_get_format(sd_state, i);
-
-		format->code = MEDIA_BUS_FMT_RGB888_1X24;
-		format->field = V4L2_FIELD_NONE;
-		format->colorspace = V4L2_COLORSPACE_SRGB;
-		format->width = XVIP_MAX_WIDTH;
-		format->height = XVIP_MAX_HEIGHT;
+	for (i = 0; i < routing.num_routes; ++i) {
+		routes[i].sink_pad = xvsw->tdest_routing ? 0 : i;
+		routes[i].sink_stream = 0;
+		routes[i].source_pad = xvsw->nsinks + i;
+		routes[i].source_stream = 0;
+		routes[i].flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE;
 	}
 
-	return 0;
+	return __xvsw_set_routing(subdev, state, &routing);
 }
 
 static int xvsw_enum_mbus_code(struct v4l2_subdev *subdev,
-			       struct v4l2_subdev_state *sd_state,
+			       struct v4l2_subdev_state *state,
 			       struct v4l2_subdev_mbus_code_enum *code)
 {
 	const struct v4l2_mbus_framefmt *format;
 
 	/*
 	 * The switch passes the data through without interpreting it, there's
-	 * no list of formats to enumerate. Report the format of the pad.
+	 * no list of formats to enumerate. Report the format of the stream.
 	 */
 	if (code->index)
 		return -EINVAL;
 
-	format = v4l2_subdev_state_get_format(sd_state, code->pad);
+	format = v4l2_subdev_state_get_format(state, code->pad, code->stream);
+	if (!format)
+		return -EINVAL;
 
 	code->code = format->code;
 
@@ -212,13 +286,15 @@ static int xvsw_enum_mbus_code(struct v4l2_subdev *subdev,
 }
 
 static int xvsw_enum_frame_size(struct v4l2_subdev *subdev,
-				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_state *state,
 				struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct xvswitch_device *xvsw = to_xvsw(subdev);
 	const struct v4l2_mbus_framefmt *format;
 
-	format = v4l2_subdev_state_get_format(sd_state, fse->pad);
+	format = v4l2_subdev_state_get_format(state, fse->pad, fse->stream);
+	if (!format)
+		return -EINVAL;
 
 	if (fse->index || fse->code != format->code)
 		return -EINVAL;
@@ -238,88 +314,23 @@ static int xvsw_enum_frame_size(struct v4l2_subdev *subdev,
 	return 0;
 }
 
-static int xvsw_get_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_state *sd_state,
-			   struct v4l2_subdev_format *fmt)
-{
-	struct xvswitch_device *xvsw = to_xvsw(subdev);
-	int pad = fmt->pad;
-
-	/*
-	 * If control reg routing and pad is source pad then
-	 * get corresponding sink pad. if no sink pad then
-	 * clear the format and return
-	 */
-
-	if (!xvsw->tdest_routing && pad >= xvsw->nsinks) {
-		pad = xvsw->routing[pad - xvsw->nsinks];
-		if (pad < 0) {
-			memset(&fmt->format, 0, sizeof(fmt->format));
-			return 0;
-		}
-	}
-
-	fmt->format = *v4l2_subdev_state_get_format(sd_state, pad);
-
-	return 0;
-}
-
 static int xvsw_set_format(struct v4l2_subdev *subdev,
-			   struct v4l2_subdev_state *sd_state,
+			   struct v4l2_subdev_state *state,
 			   struct v4l2_subdev_format *fmt)
 {
 	struct xvswitch_device *xvsw = to_xvsw(subdev);
 	struct v4l2_mbus_framefmt *format;
 
-	if (!xvsw->tdest_routing && fmt->pad >= xvsw->nsinks) {
-		/*
-		 * In case of control reg routing,
-		 * get the corresponding sink pad to source pad passed.
-		 *
-		 * The source pad format is always identical to the
-		 * sink pad format and can't be modified.
-		 *
-		 * If sink pad found then get_format for that pad
-		 * else clear the fmt->format as the source pad
-		 * isn't connected and return.
-		 */
-		return xvsw_get_format(subdev, sd_state, fmt);
-	}
-
-	if (xvsw->nsinks == 1 && fmt->pad != 0) {
-		struct v4l2_mbus_framefmt *sinkformat;
-
-		/*
-		 * in tdest routing if there is only one sink then all the
-		 * source pads will have same property as sink pad, assuming
-		 * streams going to each source pad will have same
-		 * properties.
-		 */
-
-		/* get sink pad format */
-		sinkformat = v4l2_subdev_state_get_format(sd_state, 0);
-
-		fmt->format = *sinkformat;
-
-		/* set sink pad format on source pad */
-		format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
-
-		*format = *sinkformat;
-
-		return 0;
-	}
-
 	/*
-	 * In TDEST routing mode, one can set any format on the pad as
-	 * it can't be checked which pad's data will travel to
-	 * which pad. E.g. In a system with 2 slaves and 4 masters,
-	 * S0 or S1 data can reach M0 thru M3 based on TDEST
-	 * S0 may have RBG and S1 may have YUV. M0, M1 stream RBG
-	 * and M2, M3 stream YUV based on TDEST.
-	 *
-	 * In Control reg routing mode, set format only for sink pads.
+	 * The source pad formats are always identical to the format of the
+	 * routed sink stream and can't be modified.
 	 */
-	format = v4l2_subdev_state_get_format(sd_state, fmt->pad);
+	if (fmt->pad >= xvsw->nsinks)
+		return v4l2_subdev_get_fmt(subdev, state, fmt);
+
+	format = v4l2_subdev_state_get_format(state, fmt->pad, fmt->stream);
+	if (!format)
+		return -EINVAL;
 
 	format->code = fmt->format.code;
 	format->width = fmt->format.width;
@@ -329,14 +340,20 @@ static int xvsw_set_format(struct v4l2_subdev *subdev,
 
 	fmt->format = *format;
 
+	format = v4l2_subdev_state_get_opposite_stream_format(state, fmt->pad,
+							      fmt->stream);
+	if (format)
+		*format = fmt->format;
+
 	return 0;
 }
 
 static struct v4l2_subdev_pad_ops xvsw_pad_ops = {
 	.enum_mbus_code = xvsw_enum_mbus_code,
 	.enum_frame_size = xvsw_enum_frame_size,
-	.get_fmt = xvsw_get_format,
+	.get_fmt = v4l2_subdev_get_fmt,
 	.set_fmt = xvsw_set_format,
+	.set_routing = xvsw_set_routing,
 	.enable_streams = xvsw_enable_streams,
 	.disable_streams = xvsw_disable_streams,
 };
@@ -353,30 +370,9 @@ static const struct v4l2_subdev_internal_ops xvsw_internal_ops = {
  * Media Operations
  */
 
-static bool xvsw_has_pad_interdep(struct media_entity *entity,
-				  unsigned int pad0, unsigned int pad1)
-{
-	struct xvswitch_device *xvsw =
-		container_of(entity, struct xvswitch_device, subdev.entity);
-	unsigned int sink0, sink1;
-
-	/* Two sinks are never connected together. */
-	if (pad0 < xvsw->nsinks && pad1 < xvsw->nsinks)
-		return false;
-
-	/* In TDEST routing, assume all sinks and sources are connected */
-	if (xvsw->tdest_routing)
-		return true;
-
-	sink0 = pad0 < xvsw->nsinks ? pad0 : xvsw->routing[pad0 - xvsw->nsinks];
-	sink1 = pad1 < xvsw->nsinks ? pad1 : xvsw->routing[pad1 - xvsw->nsinks];
-
-	return sink0 == sink1;
-}
-
 static const struct media_entity_operations xvsw_media_ops = {
 	.link_validate = v4l2_subdev_link_validate,
-	.has_pad_interdep = xvsw_has_pad_interdep,
+	.has_pad_interdep = v4l2_subdev_has_pad_interdep,
 };
 
 /* -----------------------------------------------------------------------------
@@ -512,13 +508,6 @@ static int xvsw_probe(struct platform_device *pdev)
 	for (; i < npads; ++i)
 		xvsw->pads[i].flags = MEDIA_PAD_FL_SOURCE;
 
-	/*
-	 * Initialize the routing table if none are connected.
-	 * Routing table is valid only incase routing is not TDEST based.
-	 */
-	for (i = 0; i < MAX_VSW_SRCS; ++i)
-		xvsw->routing[i] = -1;
-
 	ret = clk_prepare_enable(xvsw->aclk);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to enable aclk (%d)\n",
@@ -545,7 +534,7 @@ static int xvsw_probe(struct platform_device *pdev)
 	subdev->internal_ops = &xvsw_internal_ops;
 	strscpy(subdev->name, dev_name(&pdev->dev), sizeof(subdev->name));
 	v4l2_set_subdevdata(subdev, xvsw);
-	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+	subdev->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_STREAMS;
 	subdev->entity.function = MEDIA_ENT_F_VID_MUX;
 	subdev->entity.ops = &xvsw_media_ops;
 

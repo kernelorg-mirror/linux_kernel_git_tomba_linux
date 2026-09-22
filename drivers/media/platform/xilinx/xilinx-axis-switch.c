@@ -38,6 +38,7 @@
  * @subdev: The v4l2 subdev structure
  * @pads: media pads
  * @routing: sink pad connected to each source pad (-1 if none)
+ * @sink_users: number of started source pads fed by each sink pad
  * @nsinks: number of sink pads (1 to 8)
  * @nsources: number of source pads (2 to 8)
  * @tdest_routing: Whether TDEST routing is enabled
@@ -50,6 +51,7 @@ struct xvswitch_device {
 	struct v4l2_subdev subdev;
 	struct media_pad *pads;
 	int routing[MAX_VSW_SRCS];
+	unsigned int sink_users[MAX_VSW_SINKS];
 	u32 nsinks;
 	u32 nsources;
 	bool tdest_routing;
@@ -73,47 +75,92 @@ static inline void xvswitch_write(struct xvswitch_device *xvsw, u32 addr,
 	iowrite32(value, xvsw->iomem + addr);
 }
 
-/* -----------------------------------------------------------------------------
- * V4L2 Subdevice Video Operations
- */
-
-static int xvsw_s_stream(struct v4l2_subdev *subdev, int enable)
+/* Only valid in control register routing mode. */
+static void xvsw_disable_all_ports(struct xvswitch_device *xvsw)
 {
-	struct xvswitch_device *xvsw = to_xvsw(subdev);
 	unsigned int i;
 
-	/* Nothing to be done in case of TDEST routing */
+	for (i = 0; i < xvsw->nsources; i++)
+		xvswitch_write(xvsw, XVSW_MI_MUX_REG_BASE + (i * 4),
+			       XVSW_MI_MUX_DISABLE_MASK);
+
+	xvswitch_write(xvsw, XVSW_CTRL_REG, XVSW_CTRL_REG_UPDATE_MASK);
+}
+
+/* -----------------------------------------------------------------------------
+ * Streaming
+ */
+
+/*
+ * Get the sink pad that feeds the given source pad, or a negative value if
+ * there is none.
+ */
+static int xvsw_get_sink_pad(struct xvswitch_device *xvsw, u32 pad)
+{
 	if (xvsw->tdest_routing)
 		return 0;
 
-	if (!enable) {
-		/* In control reg routing, disable all master ports */
-		for (i = 0; i < xvsw->nsources; i++) {
-			xvswitch_write(xvsw, XVSW_MI_MUX_REG_BASE + (i * 4),
-				       XVSW_MI_MUX_DISABLE_MASK);
-		}
-		xvswitch_write(xvsw, XVSW_CTRL_REG, XVSW_CTRL_REG_UPDATE_MASK);
-		return 0;
-	}
+	return xvsw->routing[pad - xvsw->nsinks];
+}
 
-	/*
-	 * In case of control reg routing,
-	 * from routing table write the values into respective reg
-	 * and enable
-	 */
-	for (i = 0; i < MAX_VSW_SRCS; i++) {
-		u32 val;
+static void xvsw_set_pad_stream(struct xvswitch_device *xvsw, u32 pad,
+				u32 sink_pad, bool enable)
+{
+	/* Nothing to be done in case of TDEST routing */
+	if (xvsw->tdest_routing)
+		return;
 
-		if (xvsw->routing[i] != -1)
-			val = xvsw->routing[i];
-		else
-			val = XVSW_MI_MUX_DISABLE_MASK;
-
-		xvswitch_write(xvsw, XVSW_MI_MUX_REG_BASE + (i * 4),
-			       val);
-	}
-
+	xvswitch_write(xvsw, XVSW_MI_MUX_REG_BASE + (pad - xvsw->nsinks) * 4,
+		       enable ? sink_pad : XVSW_MI_MUX_DISABLE_MASK);
 	xvswitch_write(xvsw, XVSW_CTRL_REG, XVSW_CTRL_REG_UPDATE_MASK);
+}
+
+static int xvsw_enable_streams(struct v4l2_subdev *subdev,
+			       struct v4l2_subdev_state *state, u32 pad,
+			       u64 streams_mask)
+{
+	struct xvswitch_device *xvsw = to_xvsw(subdev);
+	int sink_pad = xvsw_get_sink_pad(xvsw, pad);
+	int ret;
+
+	if (sink_pad < 0)
+		return -EPIPE;
+
+	xvsw_set_pad_stream(xvsw, pad, sink_pad, true);
+
+	if (!xvsw->sink_users[sink_pad]) {
+		ret = xvip_enable_remote_stream(subdev, sink_pad, BIT_ULL(0));
+		if (ret) {
+			xvsw_set_pad_stream(xvsw, pad, sink_pad, false);
+			return ret;
+		}
+	}
+
+	xvsw->sink_users[sink_pad]++;
+
+	return 0;
+}
+
+static int xvsw_disable_streams(struct v4l2_subdev *subdev,
+				struct v4l2_subdev_state *state, u32 pad,
+				u64 streams_mask)
+{
+	struct xvswitch_device *xvsw = to_xvsw(subdev);
+	int sink_pad = xvsw_get_sink_pad(xvsw, pad);
+	int ret;
+
+	if (sink_pad < 0)
+		return -EPIPE;
+
+	if (--xvsw->sink_users[sink_pad] == 0) {
+		ret = xvip_disable_remote_stream(subdev, sink_pad, BIT_ULL(0));
+		if (ret)
+			dev_err(xvsw->dev,
+				"failed to stop the source of pad %u: %d\n",
+				pad, ret);
+	}
+
+	xvsw_set_pad_stream(xvsw, pad, sink_pad, false);
 
 	return 0;
 }
@@ -302,10 +349,6 @@ done:
 	return ret;
 }
 
-static struct v4l2_subdev_video_ops xvsw_video_ops = {
-	.s_stream = xvsw_s_stream,
-};
-
 static struct v4l2_subdev_pad_ops xvsw_pad_ops = {
 	.enum_mbus_code = xvip_enum_mbus_code,
 	.enum_frame_size = xvip_enum_frame_size,
@@ -313,10 +356,11 @@ static struct v4l2_subdev_pad_ops xvsw_pad_ops = {
 	.set_fmt = xvsw_set_format,
 /*	.get_routing = xvsw_get_routing,*/
 	.set_routing = xvsw_set_routing,
+	.enable_streams = xvsw_enable_streams,
+	.disable_streams = xvsw_disable_streams,
 };
 
 static struct v4l2_subdev_ops xvsw_ops = {
-	.video = &xvsw_video_ops,
 	.pad = &xvsw_pad_ops,
 };
 
@@ -510,6 +554,8 @@ static int xvsw_probe(struct platform_device *pdev)
 			clk_disable_unprepare(xvsw->aclk);
 			return ret;
 		}
+
+		xvsw_disable_all_ports(xvsw);
 	}
 
 	subdev = &xvsw->subdev;

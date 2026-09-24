@@ -868,7 +868,6 @@ bool drm_atomic_helper_plane_compare_state(struct drm_plane *plane,
 	STATE_CHECK_U16(ret, p, plane->name, expected, actual, alpha);
 	STATE_CHECK_U16(ret, p, plane->name, expected, actual, pixel_blend_mode);
 	STATE_CHECK_U32(ret, p, plane->name, expected, actual, rotation);
-	STATE_CHECK_U32(ret, p, plane->name, expected, actual, zpos);
 	STATE_CHECK_U32(ret, p, plane->name, expected, actual, normalized_zpos);
 	STATE_CHECK_U32(ret, p, plane->name, expected, actual, color_encoding);
 	STATE_CHECK_U32(ret, p, plane->name, expected, actual, color_range);

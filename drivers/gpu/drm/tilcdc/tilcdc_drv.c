@@ -422,7 +422,9 @@ static int tilcdc_pdev_probe(struct platform_device *pdev)
 		goto unregister_cpufreq_notif;
 	}
 
-	drm_mode_config_reset(ddev);
+	ret = drm_mode_config_create_initial_state(ddev);
+	if (ret)
+		goto stop_poll;
 
 	drm_kms_helper_poll_init(ddev);
 

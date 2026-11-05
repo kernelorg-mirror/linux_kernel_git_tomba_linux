@@ -939,9 +939,7 @@ int vmw_kms_sou_init_display(struct vmw_private *dev_priv)
 
 	dev_priv->active_display_unit = vmw_du_screen_object;
 
-	drm_mode_config_reset(dev);
-
-	return 0;
+	return drm_mode_config_create_initial_state(dev);
 }
 
 static int do_bo_define_gmrfb(struct vmw_private *dev_priv,

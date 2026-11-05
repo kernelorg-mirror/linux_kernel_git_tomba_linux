@@ -1708,7 +1708,5 @@ int vmw_kms_stdu_init_display(struct vmw_private *dev_priv)
 		}
 	}
 
-	drm_mode_config_reset(dev);
-
-	return 0;
+	return drm_mode_config_create_initial_state(dev);
 }

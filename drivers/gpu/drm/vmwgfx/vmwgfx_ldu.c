@@ -567,7 +567,9 @@ int vmw_kms_ldu_init_display(struct vmw_private *dev_priv)
 
 	dev_priv->active_display_unit = vmw_du_legacy;
 
-	drm_mode_config_reset(dev);
+	ret = drm_mode_config_create_initial_state(dev);
+	if (ret)
+		goto err_free;
 
 	return 0;
 

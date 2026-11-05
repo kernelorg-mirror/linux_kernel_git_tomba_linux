@@ -1312,8 +1312,7 @@ int qxl_modeset_init(struct qxl_device *qdev)
 	if (ret)
 		return ret;
 
-	drm_mode_config_reset(&qdev->ddev);
-	return 0;
+	return drm_mode_config_create_initial_state(&qdev->ddev);
 }
 
 void qxl_modeset_fini(struct qxl_device *qdev)

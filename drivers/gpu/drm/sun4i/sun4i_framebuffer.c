@@ -10,6 +10,7 @@
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_blend.h>
 #include <drm/drm_gem_framebuffer_helper.h>
+#include <drm/drm_print.h>
 
 #include "sun4i_drv.h"
 #include "sun4i_framebuffer.h"
@@ -26,7 +27,8 @@ static const struct drm_mode_config_helper_funcs sun4i_de_mode_config_helpers = 
 
 void sun4i_framebuffer_init(struct drm_device *drm)
 {
-	drm_mode_config_reset(drm);
+	drm_WARN(drm, drm_mode_config_create_initial_state(drm),
+		 "Failed to create state\n");
 
 	drm->mode_config.max_width = 8192;
 	drm->mode_config.max_height = 8192;

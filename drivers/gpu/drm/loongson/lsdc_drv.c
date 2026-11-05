@@ -247,7 +247,9 @@ lsdc_create_device(struct pci_dev *pdev,
 	if (ret)
 		return ERR_PTR(ret);
 
-	drm_mode_config_reset(ddev);
+	ret = drm_mode_config_create_initial_state(ddev);
+	if (ret)
+		return ERR_PTR(ret);
 
 	return ldev;
 }

@@ -1354,7 +1354,9 @@ static int ingenic_drm_bind(struct device *dev, bool has_components)
 		goto err_drvdata;
 	}
 
-	drm_mode_config_reset(drm);
+	ret = drm_mode_config_create_initial_state(drm);
+	if (ret)
+		goto err_drvdata;
 
 	ret = clk_prepare_enable(priv->pix_clk);
 	if (ret) {

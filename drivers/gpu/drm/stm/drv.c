@@ -104,7 +104,9 @@ static int drv_load(struct drm_device *ddev)
 	if (ret)
 		return ret;
 
-	drm_mode_config_reset(ddev);
+	ret = drm_mode_config_create_initial_state(ddev);
+	if (ret)
+		return ret;
 	drm_kms_helper_poll_init(ddev);
 
 	platform_set_drvdata(pdev, ddev);

@@ -9,10 +9,13 @@
 #include <linux/debugfs.h>
 #include <linux/err.h>
 #include <linux/export.h>
+#include <linux/media-bus-format.h>
 #include <linux/module.h>
 #include <linux/of.h>
 
 #include <drm/drm_atomic_helper.h>
+#include <drm/drm_atomic_state_readout.h>
+#include <drm/drm_atomic_state_readout_helper.h>
 #include <drm/drm_bridge.h>
 #include <drm/drm_connector.h>
 #include <drm/drm_crtc.h>
@@ -83,7 +86,30 @@ static int panel_bridge_attach(struct drm_bridge *bridge,
 {
 	struct drm_panel *panel = drm_bridge_to_panel(bridge);
 	struct drm_connector *connector = &panel->connector;
+	bool upstream_readout = false;
 	int ret;
+
+	/*
+	 * drm_bridge_connector_init() picks the connector readout
+	 * provider from the last bridge of the chain carrying
+	 * DRM_BRIDGE_OP_CONNECTOR_HW_READOUT. Only provide the
+	 * fallback readout of a panel bridge when no bridge earlier
+	 * in the chain provides one, as those know the actual link
+	 * state while a panel bridge can only assume the panel is
+	 * enabled.
+	 */
+	drm_for_each_bridge_in_chain(encoder, iter) {
+		if (iter == bridge)
+			break;
+
+		if (iter->ops & DRM_BRIDGE_OP_CONNECTOR_HW_READOUT) {
+			upstream_readout = true;
+			break;
+		}
+	}
+
+	if (!upstream_readout)
+		bridge->ops |= DRM_BRIDGE_OP_CONNECTOR_HW_READOUT;
 
 	if (flags & DRM_BRIDGE_ATTACH_NO_CONNECTOR)
 		return 0;
@@ -226,6 +252,100 @@ static void panel_bridge_debugfs_init(struct drm_bridge *bridge,
 		panel->funcs->debugfs_init(panel, root);
 }
 
+/*
+ * A panel bridge has no state of its own to read out of the hardware:
+ * reconstruct the bus configuration the atomic helpers negotiate
+ * instead.
+ *
+ * The panel bridge is always the last bridge of a chain, and the
+ * negotiation picks the first connector display info format as its
+ * output format (or MEDIA_BUS_FMT_FIXED when the display info has
+ * none), which drm_atomic_helper_bridge_propagate_bus_fmt() passes
+ * through to its input. drm_atomic_bridge_propagate_bus_flags()
+ * similarly propagates the display info flags to both its output and
+ * input. This is also what happens when the display info has no
+ * formats yet, like during the initial state creation at probe time
+ * before any mode has been read: the bus configuration then reports
+ * a fixed format, which is harmless as the initial state is never
+ * compared, and every commit negotiates the bus configuration anew.
+ *
+ * The format the negotiation selects can only differ from the first
+ * display info format when the connector reports several formats and
+ * the rest of the bridge chain rejects it, which panel connectors
+ * don't do.
+ */
+static int
+panel_bridge_readout_state(struct drm_bridge *bridge,
+			   struct drm_atomic_sro_state *state,
+			   struct drm_bridge_state *bridge_state,
+			   struct drm_crtc_state *crtc_state,
+			   struct drm_connector_state *conn_state)
+{
+	struct drm_connector *connector = conn_state->connector;
+	struct drm_display_info *info = &connector->display_info;
+	u32 format;
+
+	if (info->num_bus_formats)
+		format = info->bus_formats[0];
+	else
+		format = MEDIA_BUS_FMT_FIXED;
+
+	bridge_state->input_bus_cfg.format = format;
+	bridge_state->output_bus_cfg.format = format;
+
+	bridge_state->input_bus_cfg.flags = info->bus_flags;
+	bridge_state->output_bus_cfg.flags = info->bus_flags;
+
+	return 0;
+}
+
+/*
+ * A panel bridge has no way to read the panel state out of the
+ * hardware: assume the panel is enabled whenever its pipeline is.
+ */
+static int
+panel_bridge_connector_readout(struct drm_bridge *bridge,
+			       struct drm_atomic_sro_state *state,
+			       struct drm_connector_state *conn_state)
+{
+	struct drm_connector *connector = conn_state->connector;
+	struct drm_crtc_state *crtc_state;
+	struct drm_encoder *encoder;
+	struct drm_crtc *crtc;
+
+	encoder = bridge->encoder;
+	if (!encoder->funcs || !encoder->funcs->atomic_sro_get_current_crtc)
+		return -ENODEV;
+
+	crtc = encoder->funcs->atomic_sro_get_current_crtc(encoder);
+	if (!crtc)
+		return -ENODEV;
+
+	crtc_state = drm_atomic_sro_get_crtc_state(state, crtc);
+	if (!crtc_state)
+		return -ENODEV;
+
+	/* The pipeline is off, there is nothing to read out. */
+	if (!crtc_state->active)
+		return 0;
+
+	crtc_state->encoder_mask |= drm_encoder_mask(encoder);
+	crtc_state->connector_mask |= drm_connector_mask(connector);
+
+	/*
+	 * drm_atomic_set_crtc_for_connector() takes a connector
+	 * reference when setting the crtc pointer, which is later
+	 * released by __drm_atomic_helper_connector_destroy_state().
+	 * The readout bypasses that path, so take the reference
+	 * explicitly.
+	 */
+	drm_connector_get(connector);
+	conn_state->crtc = crtc;
+	conn_state->best_encoder = encoder;
+
+	return 0;
+}
+
 static const struct drm_bridge_funcs panel_bridge_bridge_funcs = {
 	.attach = panel_bridge_attach,
 	.detach = panel_bridge_detach,
@@ -239,6 +359,9 @@ static const struct drm_bridge_funcs panel_bridge_bridge_funcs = {
 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
 	.atomic_get_input_bus_fmts = drm_atomic_helper_bridge_propagate_bus_fmt,
 	.debugfs_init = panel_bridge_debugfs_init,
+	.atomic_sro_readout_state = panel_bridge_readout_state,
+	.atomic_sro_compare_state = drm_atomic_helper_bridge_compare_state,
+	.atomic_sro_connector_readout = panel_bridge_connector_readout,
 };
 
 /**

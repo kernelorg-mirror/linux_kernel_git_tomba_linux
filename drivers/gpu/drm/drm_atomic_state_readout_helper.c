@@ -787,3 +787,33 @@ int drm_atomic_helper_sro_readout_state(struct drm_device *dev)
 	return 0;
 }
 EXPORT_SYMBOL(drm_atomic_helper_sro_readout_state);
+
+/**
+ * drm_atomic_helper_print_state_mismatch - report a state comparison mismatch
+ * @p: printer to report through
+ * @name: human-readable name of the object (e.g. plane or CRTC name)
+ * @field: name of the mismatching field
+ * @format: printf-style format string describing the mismatch
+ *
+ * Helper used by atomic_sro_compare_state implementations and the
+ * STATE_CHECK_* macros to report a field-level mismatch between the
+ * committed state and the state read back from hardware.
+ */
+void __printf(4, 5)
+drm_atomic_helper_print_state_mismatch(struct drm_printer *p,
+				       const char *name,
+				       const char *field,
+				       const char *format, ...)
+{
+	struct va_format vaf;
+	va_list args;
+
+	va_start(args, format);
+	vaf.fmt = format;
+	vaf.va = &args;
+
+	drm_printf(p, "%s configuration mismatch in %s %pV\n", name, field, &vaf);
+
+	va_end(args);
+}
+EXPORT_SYMBOL(drm_atomic_helper_print_state_mismatch);

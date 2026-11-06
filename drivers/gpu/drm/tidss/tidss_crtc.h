@@ -47,4 +47,6 @@ struct tidss_crtc *tidss_crtc_create(struct tidss_device *tidss,
 				     u32 hw_videoport,
 				     struct drm_plane *primary,
 				     bool dpi_output);
+struct drm_crtc *tidss_crtc_from_hw_videoport(struct tidss_device *tidss,
+					      u32 hw_videoport);
 #endif

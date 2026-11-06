@@ -2773,8 +2773,9 @@ static void dispc_vp_init(struct dispc_device *dispc)
 		VP_REG_FLD_MOD(dispc, i, DISPC_VP_CONFIG, 1,
 			       DISPC_VP_CONFIG_GAMMAENABLE_MASK);
 
-		if (dispc->feat->has_vp_control_dpienable) {
-			/* Disable DPIENABLE for all VPs */
+		if (dispc->feat->has_vp_control_dpienable &&
+		    !dispc_vp_is_enabled(dispc, i)) {
+			/* Disable DPIENABLE for the stopped VPs */
 			VP_REG_FLD_MOD(dispc, i, DISPC_VP_CONTROL, 0,
 				       DISPC_VP_CONTROL_DPIENABLE_MASK);
 		}

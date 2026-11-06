@@ -1597,6 +1597,37 @@ struct drm_mode_config_helper_funcs {
 	 * This hook is optional.
 	 */
 	int (*atomic_commit_setup)(struct drm_atomic_commit *state);
+
+	/**
+	 * @atomic_sro_build_state:
+	 *
+	 * Builds a &struct drm_atomic_sro_state from the current hardware
+	 * state by calling the atomic_sro_readout_state hooks on the KMS
+	 * objects to read out.
+	 *
+	 * This hook is called both at initialization time, to create the
+	 * initial state from what the firmware programmed, and after
+	 * blocking commits, to read back the hardware state and compare it
+	 * to what was committed.
+	 *
+	 * When @commit is NULL, the state of every object in the device is
+	 * read out, and the caller must hold all the modeset locks, as
+	 * drm_mode_config_create_initial_state() does.
+	 *
+	 * When @commit is not NULL, only the objects that have a state in
+	 * @commit are read out. The caller must hold the locks of the
+	 * objects in @commit through its acquire context, and the readout
+	 * hooks must not access the state of any object outside of the
+	 * commit, since its locks aren't held.
+	 *
+	 * RETURNS:
+	 *
+	 * A &struct drm_atomic_sro_state on success, an error pointer
+	 * otherwise.
+	 */
+	struct drm_atomic_sro_state *
+	(*atomic_sro_build_state)(struct drm_device *dev,
+				  struct drm_atomic_commit *commit);
 };
 
 #endif

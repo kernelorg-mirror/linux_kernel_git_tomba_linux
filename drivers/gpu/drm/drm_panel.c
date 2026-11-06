@@ -346,6 +346,27 @@ panel_bridge_connector_readout(struct drm_bridge *bridge,
 	return 0;
 }
 
+static void
+panel_bridge_atomic_sro_install_state(struct drm_bridge *bridge,
+				      struct drm_bridge_state *bridge_state,
+				      struct drm_crtc_state *crtc_state,
+				      struct drm_connector_state *conn_state)
+{
+	struct drm_panel *panel = drm_bridge_to_panel(bridge);
+
+	if (!crtc_state->active)
+		return;
+
+	/*
+	 * FIXME: HACK: This is not correct. We should have some kind of sro-install
+	 * for panels too, but it's not so trivial. However, this helps
+	 * us with the runtime-pm from panel simple.
+	 */
+
+	drm_panel_prepare(panel);
+	drm_panel_enable(panel);
+}
+
 static const struct drm_bridge_funcs panel_bridge_bridge_funcs = {
 	.attach = panel_bridge_attach,
 	.detach = panel_bridge_detach,
@@ -362,6 +383,7 @@ static const struct drm_bridge_funcs panel_bridge_bridge_funcs = {
 	.atomic_sro_readout_state = panel_bridge_readout_state,
 	.atomic_sro_compare_state = drm_atomic_helper_bridge_compare_state,
 	.atomic_sro_connector_readout = panel_bridge_connector_readout,
+	.atomic_sro_install_state = panel_bridge_atomic_sro_install_state,
 };
 
 /**

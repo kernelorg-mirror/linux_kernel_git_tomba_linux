@@ -6,12 +6,16 @@
 
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
+#include <drm/drm_atomic_state_readout.h>
+#include <drm/drm_atomic_state_readout_helper.h>
 #include <drm/drm_blend.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_fb_dma_helper.h>
 #include <drm/drm_fourcc.h>
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_gem_atomic_helper.h>
+#include <drm/drm_gem_dma_helper.h>
+#include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_panic_helper.h>
 
 #include "tidss_crtc.h"
@@ -166,11 +170,232 @@ static const struct drm_plane_helper_funcs tidss_primary_plane_helper_funcs = {
 	.get_scanout_buffer = drm_fb_dma_get_scanout_buffer,
 };
 
+static const struct drm_framebuffer_funcs tidss_plane_readout_fb_funcs = {
+	.destroy	= drm_gem_fb_destroy,
+};
+
+static void tidss_plane_readout_gem_free(struct drm_gem_object *obj)
+{
+	struct drm_gem_dma_object *dma_obj = to_drm_gem_dma_obj(obj);
+
+	drm_gem_object_release(obj);
+	kfree(dma_obj);
+}
+
+static const struct drm_gem_object_funcs tidss_plane_readout_gem_funcs = {
+	.free = tidss_plane_readout_gem_free,
+	.print_info = drm_gem_dma_object_print_info,
+};
+
+static struct drm_framebuffer *tidss_plane_readout_fb(struct drm_plane *plane)
+{
+	struct drm_device *ddev = plane->dev;
+	struct tidss_device *tidss = to_tidss(ddev);
+	struct dispc_device *dispc = tidss->dispc;
+	struct tidss_plane *tplane = to_tidss_plane(plane);
+	const struct drm_format_info *info;
+	struct drm_gem_dma_object *dma_obj;
+	struct drm_framebuffer *fb;
+	int ret;
+
+	fb = kzalloc_obj(*fb);
+	if (!fb)
+		return ERR_PTR(-ENOMEM);
+
+	fb->dev = plane->dev;
+
+	info = dispc_plane_get_current_format(dispc, tplane->hw_plane_id);
+	if (IS_ERR(info)) {
+		ret = PTR_ERR(info);
+		goto err_free_fb;
+	}
+
+	// TODO: Figure out YUV and multiplanar formats, along with
+	// the color encoding and range
+	if (info->is_yuv) {
+		ret = -EINVAL;
+		goto err_free_fb;
+	}
+
+	fb->format = info;
+
+	dispc_plane_get_picture_size(dispc, tplane->hw_plane_id, &fb->width,
+				     &fb->height);
+
+	/*
+	 * A pixel increment of 1 means that the DMA engine fetches every
+	 * pixel of the source buffer. Any other value means that
+	 * horizontal decimation is enabled, and the buffer geometry
+	 * cannot be reconstructed from the registers.
+	 */
+	if (dispc_plane_get_pixel_inc(dispc, tplane->hw_plane_id) != 1) {
+		ret = -EINVAL;
+		goto err_free_fb;
+	}
+
+	/*
+	 * The row increment register holds the extra bytes between the
+	 * end of a row of the picture and the beginning of the next one,
+	 * which includes any padding the firmware might have programmed.
+	 */
+	fb->pitches[0] = fb->width * (drm_format_info_bpp(info, 0) / 8) +
+			 dispc_plane_get_row_inc(dispc, tplane->hw_plane_id) - 1;
+
+	/*
+	 * The DMA base address can have an offset into the firmware's
+	 * buffer baked in, and there is no way to recover it. The GEM
+	 * object starts at the base address, so the offset is 0.
+	 */
+	fb->offsets[0] = 0;
+
+	dma_obj = kzalloc_obj(*dma_obj);
+	if (!dma_obj) {
+		ret = -ENOMEM;
+		goto err_free_fb;
+	}
+
+	dma_obj->base.funcs = &tidss_plane_readout_gem_funcs;
+	drm_gem_private_object_init(ddev, &dma_obj->base,
+				    PAGE_ALIGN(fb->pitches[0] * fb->height));
+	dma_obj->dma_addr = dispc_plane_get_dma_addr(dispc, tplane->hw_plane_id);
+	fb->obj[0] = &dma_obj->base;
+
+	ret = drm_framebuffer_init(plane->dev, fb, &tidss_plane_readout_fb_funcs);
+	if (ret) {
+		drm_gem_object_put(&dma_obj->base);
+		kfree(fb);
+		return ERR_PTR(ret);
+	}
+
+	return fb;
+
+err_free_fb:
+	kfree(fb);
+	return ERR_PTR(ret);
+}
+
+/*
+ * Returns NULL for a plane without a representation in the DRM state: no
+ * enabled overlay layer takes it as input, or it feeds a videoport
+ * without a CRTC.
+ */
+static struct drm_crtc *tidss_plane_readout_crtc(struct drm_plane *plane,
+						 int *crtc_x, int *crtc_y,
+						 u32 *normalized_zpos)
+{
+	struct tidss_device *tidss = to_tidss(plane->dev);
+	struct tidss_plane *tplane = to_tidss_plane(plane);
+	u32 hw_videoport;
+
+	if (dispc_ovr_get_plane(tidss->dispc, tplane->hw_plane_id,
+				&hw_videoport, crtc_x, crtc_y, normalized_zpos))
+		return NULL;
+
+	return tidss_crtc_from_hw_videoport(tidss, hw_videoport);
+}
+
+static int tidss_plane_atomic_readout_state(struct drm_plane *plane,
+					    struct drm_atomic_sro_state *state,
+					    struct drm_plane_state *plane_state)
+{
+	struct drm_device *ddev = plane->dev;
+	struct tidss_device *tidss = to_tidss(ddev);
+	struct dispc_device *dispc = tidss->dispc;
+	struct tidss_plane *tplane = to_tidss_plane(plane);
+	struct drm_crtc_state *crtc_state;
+	struct drm_framebuffer *fb;
+	struct drm_crtc *crtc;
+	unsigned int in_w, in_h;
+	int crtc_x, crtc_y;
+	u32 normalized_zpos;
+	int ret;
+
+	tidss_runtime_get(tidss);
+
+	if (!dispc_plane_is_enabled(dispc, tplane->hw_plane_id))
+		goto out;
+
+	crtc = tidss_plane_readout_crtc(plane, &crtc_x, &crtc_y,
+					&normalized_zpos);
+	if (!crtc)
+		goto out;
+
+	crtc_state = drm_atomic_sro_get_crtc_state(state, crtc);
+	if (!crtc_state) {
+		ret = -ENODEV;
+		goto err_runtime_pm;
+	}
+
+	fb = tidss_plane_readout_fb(plane);
+	if (IS_ERR(fb)) {
+		ret = PTR_ERR(fb);
+		goto err_runtime_pm;
+	}
+
+	plane_state->fb = fb;
+	plane_state->crtc = crtc;
+	plane_state->visible = true;
+
+	dispc_plane_get_picture_size(dispc, tplane->hw_plane_id, &in_w, &in_h);
+	plane_state->src_w = in_w << 16;
+	plane_state->src_h = in_h << 16;
+
+	dispc_plane_get_size(dispc, tplane->hw_plane_id, &plane_state->crtc_w,
+			     &plane_state->crtc_h);
+
+	plane_state->crtc_x = crtc_x;
+	plane_state->crtc_y = crtc_y;
+
+	/*
+	 * The overlay layer index a plane is routed to is its
+	 * normalized zpos, as that is what the atomic update uses as
+	 * the layer index. The raw zpos property userspace set
+	 * cannot be recovered from the hardware.
+	 */
+	plane_state->normalized_zpos = normalized_zpos;
+	plane_state->zpos = normalized_zpos;
+
+	// TODO: Handle src_x/src_y, see DISPC_VID_BA_0
+
+	plane_state->src.x1 = 0;
+	plane_state->src.x2 = plane_state->src_w;
+	plane_state->src.y1 = 0;
+	plane_state->src.y2 = plane_state->src_h;
+	plane_state->dst.x1 = crtc_x;
+	plane_state->dst.x2 = crtc_x + plane_state->crtc_w;
+	plane_state->dst.y1 = crtc_y;
+	plane_state->dst.y2 = crtc_y + plane_state->crtc_h;
+
+	/*
+	 * The global alpha register is 8 bits wide and is programmed
+	 * from the high byte of the 16 bits alpha property.
+	 * Replicating the byte is the only inverse that preserves the
+	 * fraction of full opacity (0x00 -> 0x0000, 0xff -> 0xffff)
+	 * and round-trips through a program-then-readout cycle.
+	 */
+	plane_state->alpha =
+		dispc_plane_get_global_alpha(dispc, tplane->hw_plane_id) * 0x0101;
+	plane_state->pixel_blend_mode =
+		dispc_plane_get_blend_mode(dispc, tplane->hw_plane_id);
+
+	crtc_state->plane_mask |= drm_plane_mask(plane);
+
+out:
+	tidss_runtime_put(tidss);
+	return 0;
+
+err_runtime_pm:
+	tidss_runtime_put(tidss);
+	return ret;
+}
+
 static const struct drm_plane_funcs tidss_plane_funcs = {
 	.update_plane = drm_atomic_helper_update_plane,
 	.disable_plane = drm_atomic_helper_disable_plane,
 	.destroy = drm_plane_destroy,
 	.atomic_create_state = drm_atomic_helper_plane_create_state,
+	.atomic_sro_readout_state = tidss_plane_atomic_readout_state,
+	.atomic_sro_compare_state = drm_atomic_helper_plane_compare_state,
 	.atomic_duplicate_state = drm_atomic_helper_plane_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_plane_destroy_state,
 	DRM_PANIC_PLANE_FUNCS,

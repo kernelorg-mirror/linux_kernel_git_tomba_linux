@@ -1077,6 +1077,7 @@ static void drm_test_sro_readout_and_compare_blanked(struct kunit *test)
 {
 	struct drm_modeset_acquire_ctx ctx;
 	struct drm_connector_state *conn_state;
+	struct drm_plane_state *plane_state;
 	struct drm_atomic_commit *commit;
 	struct sro_test_priv *priv;
 	struct drm_crtc_state *crtc_state;
@@ -1100,9 +1101,15 @@ static void drm_test_sro_readout_and_compare_blanked(struct kunit *test)
 	conn_state = drm_atomic_get_connector_state(commit, &priv->connector);
 	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, conn_state);
 
+	plane_state = drm_atomic_get_plane_state(commit, priv->plane);
+	KUNIT_ASSERT_NOT_ERR_OR_NULL(test, plane_state);
+
+	ret = drm_atomic_set_crtc_for_plane(plane_state, priv->crtc);
+	KUNIT_ASSERT_EQ(test, ret, 0);
+
 	/*
-	 * A DPMS off commit only clears active: the connector is still
-	 * bound to its CRTC in the committed state.
+	 * A DPMS off commit only clears active: the connector and the
+	 * plane are still bound to their CRTC in the committed state.
 	 */
 	crtc_state->active = false;
 	KUNIT_ASSERT_PTR_EQ(test, conn_state->crtc, priv->crtc);

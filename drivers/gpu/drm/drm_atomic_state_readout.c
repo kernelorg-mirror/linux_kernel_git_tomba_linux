@@ -938,6 +938,10 @@ bool drm_atomic_sro_readout_and_compare(struct drm_atomic_commit *commit)
 			plane->funcs;
 		struct drm_plane_state *readout_plane_state;
 
+		if (new_plane_state->crtc &&
+		    !drm_atomic_sro_crtc_is_active(commit, new_plane_state->crtc))
+			continue;
+
 		readout_plane_state = drm_atomic_sro_get_plane_state(readout_state, plane);
 		if (!readout_plane_state) {
 			identical = false;

@@ -137,13 +137,17 @@ int drm_gem_plane_helper_prepare_fb(struct drm_plane *plane,
 	usage = fence ? DMA_RESV_USAGE_KERNEL : DMA_RESV_USAGE_WRITE;
 
 	for (i = 0; i < state->fb->format->num_planes; ++i) {
-		struct drm_gem_object *obj = drm_gem_fb_get_obj(state->fb, i);
+		struct drm_gem_object *obj = state->fb->obj[i];
 		struct dma_fence *new;
 
-		if (!obj) {
-			ret = -EINVAL;
-			goto error;
-		}
+		/*
+		 * A framebuffer reconstructed from a hardware state
+		 * readout has no GEM object backing its planes, as it
+		 * describes a buffer allocated outside of the kernel:
+		 * there is no implicit fencing to wait on.
+		 */
+		if (!obj)
+			continue;
 
 		ret = dma_resv_get_singleton(obj->resv, usage, &new);
 		if (ret)

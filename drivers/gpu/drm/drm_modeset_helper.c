@@ -262,3 +262,34 @@ int drm_mode_config_helper_resume(struct drm_device *dev)
 	return ret;
 }
 EXPORT_SYMBOL(drm_mode_config_helper_resume);
+
+/**
+ * drm_mode_config_helper_hw_reset - default &drm_mode_config_funcs.hw_reset implementation
+ * @dev: DRM device
+ *
+ * Resets all KMS objects that provide a hardware reset hook to a
+ * known-good state, without touching the software state.
+ *
+ * Drivers can assign this function as their
+ * &drm_mode_config_funcs.hw_reset implementation.
+ */
+void drm_mode_config_helper_hw_reset(struct drm_device *dev)
+{
+	struct drm_crtc *crtc;
+
+	drm_for_each_crtc(crtc, dev) {
+		const struct drm_crtc_helper_funcs *helper_funcs =
+			crtc->helper_private;
+
+		if (helper_funcs && helper_funcs->hw_reset)
+			helper_funcs->hw_reset(crtc);
+	}
+
+	/*
+	 * TODO: Reset encoders once the semantics of
+	 * encoder->funcs->reset have been clarified. Some drivers
+	 * (e.g. i915) reset both hardware and software state, while
+	 * others (e.g. loongson) only reset hardware registers.
+	 */
+}
+EXPORT_SYMBOL(drm_mode_config_helper_hw_reset);

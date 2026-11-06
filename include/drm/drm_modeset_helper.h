@@ -42,5 +42,6 @@ int drm_crtc_init(struct drm_device *dev, struct drm_crtc *crtc,
 
 int drm_mode_config_helper_suspend(struct drm_device *dev);
 int drm_mode_config_helper_resume(struct drm_device *dev);
+void drm_mode_config_helper_hw_reset(struct drm_device *dev);
 
 #endif

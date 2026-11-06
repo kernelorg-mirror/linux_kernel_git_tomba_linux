@@ -12,6 +12,8 @@
 #include <linux/module.h>
 #include <linux/sched/mm.h>
 
+#include <kunit/visibility.h>
+
 #include "drm_internal.h"
 #include "drm_crtc_internal.h"
 
@@ -63,10 +65,16 @@
  * sequence.
  */
 
-static unsigned int atomic_readout = DRM_ATOMIC_READOUT_ENABLED;
+/*
+ * Exposed for the KUnit tests, which exercise the various modes the
+ * parameter can be set to. They must restore the default value, as
+ * the tests of every suite run in the same kernel instance.
+ */
+VISIBLE_IF_KUNIT unsigned int atomic_readout = DRM_ATOMIC_READOUT_ENABLED;
 module_param_unsafe(atomic_readout, uint, 0400);
 MODULE_PARM_DESC(atomic_readout,
 		 "Enable Hardware State Readout (0 = disabled, 1 = enabled, 2 = ignore missing compares, 3 = ignore missing readouts and compares, default = 1)");
+EXPORT_SYMBOL_IF_KUNIT(atomic_readout);
 
 static bool drm_atomic_sro_can_readout(struct drm_device *dev)
 {

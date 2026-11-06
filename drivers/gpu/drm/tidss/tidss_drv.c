@@ -171,15 +171,6 @@ static int tidss_probe(struct platform_device *pdev)
 	pm_runtime_set_autosuspend_delay(dev, 1000);
 	pm_runtime_use_autosuspend(dev);
 
-	ret = dispc_softreset(tidss->dispc);
-	if (ret) {
-		dev_err(dev, "failed to reset dispc: %d\n", ret);
-		goto err_runtime_suspend;
-	}
-
-	dispc_initial_config(tidss->dispc);
-	tidss_irq_install(tidss);
-
 	drm_kms_helper_poll_init(ddev);
 
 	ret = drm_mode_config_create_initial_state(ddev);

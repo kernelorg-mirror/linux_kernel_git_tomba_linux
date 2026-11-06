@@ -10,12 +10,14 @@
 #include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_of.h>
 #include <drm/drm_panel.h>
+#include <drm/drm_print.h>
 #include <drm/drm_vblank.h>
 
 #include "tidss_crtc.h"
 #include "tidss_dispc.h"
 #include "tidss_drv.h"
 #include "tidss_encoder.h"
+#include "tidss_irq.h"
 #include "tidss_kms.h"
 #include "tidss_plane.h"
 
@@ -116,10 +118,31 @@ static int tidss_atomic_check(struct drm_device *ddev,
 	return 0;
 }
 
+static void tidss_hw_setup(struct tidss_device *tidss)
+{
+	dispc_initial_config(tidss->dispc);
+	tidss_irq_install(tidss);
+}
+
+static void tidss_hw_reset(struct drm_device *dev)
+{
+	struct tidss_device *tidss = to_tidss(dev);
+	int ret;
+
+	ret = dispc_softreset(tidss->dispc);
+	if (ret)
+		drm_warn(dev, "Couldn't reset dispc");
+
+	drm_mode_config_helper_hw_reset(dev);
+
+	tidss_hw_setup(tidss);
+}
+
 static const struct drm_mode_config_funcs mode_config_funcs = {
 	.fb_create = drm_gem_fb_create,
 	.atomic_check = tidss_atomic_check,
 	.atomic_commit = drm_atomic_helper_commit,
+	.hw_reset = tidss_hw_reset,
 };
 
 static const char * const tidss_internal_bridge_compatibles[] = {

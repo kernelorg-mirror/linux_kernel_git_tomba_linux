@@ -1620,6 +1620,9 @@ struct drm_mode_config_helper_funcs {
 	 * hooks must not access the state of any object outside of the
 	 * commit, since its locks aren't held.
 	 *
+	 * The default implementation is
+	 * drm_atomic_helper_sro_build_state().
+	 *
 	 * RETURNS:
 	 *
 	 * A &struct drm_atomic_sro_state on success, an error pointer

@@ -48,7 +48,10 @@
  * Drivers integrate with SRO by implementing the readout hooks in their
  * object funcs vtables and setting the
  * &drm_mode_config_funcs.atomic_sro_readout_state and
- * &drm_mode_config_helper_funcs.atomic_sro_build_state callbacks.
+ * &drm_mode_config_helper_funcs.atomic_sro_build_state callbacks. The
+ * default helpers drm_atomic_helper_sro_readout_state() and
+ * drm_atomic_helper_sro_build_state() handle the standard readout
+ * sequence.
  */
 
 static unsigned int atomic_readout = DRM_ATOMIC_READOUT_ENABLED;

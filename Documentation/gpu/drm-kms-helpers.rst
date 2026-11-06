@@ -99,6 +99,15 @@ Atomic State Read-Out Reference
 .. kernel-doc:: drivers/gpu/drm/drm_atomic_state_readout.c
    :export:
 
+Atomic State Read-Out Helpers Reference
+----------------------------------------
+
+.. kernel-doc:: include/drm/drm_atomic_state_readout_helper.h
+   :internal:
+
+.. kernel-doc:: drivers/gpu/drm/drm_atomic_state_readout_helper.c
+   :export:
+
 GEM Atomic Helper Reference
 ---------------------------
 

@@ -5,6 +5,7 @@
  * Aradhya Bhatia <a-bhatia1@ti.com>
  */
 
+#include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/of.h>
 #include <linux/of_graph.h>
@@ -13,8 +14,12 @@
 #include <linux/regmap.h>
 
 #include <drm/drm_atomic_helper.h>
+#include <drm/drm_atomic_state_readout.h>
+#include <drm/drm_atomic_state_readout_helper.h>
 #include <drm/drm_bridge.h>
+#include <drm/drm_connector.h>
 #include <drm/drm_of.h>
+#include <drm/drm_panel.h>
 
 #include "tidss_dispc.h"
 #include "tidss_dispc_regs.h"
@@ -350,6 +355,113 @@ tidss_oldi_mode_valid(struct drm_bridge *bridge,
 	return MODE_OK;
 }
 
+static u32 tidss_oldi_read_config(struct tidss_oldi *oldi)
+{
+	u32 cfg;
+
+	tidss_runtime_get(oldi->tidss);
+	cfg = tidss_get_oldi_config(oldi->tidss, oldi->parent_vp);
+	tidss_runtime_put(oldi->tidss);
+
+	return cfg;
+}
+
+static int
+tidss_oldi_bridge_readout_state(struct drm_bridge *bridge,
+				struct drm_atomic_sro_state *state,
+				struct drm_bridge_state *bridge_state,
+				struct drm_crtc_state *crtc_state,
+				struct drm_connector_state *conn_state)
+{
+	struct tidss_oldi *oldi = drm_bridge_to_tidss_oldi(bridge);
+	const struct oldi_bus_format *bus_fmt = NULL;
+	unsigned int i;
+	u32 cfg, map;
+
+	cfg = tidss_oldi_read_config(oldi);
+
+	if (!(cfg & OLDI_ENABLE))
+		return 0;
+
+	/*
+	 * The most significant bit of the data mapping field carries
+	 * the dual-link flag rather than the LVDS mapping: mask it out
+	 * before looking for the bus format.
+	 */
+	map = cfg & (OLDI_MAP & ~BIT(3));
+
+	for (i = 0; i < ARRAY_SIZE(oldi_bus_formats); i++) {
+		if (oldi_bus_formats[i].oldi_mode_reg_val << 1 != map)
+			continue;
+
+		if ((cfg & OLDI_MSB) ?
+		    oldi_bus_formats[i].data_width != 24 :
+		    oldi_bus_formats[i].data_width != 18)
+			continue;
+
+		bus_fmt = &oldi_bus_formats[i];
+		break;
+	}
+
+	if (!bus_fmt) {
+		dev_err(oldi->dev,
+			"OLDI%u: unrecognised mapping in the config register\n",
+			oldi->oldi_instance);
+		return -EINVAL;
+	}
+
+	bridge_state->input_bus_cfg.format = bus_fmt->input_bus_fmt;
+	bridge_state->output_bus_cfg.format = bus_fmt->bus_fmt;
+
+	bridge_state->input_bus_cfg.flags =
+		DRM_BUS_FLAG_PIXDATA_SAMPLE_POSEDGE |
+		DRM_BUS_FLAG_SYNC_SAMPLE_POSEDGE |
+		((cfg & OLDI_DEPOL) ? DRM_BUS_FLAG_DE_LOW :
+				      DRM_BUS_FLAG_DE_HIGH);
+
+	bridge_state->output_bus_cfg.flags =
+		(cfg & OLDI_DEPOL) ? DRM_BUS_FLAG_DE_LOW :
+				     DRM_BUS_FLAG_DE_HIGH;
+
+	return 0;
+}
+
+static int
+tidss_oldi_bridge_connector_readout(struct drm_bridge *bridge,
+				    struct drm_atomic_sro_state *state,
+				    struct drm_connector_state *conn_state)
+{
+	struct tidss_oldi *oldi = drm_bridge_to_tidss_oldi(bridge);
+	struct drm_connector *connector = conn_state->connector;
+	struct drm_crtc_state *crtc_state;
+	struct drm_encoder *encoder;
+	struct drm_crtc *crtc;
+
+	if (!(tidss_oldi_read_config(oldi) & OLDI_ENABLE))
+		return 0;
+
+	encoder = bridge->encoder;
+	if (!encoder->funcs || !encoder->funcs->atomic_sro_get_current_crtc)
+		return -ENODEV;
+
+	crtc = encoder->funcs->atomic_sro_get_current_crtc(encoder);
+	if (!crtc)
+		return -ENODEV;
+
+	crtc_state = drm_atomic_sro_get_crtc_state(state, crtc);
+	if (!crtc_state)
+		return -ENODEV;
+
+	crtc_state->encoder_mask |= drm_encoder_mask(encoder);
+	crtc_state->connector_mask |= drm_connector_mask(connector);
+
+	drm_connector_get(connector);
+	conn_state->crtc = crtc;
+	conn_state->best_encoder = encoder;
+
+	return 0;
+}
+
 static const struct drm_bridge_funcs tidss_oldi_bridge_funcs = {
 	.attach = tidss_oldi_bridge_attach,
 	.atomic_check = tidss_oldi_atomic_check,
@@ -360,6 +472,9 @@ static const struct drm_bridge_funcs tidss_oldi_bridge_funcs = {
 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
 	.atomic_create_state = drm_atomic_helper_bridge_create_state,
 	.mode_valid = tidss_oldi_mode_valid,
+	.atomic_sro_readout_state = tidss_oldi_bridge_readout_state,
+	.atomic_sro_compare_state = drm_atomic_helper_bridge_compare_state,
+	.atomic_sro_connector_readout = tidss_oldi_bridge_connector_readout,
 };
 
 static int get_oldi_mode(struct device_node *oldi_tx, int *companion_instance)
@@ -612,6 +727,7 @@ static int tidss_oldi_init_one(struct tidss_device *tidss,
 	/* Register the bridge. */
 	oldi->bridge.of_node = oldi_tx;
 	oldi->bridge.driver_private = oldi;
+	oldi->bridge.ops |= DRM_BRIDGE_OP_CONNECTOR_HW_READOUT;
 
 	tidss->oldis[tidss->num_oldis++] = oldi;
 	tidss->is_ext_vp_clk[oldi->parent_vp] = true;

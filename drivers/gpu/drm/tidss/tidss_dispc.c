@@ -501,6 +501,11 @@ void tidss_disable_oldi(struct tidss_device *tidss, u32 hw_videoport)
 	dispc_vp_write(tidss->dispc, hw_videoport, DISPC_VP_DSS_OLDI_CFG, 0);
 }
 
+u32 tidss_get_oldi_config(struct tidss_device *tidss, u32 hw_videoport)
+{
+	return dispc_vp_read(tidss->dispc, hw_videoport, DISPC_VP_DSS_OLDI_CFG);
+}
+
 /*
  * TRM gives bitfields as start:end, where start is the higher bit
  * number. For example 7:0

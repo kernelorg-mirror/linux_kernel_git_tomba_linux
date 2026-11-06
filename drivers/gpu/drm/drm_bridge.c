@@ -761,7 +761,8 @@ int drm_bridge_attach(struct drm_encoder *encoder, struct drm_bridge *bridge,
 	}
 
 	if (bridge->funcs &&
-	    bridge->funcs->atomic_sro_readout_state)
+	    bridge->funcs->atomic_sro_readout_state &&
+	    bridge->funcs->atomic_sro_compare_state)
 		ret = drm_atomic_private_obj_init(bridge->dev, &bridge->base,
 						  bridge->name,
 						  &drm_bridge_priv_state_funcs_with_sro);

@@ -3,6 +3,9 @@
 #ifndef DRM_ATOMIC_SRO_H_
 #define DRM_ATOMIC_SRO_H_
 
+#include <linux/types.h>
+
+struct drm_atomic_commit;
 struct drm_atomic_sro_state;
 struct drm_connector;
 struct drm_connector_state;
@@ -58,5 +61,6 @@ void drm_atomic_sro_set_private_obj_state(struct drm_atomic_sro_state *state,
 					  struct drm_private_state *obj_state);
 
 void drm_atomic_sro_install_state(struct drm_atomic_sro_state *state);
+bool drm_atomic_sro_readout_and_compare(struct drm_atomic_commit *commit);
 
 #endif /* DRM_ATOMIC_SRO_H_ */

@@ -407,7 +407,8 @@ static int drm_mode_config_create_state(struct drm_device *dev)
  * It creates the initial state in several steps. It first tries to
  * read-out the initial state from the hardware for all objects if state
  * read-out is enabled and the driver supports it. Then, if state
- * read-out isn't supported or fails, it creates a new, pristine state
+ * read-out isn't supported or fails, it resets the hardware using
+ * &drm_mode_config_funcs.hw_reset() and creates a new, pristine state
  * using the objects atomic_create_state callback.
  *
  * For historical reasons, drm_mode_config_reset() is similar, but
@@ -441,6 +442,11 @@ int drm_mode_config_create_initial_state(struct drm_device *dev)
 			goto out;
 	}
 
+	/* Reset the hardware first ... */
+	if (dev->mode_config.funcs->hw_reset)
+		dev->mode_config.funcs->hw_reset(dev);
+
+	/* ... then allocate a new pristine state */
 	ret = drm_mode_config_create_state(dev);
 
 out:

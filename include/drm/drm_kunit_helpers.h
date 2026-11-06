@@ -15,7 +15,11 @@ struct drm_crtc_helper_funcs;
 struct drm_device;
 struct drm_plane_funcs;
 struct drm_plane_helper_funcs;
+struct drm_printer;
 struct kunit;
+
+struct drm_printer *drm_kunit_helper_printer(struct kunit *test,
+					     int level);
 
 struct device *drm_kunit_helper_alloc_device(struct kunit *test);
 void drm_kunit_helper_free_device(struct kunit *test, struct device *dev);

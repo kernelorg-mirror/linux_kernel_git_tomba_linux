@@ -8,6 +8,7 @@
 #include <drm/drm_fourcc.h>
 #include <drm/drm_kunit_helpers.h>
 #include <drm/drm_managed.h>
+#include <drm/drm_print.h>
 
 #include <kunit/device.h>
 #include <kunit/resource.h>
@@ -17,6 +18,83 @@
 #include <linux/platform_device.h>
 
 #define KUNIT_DEVICE_NAME	"drm-kunit-mock-device"
+
+struct drm_printer_ctx {
+	struct drm_printer	p;
+	int			level;
+	struct kunit		*test;
+};
+
+/*
+ * kunit_log() is a macro that only accepts a compile-time log level,
+ * so the level has to be dispatched to the matching kunit_log() call.
+ */
+static void drm_kunit_printf(struct drm_printer *p, struct va_format *vaf)
+{
+	struct drm_printer_ctx *ctx = p->arg;
+
+	switch (ctx->level) {
+	case LOGLEVEL_EMERG:
+		kunit_log(KERN_EMERG, ctx->test, "%pV", vaf);
+		break;
+	case LOGLEVEL_ALERT:
+		kunit_log(KERN_ALERT, ctx->test, "%pV", vaf);
+		break;
+	case LOGLEVEL_CRIT:
+		kunit_log(KERN_CRIT, ctx->test, "%pV", vaf);
+		break;
+	case LOGLEVEL_ERR:
+		kunit_log(KERN_ERR, ctx->test, "%pV", vaf);
+		break;
+	case LOGLEVEL_WARNING:
+		kunit_log(KERN_WARNING, ctx->test, "%pV", vaf);
+		break;
+	case LOGLEVEL_NOTICE:
+		kunit_log(KERN_NOTICE, ctx->test, "%pV", vaf);
+		break;
+	case LOGLEVEL_DEBUG:
+		kunit_log(KERN_DEBUG, ctx->test, "%pV", vaf);
+		break;
+	case LOGLEVEL_INFO:
+	default:
+		kunit_log(KERN_INFO, ctx->test, "%pV", vaf);
+		break;
+	}
+}
+
+/**
+ * drm_kunit_helper_printer - Creates a &drm_printer logging into a KUnit test log
+ * @test: The test context object
+ * @level: The log level to log the messages at, one of the LOGLEVEL_* constants
+ *
+ * Creates a &struct drm_printer that will log anything printed through
+ * it, using kunit_log(), both to the kernel log at the @level log
+ * level and to the log of the KUnit test @test.
+ *
+ * This is the KUnit counterpart of the drm_print.h printers like
+ * drm_info_printer() or drm_err_printer(), and @level should be the
+ * log level of the printer it replaces.
+ *
+ * Returns:
+ * A pointer to the &drm_printer, or an ERR_PTR() otherwise.
+ */
+struct drm_printer *
+drm_kunit_helper_printer(struct kunit *test, int level)
+{
+	struct drm_printer_ctx *ctx;
+
+	ctx = kunit_kzalloc(test, sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return ERR_PTR(-ENOMEM);
+
+	ctx->level = level;
+	ctx->p.printfn = drm_kunit_printf;
+	ctx->p.arg = ctx;
+	ctx->test = test;
+
+	return &ctx->p;
+}
+EXPORT_SYMBOL_GPL(drm_kunit_helper_printer);
 
 static const struct drm_mode_config_funcs drm_mode_config_funcs = {
 	.atomic_check	= drm_atomic_helper_check,

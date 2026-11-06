@@ -182,7 +182,7 @@ static int tidss_probe(struct platform_device *pdev)
 	ret = drm_dev_register(ddev, 0);
 	if (ret) {
 		dev_err(dev, "failed to register DRM device\n");
-		goto err_runtime_suspend;
+		goto err_shutdown;
 	}
 
 	/* Remove possible early fb before setting up the fbdev */
@@ -200,6 +200,9 @@ static int tidss_probe(struct platform_device *pdev)
 
 err_drm_dev_unreg:
 	drm_dev_unregister(ddev);
+
+err_shutdown:
+	drm_atomic_helper_shutdown(ddev);
 
 err_runtime_suspend:
 	pm_runtime_dont_use_autosuspend(dev);

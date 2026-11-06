@@ -6,6 +6,8 @@
 
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
+#include <drm/drm_atomic_state_readout.h>
+#include <drm/drm_atomic_state_readout_helper.h>
 #include <drm/drm_bridge.h>
 #include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_of.h>
@@ -65,7 +67,8 @@ static void tidss_atomic_commit_tail(struct drm_atomic_commit *old_state)
 }
 
 static const struct drm_mode_config_helper_funcs mode_config_helper_funcs = {
-	.atomic_commit_tail = tidss_atomic_commit_tail,
+	.atomic_commit_tail	= tidss_atomic_commit_tail,
+	.atomic_sro_build_state = drm_atomic_helper_sro_build_state,
 };
 
 static int tidss_atomic_check(struct drm_device *ddev,
@@ -118,10 +121,66 @@ static int tidss_atomic_check(struct drm_device *ddev,
 	return 0;
 }
 
+static bool tidss_any_crtc_enabled(struct tidss_device *tidss)
+{
+	unsigned int i;
+
+	for (i = 0; i < tidss->num_crtcs; i++) {
+		struct tidss_crtc *tcrtc = to_tidss_crtc(tidss->crtcs[i]);
+
+		if (dispc_vp_is_enabled(tidss->dispc, tcrtc->hw_videoport))
+			return true;
+	}
+
+	return false;
+}
+
+static int tidss_sro_readout_state(struct drm_device *ddev)
+{
+	struct tidss_device *tidss = to_tidss(ddev);
+	bool active;
+
+	tidss_runtime_get(tidss);
+	dispc_move_global_output_enable(tidss->dispc);
+	active = tidss_any_crtc_enabled(tidss);
+	tidss_runtime_put(tidss);
+
+	if (!active) {
+		drm_dbg_kms(ddev, "No active CRTC in the hardware, resetting\n");
+		return -ENODEV;
+	}
+
+	return drm_atomic_helper_sro_readout_state(ddev);
+}
+
 static void tidss_hw_setup(struct tidss_device *tidss)
 {
 	dispc_initial_config(tidss->dispc);
 	tidss_irq_install(tidss);
+}
+
+static void tidss_sro_install_state(struct drm_device *ddev)
+{
+	struct tidss_device *tidss = to_tidss(ddev);
+	unsigned int hw_vp;
+
+	tidss_runtime_get(tidss);
+
+	for (hw_vp = 0; hw_vp < tidss->feat->num_vps; hw_vp++) {
+		if (tidss_crtc_from_hw_videoport(tidss, hw_vp))
+			continue;
+
+		if (!dispc_vp_is_enabled(tidss->dispc, hw_vp))
+			continue;
+
+		drm_dbg_kms(ddev, "VP%u enabled without a CRTC, disabling\n",
+			    hw_vp);
+		dispc_vp_force_disable(tidss->dispc, hw_vp);
+	}
+
+	tidss_hw_setup(tidss);
+
+	tidss_runtime_put(tidss);
 }
 
 static void tidss_hw_reset(struct drm_device *dev)
@@ -142,6 +201,8 @@ static const struct drm_mode_config_funcs mode_config_funcs = {
 	.fb_create = drm_gem_fb_create,
 	.atomic_check = tidss_atomic_check,
 	.atomic_commit = drm_atomic_helper_commit,
+	.atomic_sro_readout_state = tidss_sro_readout_state,
+	.atomic_sro_install_state = tidss_sro_install_state,
 	.hw_reset = tidss_hw_reset,
 };
 

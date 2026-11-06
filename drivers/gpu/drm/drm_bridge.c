@@ -572,9 +572,9 @@ drm_bridge_atomic_print_priv_state(struct drm_printer *p,
 	struct drm_bridge *bridge = drm_priv_to_bridge(s->obj);
 
 	if (bridge->of_node)
-		drm_printf(p, "bridge: %ps (%pOFfc)\n", bridge->funcs, bridge->of_node);
+		drm_printf(p, "bridge: %s (%pOFfc)\n", bridge->name, bridge->of_node);
 	else
-		drm_printf(p, "bridge: %ps\n", bridge->funcs);
+		drm_printf(p, "bridge: %s\n", bridge->name);
 
 	drm_printf_indent(p, 1, "input bus configuration:");
 	drm_printf_indent(p, 2, "code: %04x", state->input_bus_cfg.format);

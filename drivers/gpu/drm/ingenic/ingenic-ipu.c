@@ -902,6 +902,7 @@ static int ingenic_ipu_bind(struct device *dev, struct device *master, void *d)
 	}
 
 	drm_atomic_private_obj_init(drm, &ipu->private_obj,
+				    "ingenic_ipu_state",
 				    &ingenic_ipu_private_state_funcs);
 
 	return 0;

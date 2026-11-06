@@ -389,6 +389,14 @@ lookup_or_alloc_group(struct drm_dp_tunnel_mgr *mgr, u8 drv_group_id)
 		 tunnel_group_drv_id(drv_group_id) & ((1 << DP_GROUP_ID_BITS) - 1),
 		 tunnel_group_id(drv_group_id) & ((1 << DP_USB4_DRIVER_ID_BITS) - 1));
 
+	/*
+	 * The private object was named after the group index when it
+	 * was initialized, since the group identifier wasn't known
+	 * yet. Refresh it now that we have one. The name is only used
+	 * for debug messages, so ignore any allocation failure.
+	 */
+	drm_atomic_private_obj_set_name(&group->base, group->name);
+
 	return group;
 }
 
@@ -1727,11 +1735,22 @@ EXPORT_SYMBOL(drm_dp_tunnel_atomic_get_new_state);
 
 static bool init_group(struct drm_dp_tunnel_mgr *mgr, struct drm_dp_tunnel_group *group)
 {
+	char name[32];
+
 	group->mgr = mgr;
 	group->available_bw = -1;
 	INIT_LIST_HEAD(&group->tunnels);
 
-	drm_atomic_private_obj_init(mgr->dev, &group->base,
+	/*
+	 * The group identifier, and thus the group name, is only known
+	 * once a tunnel has been added to the group. Name the private
+	 * object after the group index until then,
+	 * lookup_or_alloc_group() will refresh it.
+	 */
+	snprintf(name, sizeof(name), "dp-tunnel-group-%d",
+		 (int)(group - mgr->groups));
+
+	drm_atomic_private_obj_init(mgr->dev, &group->base, name,
 				    &tunnel_group_funcs);
 
 	return true;

@@ -1048,6 +1048,7 @@ static void drm_atomic_plane_print_state(struct drm_printer *p,
  * drm_atomic_private_obj_init - initialize private object
  * @dev: DRM device this object will be attached to
  * @obj: private object
+ * @name: human-readable name for debug messages
  * @funcs: pointer to the struct of function pointers that identify the object
  * type
  *
@@ -1059,6 +1060,7 @@ static void drm_atomic_plane_print_state(struct drm_printer *p,
  */
 int drm_atomic_private_obj_init(struct drm_device *dev,
 				struct drm_private_obj *obj,
+				const char *name,
 				const struct drm_private_state_funcs *funcs)
 {
 	struct drm_private_state *state;
@@ -1077,6 +1079,12 @@ int drm_atomic_private_obj_init(struct drm_device *dev,
 
 	obj->dev = dev;
 	obj->funcs = funcs;
+	obj->name = kstrdup(name, GFP_KERNEL);
+	if (!obj->name) {
+		ret = -ENOMEM;
+		goto err_lock_fini;
+	}
+
 	list_add_tail(&obj->head, &dev->mode_config.privobj_list);
 
 	state = obj->funcs->atomic_create_state(obj);
@@ -1091,6 +1099,9 @@ int drm_atomic_private_obj_init(struct drm_device *dev,
 
 err_list_del:
 	list_del_init(&obj->head);
+	kfree(obj->name);
+	obj->name = NULL;
+err_lock_fini:
 	drm_modeset_lock_fini(&obj->lock);
 	return ret;
 }
@@ -1118,6 +1129,7 @@ drm_atomic_private_obj_fini(struct drm_private_obj *obj)
 
 	list_del_init(&obj->head);
 	obj->funcs->atomic_destroy_state(obj, obj->state);
+	kfree(obj->name);
 	drm_modeset_lock_fini(&obj->lock);
 }
 EXPORT_SYMBOL(drm_atomic_private_obj_fini);
@@ -1150,6 +1162,37 @@ static int drm_atomic_commit_set_private_obj_state(struct drm_atomic_commit *com
 
 	return 0;
 }
+
+/**
+ * drm_atomic_private_obj_set_name - update the name of a private object
+ * @obj: private object
+ * @name: new human-readable name for debug messages
+ *
+ * Replaces the name of @obj previously set at
+ * drm_atomic_private_obj_init() time. This is meant for callers that
+ * only get a meaningful name well after the object has been
+ * initialized.
+ *
+ * RETURNS:
+ * Zero on success, a negative error code on allocation failure. The
+ * name is only used for debug messages, so callers can safely ignore
+ * the return value.
+ */
+int drm_atomic_private_obj_set_name(struct drm_private_obj *obj,
+				    const char *name)
+{
+	char *new_name;
+
+	new_name = kstrdup(name, GFP_KERNEL);
+	if (!new_name)
+		return -ENOMEM;
+
+	kfree(obj->name);
+	obj->name = new_name;
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_atomic_private_obj_set_name);
 
 /**
  * drm_atomic_get_private_obj_state - get private object state

@@ -960,6 +960,7 @@ static int tegra_display_hub_init(struct host1x_client *client)
 	struct tegra_drm *tegra = drm->dev_private;
 
 	drm_atomic_private_obj_init(drm, &hub->base,
+				    "tegra_display_hub",
 				    &tegra_display_hub_state_funcs);
 
 	tegra->hub = hub;

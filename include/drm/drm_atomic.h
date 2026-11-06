@@ -376,6 +376,11 @@ struct drm_private_obj {
 	struct drm_device *dev;
 
 	/**
+	 * @name: human-readable name for debug messages
+	 */
+	const char *name;
+
+	/**
 	 * @head: List entry used to attach a private object to a &drm_device
 	 * (queued to &drm_mode_config.privobj_list).
 	 */
@@ -757,8 +762,13 @@ drm_atomic_get_connector_state(struct drm_atomic_commit *state,
 
 int drm_atomic_private_obj_init(struct drm_device *dev,
 				struct drm_private_obj *obj,
+				const char *name,
 				const struct drm_private_state_funcs *funcs);
+
 void drm_atomic_private_obj_fini(struct drm_private_obj *obj);
+
+int drm_atomic_private_obj_set_name(struct drm_private_obj *obj,
+				    const char *name);
 
 struct drm_private_state * __must_check
 drm_atomic_get_private_obj_state(struct drm_atomic_commit *state,

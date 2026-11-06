@@ -318,6 +318,7 @@ static void __drm_bridge_free(struct kref *kref)
 
 	drm_bridge_put(bridge->next_bridge);
 
+	kfree(bridge->name);
 	kfree(bridge->container);
 }
 
@@ -419,6 +420,13 @@ void *__devm_drm_bridge_alloc(struct device *dev, size_t size, size_t offset,
 		return ERR_PTR(-ENOMEM);
 
 	bridge = container + offset;
+
+	bridge->name = kasprintf(GFP_KERNEL, "bridge-%s", dev_name(dev));
+	if (!bridge->name) {
+		kfree(container);
+		return ERR_PTR(-ENOMEM);
+	}
+
 	INIT_LIST_HEAD(&bridge->list);
 	bridge->container = container;
 	bridge->funcs = funcs;
@@ -654,7 +662,7 @@ int drm_bridge_attach(struct drm_encoder *encoder, struct drm_bridge *bridge,
 			goto err_reset_bridge;
 	}
 
-	drm_atomic_private_obj_init(bridge->dev, &bridge->base,
+	drm_atomic_private_obj_init(bridge->dev, &bridge->base, bridge->name,
 				    &drm_bridge_priv_state_funcs);
 
 	return 0;

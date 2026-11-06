@@ -1303,20 +1303,27 @@ static int ingenic_drm_bind(struct device *dev, bool has_components)
 			drm_panel_put(panel);
 		}
 
-		ib = drmm_encoder_alloc(drm, struct ingenic_drm_bridge, encoder,
-					NULL, DRM_MODE_ENCODER_DPI, NULL);
+		ib = devm_drm_bridge_alloc(dev, struct ingenic_drm_bridge,
+					   bridge, &ingenic_drm_bridge_funcs);
 		if (IS_ERR(ib)) {
 			ret = PTR_ERR(ib);
-			dev_err(dev, "Failed to init encoder: %d\n", ret);
+			dev_err(dev, "Failed to allocate bridge: %d\n", ret);
 			goto err_drvdata;
 		}
 
 		encoder = &ib->encoder;
+
+		ret = drmm_encoder_init(drm, encoder, NULL,
+					DRM_MODE_ENCODER_DPI, NULL);
+		if (ret) {
+			dev_err(dev, "Failed to init encoder: %d\n", ret);
+			goto err_drvdata;
+		}
+
 		encoder->possible_crtcs = drm_crtc_mask(&priv->crtc);
 
 		drm_encoder_helper_add(encoder, &ingenic_drm_encoder_helper_funcs);
 
-		ib->bridge.funcs = &ingenic_drm_bridge_funcs;
 		ib->next_bridge = bridge;
 
 		ret = drm_bridge_attach(encoder, &ib->bridge, NULL,

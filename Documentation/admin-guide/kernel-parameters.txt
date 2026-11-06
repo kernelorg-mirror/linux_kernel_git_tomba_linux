@@ -1377,6 +1377,18 @@ Kernel parameters
 			data set with no connector name will be used for
 			any connectors not explicitly specified.
 
+	drm.atomic_readout=	[DRM]
+			Control the KMS atomic hardware state readout
+			(SRO), used to initialize the atomic state from
+			the state the firmware left the hardware in at
+			boot instead of programming a new one.
+			0: disable the state readout entirely,
+			1: enable it (default),
+			2: ignore the objects missing a comparison
+			   implementation,
+			3: ignore the objects missing a readout or
+			   comparison implementation.
+
 	dscc4.setup=	[NET]
 
 	dt_cpu_ftrs=	[PPC,EARLY]

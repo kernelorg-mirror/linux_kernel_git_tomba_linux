@@ -407,6 +407,12 @@ struct dispc_device {
 
 	struct clk *fclk;
 
+	/*
+	 * If true, the DISPC has been soft reset since probe. Until then the
+	 * registers can hold values from the bootloader.
+	 */
+	bool reset_done;
+
 	struct dss_vp_data vp_data[TIDSS_MAX_PORTS];
 
 	u32 *fourccs;
@@ -2719,6 +2725,13 @@ int dispc_runtime_suspend(struct dispc_device *dispc)
 {
 	dev_dbg(dispc->dev, "suspend\n");
 
+	/*
+	 * If the DISPC reset was skipped at probe, do it here, at runtime
+	 * suspend, to get the registers to a known state.
+	 */
+	if (!dispc->reset_done)
+		dispc_softreset(dispc);
+
 	clk_disable_unprepare(dispc->fclk);
 
 	return 0;
@@ -2843,6 +2856,7 @@ int dispc_softreset(struct dispc_device *dispc)
 
 	if (dispc->feat->subrev == DISPC_K2G) {
 		dispc_softreset_k2g(dispc);
+		dispc->reset_done = true;
 		return 0;
 	}
 
@@ -2855,6 +2869,8 @@ int dispc_softreset(struct dispc_device *dispc)
 		dev_err(dispc->dev, "failed to reset dispc\n");
 		return ret;
 	}
+
+	dispc->reset_done = true;
 
 	return 0;
 }

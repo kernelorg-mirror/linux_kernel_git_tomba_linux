@@ -131,14 +131,6 @@ static void tidss_plane_atomic_update(struct drm_plane *plane,
 	hw_videoport = to_tidss_crtc(new_state->crtc)->hw_videoport;
 
 	dispc_plane_setup(tidss->dispc, tplane->hw_plane_id, new_state, hw_videoport);
-}
-
-static void tidss_plane_atomic_enable(struct drm_plane *plane,
-				      struct drm_atomic_commit *state)
-{
-	struct drm_device *ddev = plane->dev;
-	struct tidss_device *tidss = to_tidss(ddev);
-	struct tidss_plane *tplane = to_tidss_plane(plane);
 
 	dispc_plane_enable(tidss->dispc, tplane->hw_plane_id, true);
 }
@@ -164,14 +156,12 @@ static void drm_plane_destroy(struct drm_plane *plane)
 static const struct drm_plane_helper_funcs tidss_plane_helper_funcs = {
 	.atomic_check = tidss_plane_atomic_check,
 	.atomic_update = tidss_plane_atomic_update,
-	.atomic_enable = tidss_plane_atomic_enable,
 	.atomic_disable = tidss_plane_atomic_disable,
 };
 
 static const struct drm_plane_helper_funcs tidss_primary_plane_helper_funcs = {
 	.atomic_check = tidss_plane_atomic_check,
 	.atomic_update = tidss_plane_atomic_update,
-	.atomic_enable = tidss_plane_atomic_enable,
 	.atomic_disable = tidss_plane_atomic_disable,
 	.get_scanout_buffer = drm_fb_dma_get_scanout_buffer,
 };

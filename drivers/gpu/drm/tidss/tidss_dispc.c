@@ -407,8 +407,6 @@ struct dispc_device {
 
 	struct clk *fclk;
 
-	bool is_enabled;
-
 	struct dss_vp_data vp_data[TIDSS_MAX_PORTS];
 
 	u32 *fourccs;
@@ -2721,8 +2719,6 @@ int dispc_runtime_suspend(struct dispc_device *dispc)
 {
 	dev_dbg(dispc->dev, "suspend\n");
 
-	dispc->is_enabled = false;
-
 	clk_disable_unprepare(dispc->fclk);
 
 	return 0;
@@ -2756,8 +2752,6 @@ int dispc_runtime_resume(struct dispc_device *dispc)
 		REG_GET(dispc, DSS_SYSSTATUS, DSS_SYSSTATUS_DISPC_IDLE_STATUS));
 
 	dispc_initial_config(dispc);
-
-	dispc->is_enabled = true;
 
 	tidss_irq_resume(dispc->tidss);
 

@@ -706,10 +706,13 @@ EXPORT_SYMBOL(drm_atomic_sro_set_private_obj_state);
  *
  * For each object, the optional atomic_sro_install_state hook is
  * called before the state pointer is updated, allowing drivers to
- * perform any needed action.
+ * perform any needed action. Once all the states are installed, the
+ * optional &drm_mode_config_funcs.atomic_sro_install_state hook is
+ * called for the device.
  */
 void drm_atomic_sro_install_state(struct drm_atomic_sro_state *state)
 {
+	struct drm_device *dev = state->dev;
 	unsigned int i;
 
 	for (i = 0; i <= state->max_connector_index; i++) {
@@ -833,6 +836,10 @@ void drm_atomic_sro_install_state(struct drm_atomic_sro_state *state)
 		state->private_objs[i].ptr = NULL;
 	}
 	state->num_private_objs = 0;
+
+	if (dev->mode_config.funcs &&
+	    dev->mode_config.funcs->atomic_sro_install_state)
+		dev->mode_config.funcs->atomic_sro_install_state(dev);
 }
 EXPORT_SYMBOL(drm_atomic_sro_install_state);
 

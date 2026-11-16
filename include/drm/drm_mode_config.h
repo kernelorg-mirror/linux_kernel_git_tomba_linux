@@ -375,6 +375,24 @@ struct drm_mode_config_funcs {
 	 * 0 on success, a negative error code otherwise.
 	 */
 	 int (*atomic_sro_readout_state)(struct drm_device *dev);
+
+	/**
+	 * @atomic_sro_install_state:
+	 *
+	 * This optional hook is called by drm_atomic_sro_install_state()
+	 * once the states read out from the hardware have been installed
+	 * as the current states of all the objects, and their own
+	 * atomic_sro_install_state hooks have run.
+	 *
+	 * It allows a driver to take over the parts of the hardware
+	 * that no object state describes: acquire device-wide resources,
+	 * stop hardware the firmware enabled that the driver has no
+	 * object for, and write the configuration its enable paths rely
+	 * on.
+	 *
+	 * This hook cannot fail.
+	 */
+	void (*atomic_sro_install_state)(struct drm_device *dev);
 };
 
 /**

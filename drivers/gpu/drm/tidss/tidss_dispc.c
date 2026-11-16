@@ -1155,10 +1155,110 @@ void dispc_vp_enable(struct dispc_device *dispc, u32 hw_videoport)
 		       DISPC_VP_CONTROL_ENABLE_MASK);
 }
 
+bool dispc_vp_is_enabled(struct dispc_device *dispc, u32 hw_videoport)
+{
+	return FIELD_GET(DISPC_VP_CONTROL_ENABLE_MASK,
+			 dispc_vp_read(dispc, hw_videoport, DISPC_VP_CONTROL));
+}
+
+/*
+ * The tidss driver only uses DISPC_VP_CONTROL.ENABLE, but the bootloader may
+ * use DISPC_GLOBAL_OUTPUT_ENABLE. dispc_move_global_output_enable() switches
+ * the DSS registers from DISPC_GLOBAL_OUTPUT_ENABLE to DISPC_VP_CONTROL.
+ */
+void dispc_move_global_output_enable(struct dispc_device *dispc)
+{
+	u32 hw_videoport;
+	u32 val;
+
+	if (dispc->feat->subrev == DISPC_K2G)
+		return;
+
+	val = dispc_read(dispc, DISPC_GLOBAL_OUTPUT_ENABLE);
+	if (!val)
+		return;
+
+	for (hw_videoport = 0; hw_videoport < dispc->feat->num_vps;
+	     hw_videoport++) {
+		if (!(val & BIT(hw_videoport)))
+			continue;
+
+		VP_REG_FLD_MOD(dispc, hw_videoport, DISPC_VP_CONTROL, 1,
+			       DISPC_VP_CONTROL_ENABLE_MASK);
+	}
+
+	dispc_write(dispc, DISPC_GLOBAL_OUTPUT_ENABLE, 0);
+}
+
 void dispc_vp_disable(struct dispc_device *dispc, u32 hw_videoport)
 {
 	VP_REG_FLD_MOD(dispc, hw_videoport, DISPC_VP_CONTROL, 0,
 		       DISPC_VP_CONTROL_ENABLE_MASK);
+}
+
+/*
+ * Disable a videoport that the bootloader has enabled, but tidss does not
+ * support, together with the overlay layers and the planes. This needs
+ * some care so that the disabling the unused VP won't interfere with the
+ * other VPs that may be active, and so that the planes will be usable by
+ * the driver.
+ */
+int dispc_vp_force_disable(struct dispc_device *dispc, u32 hw_videoport)
+{
+	u32 framedone = dispc_vp_irq_to_raw(DSS_IRQ_VP_FRAME_DONE(hw_videoport),
+					    hw_videoport);
+	unsigned int layer, hw_plane;
+	u32 irqenable;
+	u32 val;
+	int ret;
+
+	if (dispc->feat->subrev == DISPC_K2G) {
+		dispc_vp_disable(dispc, hw_videoport);
+		return 0;
+	}
+
+	for (layer = 0; layer < dispc->feat->num_vids; layer++) {
+		u32 attr = dispc_ovr_read(dispc, hw_videoport,
+					  DISPC_OVR_ATTRIBUTES(layer));
+		u32 hw_id = FIELD_GET(DISPC_OVR_ATTRIBUTES_CHANNELIN_MASK, attr);
+
+		if (!FIELD_GET(DISPC_OVR_ATTRIBUTES_ENABLE_MASK, attr))
+			continue;
+
+		for (hw_plane = 0; hw_plane < dispc->feat->num_vids; hw_plane++) {
+			if (dispc->feat->vid_info[hw_plane].hw_id == hw_id)
+				dispc_plane_enable(dispc, hw_plane, false);
+		}
+
+		dispc_ovr_enable_layer(dispc, hw_videoport, layer, false);
+	}
+
+	/*
+	 * Note: we use the FRAMEDONE bit in the VP_IRQSTATUS for waiting for
+	 * the VP disable to be finished. This requires unmasking the bit in
+	 * VP_IRQENABLE, which causes the interrupt line to trigger, even if the
+	 * top level IRQENABLE bits are still cleared. Thus this function must
+	 * be called before tidss_irq_install() is called, which enables the irq
+	 * line.
+	 */
+	irqenable = dispc_read(dispc, DISPC_VP_IRQENABLE(hw_videoport));
+	dispc_write(dispc, DISPC_VP_IRQENABLE(hw_videoport),
+		    irqenable | framedone);
+	dispc_write(dispc, DISPC_VP_IRQSTATUS(hw_videoport), framedone);
+
+	dispc_vp_disable(dispc, hw_videoport);
+
+	ret = readl_poll_timeout(dispc->base_common +
+				 DISPC_VP_IRQSTATUS(hw_videoport),
+				 val, val & framedone, 1000, 500000);
+	if (ret)
+		dev_err(dispc->dev, "VP%u: timeout waiting for frame done\n",
+			hw_videoport);
+
+	dispc_write(dispc, DISPC_VP_IRQSTATUS(hw_videoport), framedone);
+	dispc_write(dispc, DISPC_VP_IRQENABLE(hw_videoport), irqenable);
+
+	return ret;
 }
 
 void dispc_vp_unprepare(struct dispc_device *dispc, u32 hw_videoport)
@@ -1405,6 +1505,138 @@ int dispc_vp_set_clk_rate(struct dispc_device *dispc, u32 hw_videoport,
 	return 0;
 }
 
+int dispc_vp_readout_mode(struct dispc_device *dispc,
+			  u32 hw_videoport,
+			  struct drm_display_mode *mode)
+{
+	unsigned long rate;
+	u16 hdisplay, hfp, hsw, hbp;
+	u16 vdisplay, vfp, vsw, vbp;
+	u32 val;
+
+	val = dispc_vp_read(dispc, hw_videoport, DISPC_VP_SIZE_SCREEN);
+	hdisplay = FIELD_GET(DISPC_VP_SIZE_SCREEN_HDISPLAY_MASK, val) + 1;
+	vdisplay = FIELD_GET(DISPC_VP_SIZE_SCREEN_VDISPLAY_MASK, val) + 1;
+
+	mode->hdisplay = hdisplay;
+	mode->vdisplay = vdisplay;
+
+	val = dispc_vp_read(dispc, hw_videoport, DISPC_VP_TIMING_H);
+	hsw = FIELD_GET(DISPC_VP_TIMING_H_SYNC_PULSE_MASK, val) + 1;
+	hfp = FIELD_GET(DISPC_VP_TIMING_H_FRONT_PORCH_MASK, val) + 1;
+	hbp = FIELD_GET(DISPC_VP_TIMING_H_BACK_PORCH_MASK, val) + 1;
+
+	mode->hsync_start = hdisplay + hfp;
+	mode->hsync_end = hdisplay + hfp + hsw;
+	mode->htotal = hdisplay + hfp + hsw + hbp;
+
+	val = dispc_vp_read(dispc, hw_videoport, DISPC_VP_TIMING_V);
+	vsw = FIELD_GET(DISPC_VP_TIMING_V_SYNC_PULSE_MASK, val) + 1;
+	vfp = FIELD_GET(DISPC_VP_TIMING_V_FRONT_PORCH_MASK, val);
+	vbp = FIELD_GET(DISPC_VP_TIMING_V_BACK_PORCH_MASK, val);
+
+	mode->vsync_start = vdisplay + vfp;
+	mode->vsync_end = vdisplay + vfp + vsw;
+	mode->vtotal = vdisplay + vfp + vsw + vbp;
+
+	rate = clk_get_rate(dispc->vp_clk[hw_videoport]);
+	if (!rate)
+		return -EINVAL;
+
+	mode->clock = DIV_ROUND_CLOSEST(rate, 1000);
+
+	val = dispc_vp_read(dispc, hw_videoport, DISPC_VP_POL_FREQ);
+	if (FIELD_GET(DISPC_VP_POL_FREQ_IVS_MASK, val))
+		mode->flags |= DRM_MODE_FLAG_NVSYNC;
+	else
+		mode->flags |= DRM_MODE_FLAG_PVSYNC;
+
+	if (FIELD_GET(DISPC_VP_POL_FREQ_IHS_MASK, val))
+		mode->flags |= DRM_MODE_FLAG_NHSYNC;
+	else
+		mode->flags |= DRM_MODE_FLAG_PHSYNC;
+
+	mode->type |= DRM_MODE_TYPE_DRIVER;
+	drm_mode_set_name(mode);
+	drm_mode_set_crtcinfo(mode, 0);
+
+	return 0;
+}
+
+int dispc_vp_get_bus_format(struct dispc_device *dispc, u32 hw_videoport,
+			    u32 *bus_fmt)
+{
+	static const u32 datalines_to_width[] = { 12, 16, 18, 24, 30, 36 };
+	struct tidss_device *tidss = dispc->tidss;
+	struct drm_device *dev = &tidss->ddev;
+	u32 datalines, data_width;
+	unsigned int i;
+
+	datalines = VP_REG_GET(dispc, hw_videoport, DISPC_VP_CONTROL,
+			       DISPC_VP_CONTROL_DATALINES_MASK);
+
+	if (datalines < ARRAY_SIZE(datalines_to_width)) {
+		data_width = datalines_to_width[datalines];
+	} else {
+		drm_dbg(dev, "Unknown DATALINES encoding %u on %s\n",
+			datalines, dispc->feat->vp_name[hw_videoport]);
+		return -EINVAL;
+	}
+
+	if (dispc_vp_is_am65x_oldi(dispc->feat, hw_videoport)) {
+		u32 oldi_cfg = dispc_vp_read(dispc, hw_videoport,
+					     DISPC_VP_DSS_OLDI_CFG);
+		u32 map = FIELD_GET(DISPC_VP_DSS_OLDI_CFG_MAP_MASK, oldi_cfg);
+
+		for (i = 0; i < ARRAY_SIZE(dispc_bus_formats); i++) {
+			if (dispc_bus_formats[i].is_oldi_fmt &&
+			    dispc_bus_formats[i].data_width == data_width &&
+			    dispc_bus_formats[i].am65x_oldi_mode_reg_val == map) {
+				*bus_fmt = dispc_bus_formats[i].bus_fmt;
+				return 0;
+			}
+		}
+
+		drm_dbg(dev, "Unknown OLDI mapping %u on %s\n", map,
+			dispc->feat->vp_name[hw_videoport]);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(dispc_bus_formats); i++) {
+		if (!dispc_bus_formats[i].is_oldi_fmt &&
+		    dispc_bus_formats[i].data_width == data_width) {
+			*bus_fmt = dispc_bus_formats[i].bus_fmt;
+			return 0;
+		}
+	}
+
+	return -EINVAL;
+}
+
+u32 dispc_vp_get_bus_flags(struct dispc_device *dispc, u32 hw_videoport)
+{
+	u32 flags = 0;
+	u32 val;
+
+	val = dispc_vp_read(dispc, hw_videoport, DISPC_VP_POL_FREQ);
+	if (FIELD_GET(DISPC_VP_POL_FREQ_IPC_MASK, val))
+		flags |= DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE;
+	else
+		flags |= DRM_BUS_FLAG_PIXDATA_DRIVE_POSEDGE;
+
+	if (FIELD_GET(DISPC_VP_POL_FREQ_IEO_MASK, val))
+		flags |= DRM_BUS_FLAG_DE_LOW;
+	else
+		flags |= DRM_BUS_FLAG_DE_HIGH;
+
+	if (FIELD_GET(DISPC_VP_POL_FREQ_RF_MASK, val))
+		flags |= DRM_BUS_FLAG_SYNC_DRIVE_POSEDGE;
+	else
+		flags |= DRM_BUS_FLAG_SYNC_DRIVE_NEGEDGE;
+
+	return flags;
+}
+
 /* OVR */
 static void dispc_k2g_ovr_set_plane(struct dispc_device *dispc,
 				    u32 hw_plane, u32 hw_videoport,
@@ -1475,6 +1707,67 @@ void dispc_ovr_enable_layer(struct dispc_device *dispc,
 
 	OVR_REG_FLD_MOD(dispc, hw_videoport, DISPC_OVR_ATTRIBUTES(layer),
 			!!enable, DISPC_OVR_ATTRIBUTES_ENABLE_MASK);
+}
+
+int dispc_ovr_get_plane(struct dispc_device *dispc, u32 hw_plane,
+			u32 *hw_videoport, int *x, int *y, u32 *layer)
+{
+	u32 hw_id = dispc->feat->vid_info[hw_plane].hw_id;
+	u32 vp, l;
+
+	switch (dispc->feat->subrev) {
+	case DISPC_K2G: {
+		u32 val;
+
+		val = dispc_vid_read(dispc, hw_plane, DISPC_VID_K2G_POSITION);
+		*hw_videoport = 0;
+		*layer = 0;
+		*x = val & 0xffff;
+		*y = val >> 16;
+		return 0;
+	}
+	case DISPC_AM625:
+	case DISPC_AM62L:
+	case DISPC_AM65X:
+	case DISPC_J721E:
+		for (vp = 0; vp < dispc->feat->num_vps; vp++) {
+			for (l = 0; l < dispc->feat->num_vids; l++) {
+				u32 attrs = dispc_ovr_read(dispc, vp,
+							   DISPC_OVR_ATTRIBUTES(l));
+
+				if (!(attrs & DISPC_OVR_ATTRIBUTES_ENABLE_MASK))
+					continue;
+
+				if (FIELD_GET(DISPC_OVR_ATTRIBUTES_CHANNELIN_MASK,
+					      attrs) != hw_id)
+					continue;
+
+				*hw_videoport = vp;
+				*layer = l;
+
+				if (dispc->feat->subrev == DISPC_J721E) {
+					u32 attrs2 = dispc_ovr_read(dispc, vp,
+								    DISPC_OVR_ATTRIBUTES2(l));
+
+					*x = FIELD_GET(DISPC_OVR_ATTRIBUTES2_POSX_MASK,
+						       attrs2);
+					*y = FIELD_GET(DISPC_OVR_ATTRIBUTES2_POSY_MASK,
+						       attrs2);
+				} else {
+					*x = FIELD_GET(DISPC_OVR_ATTRIBUTES_POSX_MASK,
+						       attrs);
+					*y = FIELD_GET(DISPC_OVR_ATTRIBUTES_POSY_MASK,
+						       attrs);
+				}
+
+				return 0;
+			}
+		}
+
+		return -ENODEV;
+	default:
+		return -ENODEV;
+	}
 }
 
 /* CSC */
@@ -2049,6 +2342,17 @@ static const struct {
 	{ DRM_FORMAT_NV12, 0x3d, },
 };
 
+static u32 dispc_plane_find_fourcc_by_dss_code(u8 code)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(dispc_color_formats); ++i)
+		if (dispc_color_formats[i].dss_code == code)
+			return dispc_color_formats[i].fourcc;
+
+	return 0;
+}
+
 static void dispc_plane_set_pixel_format(struct dispc_device *dispc,
 					 u32 hw_plane, u32 fourcc)
 {
@@ -2214,10 +2518,97 @@ void dispc_plane_setup(struct dispc_device *dispc, u32 hw_plane,
 				DISPC_VID_ATTRIBUTES_PREMULTIPLYALPHA_MASK);
 }
 
+void dispc_plane_get_picture_size(struct dispc_device *dispc, u32 hw_plane,
+				  unsigned int *width, unsigned int *height)
+{
+	u32 val;
+	u16 w, h;
+
+	val = dispc_vid_read(dispc, hw_plane, DISPC_VID_PICTURE_SIZE);
+	w = FIELD_GET(DISPC_VID_PICTURE_SIZE_MEMSIZEX_MASK, val);
+	h = FIELD_GET(DISPC_VID_PICTURE_SIZE_MEMSIZEY_MASK, val);
+
+	*width = w + 1;
+	*height = h + 1;
+}
+
+void dispc_plane_get_size(struct dispc_device *dispc, u32 hw_plane,
+			  unsigned int *width, unsigned int *height)
+{
+	bool lite = dispc->feat->vid_info[hw_plane].is_lite;
+
+	if (!lite) {
+		u32 val = dispc_vid_read(dispc, hw_plane, DISPC_VID_SIZE);
+		*width = FIELD_GET(DISPC_VID_SIZE_SIZEX_MASK, val) + 1;
+		*height = FIELD_GET(DISPC_VID_SIZE_SIZEY_MASK, val) + 1;
+	} else {
+		dispc_plane_get_picture_size(dispc, hw_plane, width, height);
+	}
+}
+
+const struct drm_format_info *
+dispc_plane_get_current_format(struct dispc_device *dispc, u32 hw_plane)
+{
+	const struct drm_format_info *info;
+	u32 fourcc;
+	u32 val;
+
+	val = dispc_vid_read(dispc, hw_plane, DISPC_VID_ATTRIBUTES);
+	fourcc = dispc_plane_find_fourcc_by_dss_code(
+		FIELD_GET(DISPC_VID_ATTRIBUTES_FORMAT_MASK, val));
+	if (!fourcc)
+		return ERR_PTR(-EINVAL);
+
+	info = drm_format_info(fourcc);
+	if (!info)
+		return ERR_PTR(-EINVAL);
+
+	return info;
+}
+
+u8 dispc_plane_get_global_alpha(struct dispc_device *dispc, u32 hw_plane)
+{
+	return FIELD_GET(DISPC_VID_GLOBAL_ALPHA_GLOBALALPHA_MASK,
+			 dispc_vid_read(dispc, hw_plane,
+					DISPC_VID_GLOBAL_ALPHA));
+}
+
+u32 dispc_plane_get_pixel_inc(struct dispc_device *dispc, u32 hw_plane)
+{
+	return dispc_vid_read(dispc, hw_plane, DISPC_VID_PIXEL_INC);
+}
+
+u32 dispc_plane_get_row_inc(struct dispc_device *dispc, u32 hw_plane)
+{
+	return dispc_vid_read(dispc, hw_plane, DISPC_VID_ROW_INC);
+}
+
+dma_addr_t dispc_plane_get_dma_addr(struct dispc_device *dispc, u32 hw_plane)
+{
+	return (u64)dispc_vid_read(dispc, hw_plane, DISPC_VID_BA_EXT_0) << 32 |
+	       dispc_vid_read(dispc, hw_plane, DISPC_VID_BA_0);
+}
+
+u16 dispc_plane_get_blend_mode(struct dispc_device *dispc, u32 hw_plane)
+{
+	u32 val = dispc_vid_read(dispc, hw_plane, DISPC_VID_ATTRIBUTES);
+
+	if (FIELD_GET(DISPC_VID_ATTRIBUTES_PREMULTIPLYALPHA_MASK, val))
+		return DRM_MODE_BLEND_PREMULTI;
+	else
+		return DRM_MODE_BLEND_COVERAGE;
+}
+
 void dispc_plane_enable(struct dispc_device *dispc, u32 hw_plane, bool enable)
 {
 	VID_REG_FLD_MOD(dispc, hw_plane, DISPC_VID_ATTRIBUTES, !!enable,
 			DISPC_VID_ATTRIBUTES_ENABLE_MASK);
+}
+
+bool dispc_plane_is_enabled(struct dispc_device *dispc, u32 hw_plane)
+{
+	return FIELD_GET(DISPC_VID_ATTRIBUTES_ENABLE_MASK,
+			 dispc_vid_read(dispc, hw_plane, DISPC_VID_ATTRIBUTES));
 }
 
 static u32 dispc_vid_get_fifo_size(struct dispc_device *dispc, u32 hw_plane)

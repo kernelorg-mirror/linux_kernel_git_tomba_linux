@@ -130,15 +130,39 @@ static int tidss_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	ret = tidss_oldi_init(tidss);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to init OLDI\n");
+
+	ret = tidss_modeset_init(tidss);
+	if (ret < 0) {
+		if (ret != -EPROBE_DEFER)
+			dev_err(dev, "failed to init DRM/KMS (%d)\n", ret);
+		goto err_oldi_deinit;
+	}
+
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0) {
+		ret = irq;
+		goto err_oldi_deinit;
+	}
+	tidss->irq = irq;
+
+	ret = tidss_irq_request(ddev, irq);
+	if (ret) {
+		dev_err(dev, "tidss_irq_request failed: %d\n", ret);
+		goto err_oldi_deinit;
+	}
+
 	ret = pm_runtime_set_active(dev);
 	if (ret)
-		return ret;
+		goto err_irq_free;
 
 	ret = dispc_enable_fclk(tidss->dispc);
 	if (ret) {
 		dev_err(dev, "failed to enable fclk: %d\n", ret);
 		pm_runtime_set_suspended(dev);
-		return ret;
+		goto err_irq_free;
 	}
 
 	ret = dispc_softreset(tidss->dispc);
@@ -148,12 +172,8 @@ static int tidss_probe(struct platform_device *pdev)
 
 	if (ret) {
 		dev_err(dev, "failed to reset dispc: %d\n", ret);
-		return ret;
+		goto err_irq_free;
 	}
-
-	ret = tidss_oldi_init(tidss);
-	if (ret)
-		return dev_err_probe(dev, ret, "failed to init OLDI\n");
 
 	pm_runtime_enable(dev);
 
@@ -165,26 +185,6 @@ static int tidss_probe(struct platform_device *pdev)
 	dispc_runtime_resume(tidss->dispc);
 #endif
 
-	ret = tidss_modeset_init(tidss);
-	if (ret < 0) {
-		if (ret != -EPROBE_DEFER)
-			dev_err(dev, "failed to init DRM/KMS (%d)\n", ret);
-		goto err_runtime_suspend;
-	}
-
-	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		ret = irq;
-		goto err_runtime_suspend;
-	}
-	tidss->irq = irq;
-
-	ret = tidss_irq_request(ddev, irq);
-	if (ret) {
-		dev_err(dev, "tidss_irq_request failed: %d\n", ret);
-		goto err_runtime_suspend;
-	}
-
 	tidss_irq_install(tidss);
 
 	drm_kms_helper_poll_init(ddev);
@@ -192,13 +192,13 @@ static int tidss_probe(struct platform_device *pdev)
 	ret = drm_mode_config_create_initial_state(ddev);
 	if (ret) {
 		dev_err(dev, "failed to create initial state: %d\n", ret);
-		goto err_irq_free;
+		goto err_runtime_suspend;
 	}
 
 	ret = drm_dev_register(ddev, 0);
 	if (ret) {
 		dev_err(dev, "failed to register DRM device\n");
-		goto err_irq_free;
+		goto err_runtime_suspend;
 	}
 
 	/* Remove possible early fb before setting up the fbdev */
@@ -215,9 +215,6 @@ static int tidss_probe(struct platform_device *pdev)
 err_drm_dev_unreg:
 	drm_dev_unregister(ddev);
 
-err_irq_free:
-	tidss_irq_free(ddev);
-
 err_runtime_suspend:
 #ifndef CONFIG_PM
 	dispc_runtime_suspend(tidss->dispc);
@@ -225,6 +222,10 @@ err_runtime_suspend:
 	pm_runtime_dont_use_autosuspend(dev);
 	pm_runtime_disable(dev);
 
+err_irq_free:
+	tidss_irq_free(ddev);
+
+err_oldi_deinit:
 	tidss_oldi_deinit(tidss);
 
 	return ret;

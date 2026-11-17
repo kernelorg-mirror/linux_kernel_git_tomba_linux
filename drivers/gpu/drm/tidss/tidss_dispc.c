@@ -2808,6 +2808,16 @@ static void dispc_init_errata(struct dispc_device *dispc)
 	}
 }
 
+int dispc_enable_fclk(struct dispc_device *dispc)
+{
+	return clk_prepare_enable(dispc->fclk);
+}
+
+void dispc_disable_fclk(struct dispc_device *dispc)
+{
+	clk_disable_unprepare(dispc->fclk);
+}
+
 /*
  * K2G display controller does not support soft reset, so we do a basic manual
  * reset here: make sure the IRQs are masked and VPs are disabled.
@@ -2826,7 +2836,7 @@ static void dispc_softreset_k2g(struct dispc_device *dispc)
 			       DISPC_VP_CONTROL_ENABLE_MASK);
 }
 
-static int dispc_softreset(struct dispc_device *dispc)
+int dispc_softreset(struct dispc_device *dispc)
 {
 	u32 val;
 	int ret;
@@ -2847,49 +2857,6 @@ static int dispc_softreset(struct dispc_device *dispc)
 	}
 
 	return 0;
-}
-
-static int dispc_init_hw(struct dispc_device *dispc)
-{
-	struct device *dev = dispc->dev;
-	int ret;
-
-	ret = pm_runtime_set_active(dev);
-	if (ret) {
-		dev_err(dev, "Failed to set DSS PM to active\n");
-		return ret;
-	}
-
-	ret = clk_prepare_enable(dispc->fclk);
-	if (ret) {
-		dev_err(dev, "Failed to enable DSS fclk\n");
-		goto err_runtime_suspend;
-	}
-
-	ret = dispc_softreset(dispc);
-	if (ret)
-		goto err_clk_disable;
-
-	clk_disable_unprepare(dispc->fclk);
-	ret = pm_runtime_set_suspended(dev);
-	if (ret) {
-		dev_err(dev, "Failed to set DSS PM to suspended\n");
-		return ret;
-	}
-
-	return 0;
-
-err_clk_disable:
-	clk_disable_unprepare(dispc->fclk);
-
-err_runtime_suspend:
-	ret = pm_runtime_set_suspended(dev);
-	if (ret) {
-		dev_err(dev, "Failed to set DSS PM to suspended\n");
-		return ret;
-	}
-
-	return ret;
 }
 
 int dispc_init(struct tidss_device *tidss)
@@ -2996,10 +2963,6 @@ int dispc_init(struct tidss_device *tidss)
 
 	of_property_read_u32(dispc->dev->of_node, "max-memory-bandwidth",
 			     &dispc->memory_bandwidth_limit);
-
-	r = dispc_init_hw(dispc);
-	if (r)
-		return r;
 
 	tidss->dispc = dispc;
 

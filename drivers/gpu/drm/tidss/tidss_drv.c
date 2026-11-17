@@ -130,6 +130,27 @@ static int tidss_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	ret = pm_runtime_set_active(dev);
+	if (ret)
+		return ret;
+
+	ret = dispc_enable_fclk(tidss->dispc);
+	if (ret) {
+		dev_err(dev, "failed to enable fclk: %d\n", ret);
+		pm_runtime_set_suspended(dev);
+		return ret;
+	}
+
+	ret = dispc_softreset(tidss->dispc);
+
+	dispc_disable_fclk(tidss->dispc);
+	pm_runtime_set_suspended(dev);
+
+	if (ret) {
+		dev_err(dev, "failed to reset dispc: %d\n", ret);
+		return ret;
+	}
+
 	ret = tidss_oldi_init(tidss);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to init OLDI\n");

@@ -99,7 +99,7 @@ void tidss_irq_resume(struct tidss_device *tidss)
 	spin_unlock_irqrestore(&tidss->irq_lock, flags);
 }
 
-int tidss_irq_install(struct drm_device *ddev, unsigned int irq)
+int tidss_irq_request(struct drm_device *ddev, unsigned int irq)
 {
 	struct tidss_device *tidss = to_tidss(ddev);
 	int ret;
@@ -107,7 +107,8 @@ int tidss_irq_install(struct drm_device *ddev, unsigned int irq)
 	if (irq == IRQ_NOTCONNECTED)
 		return -ENOTCONN;
 
-	ret = request_irq(irq, tidss_irq_handler, 0, ddev->driver->name, ddev);
+	ret = request_irq(irq, tidss_irq_handler, IRQF_NO_AUTOEN,
+			  ddev->driver->name, ddev);
 	if (ret)
 		return ret;
 
@@ -130,7 +131,12 @@ int tidss_irq_install(struct drm_device *ddev, unsigned int irq)
 	return 0;
 }
 
-void tidss_irq_uninstall(struct drm_device *ddev)
+void tidss_irq_install(struct tidss_device *tidss)
+{
+	enable_irq(tidss->irq);
+}
+
+void tidss_irq_free(struct drm_device *ddev)
 {
 	struct tidss_device *tidss = to_tidss(ddev);
 

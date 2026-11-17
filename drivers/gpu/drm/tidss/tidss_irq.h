@@ -65,8 +65,9 @@ struct tidss_device;
 void tidss_irq_enable_vblank(struct drm_crtc *crtc);
 void tidss_irq_disable_vblank(struct drm_crtc *crtc);
 
-int tidss_irq_install(struct drm_device *ddev, unsigned int irq);
-void tidss_irq_uninstall(struct drm_device *ddev);
+int tidss_irq_request(struct drm_device *ddev, unsigned int irq);
+void tidss_irq_install(struct tidss_device *tidss);
+void tidss_irq_free(struct drm_device *ddev);
 
 void tidss_irq_resume(struct tidss_device *tidss);
 

@@ -158,24 +158,26 @@ static int tidss_probe(struct platform_device *pdev)
 	}
 	tidss->irq = irq;
 
-	ret = tidss_irq_install(ddev, irq);
+	ret = tidss_irq_request(ddev, irq);
 	if (ret) {
-		dev_err(dev, "tidss_irq_install failed: %d\n", ret);
+		dev_err(dev, "tidss_irq_request failed: %d\n", ret);
 		goto err_runtime_suspend;
 	}
+
+	tidss_irq_install(tidss);
 
 	drm_kms_helper_poll_init(ddev);
 
 	ret = drm_mode_config_create_initial_state(ddev);
 	if (ret) {
 		dev_err(dev, "failed to create initial state: %d\n", ret);
-		goto err_irq_uninstall;
+		goto err_irq_free;
 	}
 
 	ret = drm_dev_register(ddev, 0);
 	if (ret) {
 		dev_err(dev, "failed to register DRM device\n");
-		goto err_irq_uninstall;
+		goto err_irq_free;
 	}
 
 	/* Remove possible early fb before setting up the fbdev */
@@ -192,8 +194,8 @@ static int tidss_probe(struct platform_device *pdev)
 err_drm_dev_unreg:
 	drm_dev_unregister(ddev);
 
-err_irq_uninstall:
-	tidss_irq_uninstall(ddev);
+err_irq_free:
+	tidss_irq_free(ddev);
 
 err_runtime_suspend:
 #ifndef CONFIG_PM
@@ -217,7 +219,7 @@ static void tidss_remove(struct platform_device *pdev)
 
 	drm_atomic_helper_shutdown(ddev);
 
-	tidss_irq_uninstall(ddev);
+	tidss_irq_free(ddev);
 
 #ifndef CONFIG_PM
 	/* If we don't have PM, we need to call suspend manually */

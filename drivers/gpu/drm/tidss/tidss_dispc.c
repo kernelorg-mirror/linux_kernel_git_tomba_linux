@@ -2379,7 +2379,7 @@ static void dispc_vp_init(struct dispc_device *dispc)
 	}
 }
 
-static void dispc_initial_config(struct dispc_device *dispc)
+void dispc_initial_config(struct dispc_device *dispc)
 {
 	dispc_plane_init(dispc);
 	dispc_vp_init(dispc);

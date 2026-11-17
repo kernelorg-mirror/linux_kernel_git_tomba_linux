@@ -165,26 +165,19 @@ static int tidss_probe(struct platform_device *pdev)
 		goto err_irq_free;
 	}
 
-	ret = dispc_softreset(tidss->dispc);
-
-	dispc_disable_fclk(tidss->dispc);
-	pm_runtime_set_suspended(dev);
-
-	if (ret) {
-		dev_err(dev, "failed to reset dispc: %d\n", ret);
-		goto err_irq_free;
-	}
-
+	pm_runtime_get_noresume(dev);
 	pm_runtime_enable(dev);
 
 	pm_runtime_set_autosuspend_delay(dev, 1000);
 	pm_runtime_use_autosuspend(dev);
 
-#ifndef CONFIG_PM
-	/* If we don't have PM, we need to call resume manually */
-	dispc_runtime_resume(tidss->dispc);
-#endif
+	ret = dispc_softreset(tidss->dispc);
+	if (ret) {
+		dev_err(dev, "failed to reset dispc: %d\n", ret);
+		goto err_runtime_suspend;
+	}
 
+	dispc_initial_config(tidss->dispc);
 	tidss_irq_install(tidss);
 
 	drm_kms_helper_poll_init(ddev);
@@ -208,6 +201,8 @@ static int tidss_probe(struct platform_device *pdev)
 
 	drm_client_setup(ddev, NULL);
 
+	pm_runtime_put_autosuspend(dev);
+
 	dev_dbg(dev, "%s done\n", __func__);
 
 	return 0;
@@ -216,11 +211,11 @@ err_drm_dev_unreg:
 	drm_dev_unregister(ddev);
 
 err_runtime_suspend:
-#ifndef CONFIG_PM
-	dispc_runtime_suspend(tidss->dispc);
-#endif
 	pm_runtime_dont_use_autosuspend(dev);
 	pm_runtime_disable(dev);
+	pm_runtime_put_noidle(dev);
+	pm_runtime_set_suspended(dev);
+	dispc_disable_fclk(tidss->dispc);
 
 err_irq_free:
 	tidss_irq_free(ddev);

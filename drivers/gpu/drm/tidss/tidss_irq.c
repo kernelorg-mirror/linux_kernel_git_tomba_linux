@@ -133,6 +133,8 @@ int tidss_irq_request(struct drm_device *ddev, unsigned int irq)
 
 void tidss_irq_install(struct tidss_device *tidss)
 {
+	tidss_irq_resume(tidss);
+
 	enable_irq(tidss->irq);
 }
 

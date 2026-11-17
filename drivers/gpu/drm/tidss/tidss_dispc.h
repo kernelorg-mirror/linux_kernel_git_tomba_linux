@@ -145,6 +145,7 @@ void dispc_plane_enable(struct dispc_device *dispc, u32 hw_plane, bool enable);
 const u32 *dispc_plane_formats(struct dispc_device *dispc, unsigned int *len);
 
 int dispc_softreset(struct dispc_device *dispc);
+void dispc_initial_config(struct dispc_device *dispc);
 int dispc_enable_fclk(struct dispc_device *dispc);
 void dispc_disable_fclk(struct dispc_device *dispc);
 int dispc_init(struct tidss_device *tidss);
